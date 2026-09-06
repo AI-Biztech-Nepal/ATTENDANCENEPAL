@@ -124,7 +124,6 @@ export default function EmployeeDetailScreen({ route, navigation }: any) {
           options={[
             { label: 'Female', value: 'female' },
             { label: 'Male', value: 'male' },
-            { label: 'Other', value: 'other' },
           ]}
           value={gender}
           onChange={setGender}

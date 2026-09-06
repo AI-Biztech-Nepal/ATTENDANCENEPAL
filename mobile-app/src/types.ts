@@ -1,8 +1,8 @@
 export type PunchMethod = 'zkteco' | 'gps' | 'qr' | 'selfie';
 
-/** employees.gender — a null/unset gender behaves like 'other': only
- * company-wide ('all') holidays apply, never a gender-scoped one. */
-export type Gender = 'male' | 'female' | 'other';
+/** employees.gender — nullable; a null/unset gender gets company-wide ('all')
+ * holidays only, never a gender-scoped one. */
+export type Gender = 'male' | 'female';
 
 /** company_holidays.applies_to — 'all' is the default. */
 export type HolidayScope = 'all' | 'male' | 'female';

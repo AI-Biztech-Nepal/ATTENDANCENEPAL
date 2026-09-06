@@ -5,9 +5,8 @@
 -- men work a normal day. The company-wide company_holidays row could not
 -- express that: every holiday applied to everyone.
 --
---   * employees.gender            -> 'male' | 'female' | 'other' (nullable —
---     an unset gender behaves like 'other': gender-scoped holidays do NOT
---     apply, only company-wide ones do).
+--   * employees.gender            -> 'male' | 'female' (nullable — an unset
+--     gender gets company-wide holidays only, never a gender-scoped one).
 --   * company_holidays.applies_to -> 'all' (default, = today's behaviour) |
 --     'male' | 'female'. weekOffDatesInRange() in lib/weekOff.ts (mirrored
 --     in mobile-app/src/lib/weekOff.ts) filters holidays by the employee's
@@ -18,7 +17,11 @@
 -- 20260812090000_company_week_off.sql).
 
 alter table employees
-  add column if not exists gender text check (gender in ('male', 'female', 'other'));
+  add column if not exists gender text;
+alter table employees
+  drop constraint if exists employees_gender_check;
+alter table employees
+  add constraint employees_gender_check check (gender in ('male', 'female'));
 
 alter table company_holidays
   add column if not exists applies_to text not null default 'all'

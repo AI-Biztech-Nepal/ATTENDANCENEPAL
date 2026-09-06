@@ -7,9 +7,9 @@ export type Branch = {
   radius_meters: number;
 };
 
-/** employees.gender — a null/unset gender behaves like 'other': only
- * company-wide ('all') holidays apply to them, never a gender-scoped one. */
-export type Gender = 'male' | 'female' | 'other';
+/** employees.gender — nullable; a null/unset gender gets company-wide ('all')
+ * holidays only, never a gender-scoped one. */
+export type Gender = 'male' | 'female';
 
 /** company_holidays.applies_to — 'all' is the default and every holiday's
  * behaviour before gender scoping existed. */

@@ -13,20 +13,23 @@ import { datesInRange, fetchUpcomingHolidays, type PredefinedHoliday } from '@/l
 import type { CompanyHoliday, HolidayScope } from '@/lib/types';
 
 const SCOPE_OPTIONS: { value: HolidayScope; label: string }[] = [
-  { value: 'all', label: 'Everyone' },
-  { value: 'female', label: 'Women only' },
-  { value: 'male', label: 'Men only' },
+  { value: 'all', label: 'All' },
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
 ];
-const SCOPE_LABEL: Record<HolidayScope, string> = { all: 'Everyone', female: 'Women only', male: 'Men only' };
+const SCOPE_LABEL: Record<HolidayScope, string> = { all: 'All', male: 'Male', female: 'Female' };
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
+// `id` is set only when EDITING an existing holiday row — then handleAddHoliday
+// updates that row in place (name, date and scope are all editable, and the
+// date can be moved to a free day). Blank `id` means a new holiday.
 // holiday_end_date only travels with the form while a predefined multi-day
 // pick (Dashain, Tihar, ...) is active — it's what makes handleAddHoliday
 // write one row per day in the range instead of just holiday_date. It's
 // blanked back out the moment the date is hand-edited away from that pick's
 // start day, or the name no longer matches a predefined entry at all.
-const EMPTY_FORM = { holiday_date: '', holiday_end_date: '', name: '', applies_to: 'all' as HolidayScope };
+const EMPTY_FORM = { id: '', holiday_date: '', holiday_end_date: '', name: '', applies_to: 'all' as HolidayScope };
 
 // Best-effort: the Edge Function that actually sends push notifications is
 // separate infrastructure (needs an Expo/EAS project + `supabase functions
@@ -99,6 +102,27 @@ export default function WeekOffPage() {
     if (!form.holiday_date || !form.name.trim()) return;
     setSaving(true);
     const name = form.name.trim();
+
+    // Editing an existing row: update it in place — name, date and scope are
+    // all editable. Multi-day range picks don't apply when editing a single
+    // saved holiday.
+    if (form.id) {
+      const { error } = await supabase
+        .from('company_holidays')
+        .update({ holiday_date: form.holiday_date, name, applies_to: form.applies_to })
+        .eq('id', form.id);
+      setSaving(false);
+      if (error) {
+        alert(error.code === '23505' ? 'Another holiday already exists on that date.' : `Could not save: ${error.message}`);
+        return;
+      }
+      setForm(EMPTY_FORM);
+      setShowForm(false);
+      reload();
+      notifyWeekOffChange();
+      return;
+    }
+
     // A predefined multi-day pick (Dashain, Tihar, ...) writes one row per
     // day in its range, all sharing the same name — a plain single-day pick
     // (custom name, or a predefined one-day holiday) is just the one row,
@@ -127,6 +151,11 @@ export default function WeekOffPage() {
     notifyWeekOffChange();
   }
 
+  function editHoliday(h: CompanyHoliday) {
+    setForm({ id: h.id, holiday_date: h.holiday_date, holiday_end_date: '', name: h.name, applies_to: h.applies_to });
+    setShowForm(true);
+  }
+
   async function handleDeleteHoliday(id: string) {
     if (!(await confirm('Delete this holiday?', { title: 'Delete holiday?', confirmLabel: 'Delete', tone: 'danger' }))) return;
     const { error } = await supabase.from('company_holidays').delete().eq('id', id);
@@ -137,8 +166,10 @@ export default function WeekOffPage() {
   return (
     <AppShell title="Holidays">
       <p className="mb-5 max-w-2xl text-sm text-slate-500">
-        Holiday dates — treated as a paid day in Payroll. Applies to every employee by default, or just the women or just the men
-        (e.g. Teej). Distinct from assigning one employee a Week Off on the Shifts page&apos;s Weekly Roster.
+        Holiday dates — treated as a paid day in Payroll. &ldquo;Applies to&rdquo; is <span className="font-medium">All</span> by default, or
+        set it to <span className="font-medium">Male</span> / <span className="font-medium">Female</span> for a gender-specific holiday like Teej.
+        Every holiday stays fully editable — use <span className="font-medium">Edit</span> to change its name, date or scope. Distinct from
+        assigning one employee a Week Off on the Shifts page&apos;s Weekly Roster.
       </p>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,20rem)_1fr]">
@@ -176,6 +207,7 @@ export default function WeekOffPage() {
                   title={holiday?.name}
                   onClick={() => {
                     setForm({
+                      id: holiday?.id ?? '',
                       holiday_date: cell.adKey,
                       holiday_end_date: '',
                       name: holiday?.name ?? '',
@@ -237,14 +269,17 @@ export default function WeekOffPage() {
                     <td className="whitespace-nowrap py-2.5 pr-4 font-medium text-ink">{h.name}</td>
                     <td className="whitespace-nowrap py-2.5 pr-4">
                       {h.applies_to === 'all' ? (
-                        <span className="text-slate-400">Everyone</span>
+                        <span className="text-slate-400">All</span>
                       ) : (
                         <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
                           {SCOPE_LABEL[h.applies_to]}
                         </span>
                       )}
                     </td>
-                    <td className="whitespace-nowrap py-2.5">
+                    <td className="whitespace-nowrap py-2.5 text-right">
+                      <button onClick={() => editHoliday(h)} className="mr-3 text-xs font-medium text-accent hover:underline">
+                        Edit
+                      </button>
                       <button onClick={() => handleDeleteHoliday(h.id)} className="text-xs font-medium text-critical hover:underline">
                         Delete
                       </button>
@@ -259,11 +294,13 @@ export default function WeekOffPage() {
       </div>
 
       {showForm && (() => {
-        const editingExisting = holidaysByDate.has(form.holiday_date);
+        const isEditing = !!form.id;
+        const dateCollision = holidaysByDate.get(form.holiday_date);
+        const collidesWithOther = !!dateCollision && dateCollision.id !== form.id;
         return (
           <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
             <form onSubmit={handleAddHoliday} className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg">
-              <h3 className="mb-4 text-lg font-semibold text-ink">{editingExisting ? 'Edit Holiday' : 'New Holiday'}</h3>
+              <h3 className="mb-4 text-lg font-semibold text-ink">{isEditing ? 'Edit Holiday' : 'New Holiday'}</h3>
               <label className="mb-1 block text-xs font-medium text-slate-600">Name</label>
               <div className="mb-1">
                 <ComboBox
@@ -314,26 +351,29 @@ export default function WeekOffPage() {
               )}
 
               <label className="mb-1 block text-xs font-medium text-slate-600">Applies to</label>
-              <div className="mb-1 flex overflow-hidden rounded-lg border border-slate-200">
+              <select
+                value={form.applies_to}
+                onChange={e => setForm(f => ({ ...f, applies_to: e.target.value as HolidayScope }))}
+                className="mb-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+              >
                 {SCOPE_OPTIONS.map(opt => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, applies_to: opt.value }))}
-                    className={`flex-1 px-2 py-2 text-xs font-medium transition-colors ${
-                      form.applies_to === opt.value ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
+                  <option key={opt.value} value={opt.value}>
                     {opt.label}
-                  </button>
+                  </option>
                 ))}
-              </div>
+              </select>
               <p className="mb-3 text-[11px] text-slate-400">
-                A women- or men-only holiday (e.g. Teej) is a paid day off just for those employees — everyone else works a normal day. Employees
-                with no gender set are treated as &ldquo;works a normal day&rdquo;.
+                Choose &ldquo;Male&rdquo; or &ldquo;Female&rdquo; for a gender-specific holiday (e.g. Teej) — it&rsquo;s a paid day off just for
+                those employees, and everyone else works a normal day. Employees with no gender set always work a normal day on a gendered holiday.
               </p>
 
-              {editingExisting && <p className="mb-3 text-xs text-slate-400">This date already has a holiday — saving will overwrite it.</p>}
+              {collidesWithOther && (
+                <p className="mb-3 text-xs text-warning-text">
+                  {isEditing
+                    ? `“${dateCollision!.name}” is already on this date — pick a free day.`
+                    : `This date already has “${dateCollision!.name}” — saving will overwrite it.`}
+                </p>
+              )}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
@@ -344,10 +384,10 @@ export default function WeekOffPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving || !form.holiday_date}
+                  disabled={saving || !form.holiday_date || (isEditing && collidesWithOther)}
                   className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
                 >
-                  {saving ? 'Saving…' : editingExisting ? 'Save changes' : 'Add holiday'}
+                  {saving ? 'Saving…' : isEditing ? 'Save changes' : 'Add holiday'}
                 </button>
               </div>
             </form>

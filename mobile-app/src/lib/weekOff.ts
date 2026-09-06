@@ -75,7 +75,7 @@ type HolidayLike = Pick<CompanyHoliday, 'holiday_date'> & { applies_to?: Holiday
 
 /** Whether a holiday's scope covers an employee of this gender. 'all' (or no
  * scope) covers everyone; a 'male'/'female' holiday covers only that gender —
- * a null/'other' gender is never covered by a scoped one. */
+ * an employee with no gender set is never covered by a scoped one. */
 export function holidayCoversGender(scope: HolidayScope | null | undefined, gender: Gender | null | undefined): boolean {
   const s = scope ?? 'all';
   return s === 'all' || s === gender;
@@ -107,8 +107,8 @@ export function weekOffDatesInRange(
 }
 
 /** For a multi-employee view: pre-computes the week-off date set for each
- * gender bucket once, then returns a per-employee lookup. `null`/`'other'`
- * genders get the company-wide set. */
+ * gender bucket once, then returns a per-employee lookup. A null gender gets
+ * the company-wide set. */
 export function weekOffDatesByGender(
   start: string,
   end: string,

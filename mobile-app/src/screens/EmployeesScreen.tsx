@@ -14,7 +14,6 @@ const EMPTY_ADD_FORM = { employee_code: '', name: '', phone: '', email: '', addr
 const GENDER_OPTIONS: { value: Gender; label: string }[] = [
   { value: 'female', label: 'Female' },
   { value: 'male', label: 'Male' },
-  { value: 'other', label: 'Other' },
 ];
 const PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 function generatePassword(length = 10) {
