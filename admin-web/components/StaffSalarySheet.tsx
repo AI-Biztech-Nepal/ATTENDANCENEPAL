@@ -626,16 +626,6 @@ export default function StaffSalarySheet() {
           </table>
         </div>
 
-        {allRows.length > 0 && (
-          <div className="flex flex-wrap justify-between gap-10 px-6 pb-4 pt-14 sm:px-10">
-            {['Prepared By', 'Checked By', 'Approved By'].map(role => (
-              <div key={role} className="w-52 max-w-[16rem] flex-1">
-                <div className="border-t border-slate-400" />
-                <div className="mt-1.5 text-center text-xs text-slate-500">{role}</div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </AppShell>
   );
