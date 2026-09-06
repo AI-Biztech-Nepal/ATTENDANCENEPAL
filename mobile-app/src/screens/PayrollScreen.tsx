@@ -3,7 +3,7 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TextInput, Touch
 import { supabase } from '../lib/supabase';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '../types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '../types';
-import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesInRange } from '../lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '../lib/weekOff';
 import {
   applyOvernightShiftCorrection,
   buildWeeklyPatternByEmployee,
@@ -122,7 +122,9 @@ export default function PayrollScreen({ navigation }: any) {
   }
   useEffect(reload, [start, end]);
 
-  const weekOffDateSet = useMemo(() => weekOffDatesInRange(start, end, weeklyOffDay, holidays), [start, end, weeklyOffDay, holidays]);
+  // A per-employee lookup: gender-scoped holidays (e.g. Teej) are a paid day
+  // off only for the employees they cover.
+  const weekOffDatesFor = useMemo(() => weekOffDatesByGender(start, end, weeklyOffDay, holidays), [start, end, weeklyOffDay, holidays]);
   const leaveByEmployee = useMemo(() => leaveDatesByEmployee(leaveRequests), [leaveRequests]);
   const weeklyPattern: WeeklyPatternByEmployee = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
@@ -167,13 +169,14 @@ export default function PayrollScreen({ navigation }: any) {
         const dayLogs = empLogs.filter(l => nepalDateKey(l.punch_time) === day);
         if (dayLogs.length > 0) byDate.set(day, dayLogs);
       }
-      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDateSet, weeklyPattern);
+      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern);
       logsByEmployeeDay.set(emp.id, byDate);
     }
     for (const day of days) {
       for (const emp of employees) {
         const row = map.get(emp.id);
         if (!row) continue;
+        const weekOffDateSet = weekOffDatesFor(emp.gender);
         const summary = day === today ? undefined : summaries.find(s => s.employee_id === emp.id && s.work_date === day);
         if (summary) {
           row.days += 1;
@@ -204,7 +207,7 @@ export default function PayrollScreen({ navigation }: any) {
       }
     }
     return Array.from(map.values()).sort((a, b) => a.enrollId.localeCompare(b.enrollId, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [summaries, logs, shifts, employees, start, end, dailyShiftByDate, weekOffDateSet, leaveByEmployee, weeklyPattern]);
+  }, [summaries, logs, shifts, employees, start, end, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
 
   const otHours = Number(otHoursPerDay) || 0;
   const otMult = Number(otMultiplier) || 0;

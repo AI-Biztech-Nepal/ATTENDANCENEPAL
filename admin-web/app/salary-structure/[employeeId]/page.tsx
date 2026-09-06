@@ -140,7 +140,10 @@ function SalaryStructureEmployeeView() {
     return map;
   }, [weeklyPatternRows, employeeId]);
 
-  const weekOffDates = useMemo(() => weekOffDatesInRange(start, end, weeklyOffDay, holidays), [start, end, weeklyOffDay, holidays]);
+  const weekOffDates = useMemo(
+    () => weekOffDatesInRange(start, end, weeklyOffDay, holidays, employee?.gender ?? null),
+    [start, end, weeklyOffDay, holidays, employee?.gender]
+  );
   const leaveDates = useMemo(() => {
     const set = new Set<string>();
     for (const req of leaveRequests) {

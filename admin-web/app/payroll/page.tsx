@@ -28,7 +28,7 @@ import {
   resolveShiftForDate,
   type DailyShiftByDate,
 } from '@/lib/shift';
-import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
@@ -228,7 +228,12 @@ export default function PayrollPage() {
   // Leave both count as paid days below, even with zero punches — distinct
   // from the per-employee roster Week Off (dailyShiftByDate), which affects
   // late/early classification but was never actually paid (see calc below).
-  const weekOffDateSet = useMemo(() => weekOffDatesInRange(start, end, weeklyOffDay, holidays), [start, end, weeklyOffDay, holidays]);
+  // A per-employee lookup: gender-scoped holidays (e.g. Teej) are a paid day
+  // off only for the employees they cover.
+  const weekOffDatesFor = useMemo(
+    () => weekOffDatesByGender(start, end, weeklyOffDay, holidays),
+    [start, end, weeklyOffDay, holidays]
+  );
   const leaveByEmployee = useMemo(() => leaveDatesByEmployee(leaveRequests), [leaveRequests]);
   const weeklyPattern = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
@@ -301,7 +306,7 @@ export default function PayrollPage() {
         const dayLogs = empLogs.filter(l => nepalDateKey(l.punch_time) === day);
         if (dayLogs.length > 0) byDate.set(day, dayLogs);
       }
-      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDateSet, weeklyPattern);
+      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern);
       logsByEmployeeDay.set(emp.id, byDate);
     }
 
@@ -309,6 +314,7 @@ export default function PayrollPage() {
       for (const emp of scopedEmployees) {
         const row = map.get(emp.id);
         if (!row) continue;
+        const weekOffDateSet = weekOffDatesFor(emp.gender);
         // Today can still gain punches after its payroll_summaries row was
         // computed (that row isn't re-run until tomorrow's nightly job), so
         // always compute today live rather than trusting a possibly-stale
@@ -349,7 +355,7 @@ export default function PayrollPage() {
       }
     }
     return Array.from(map.values()).sort((a, b) => a.enrollId.localeCompare(b.enrollId, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [summaries, logs, shifts, scopedEmployees, start, end, dailyShiftByDate, weekOffDateSet, leaveByEmployee, weeklyPattern]);
+  }, [summaries, logs, shifts, scopedEmployees, start, end, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
 
   const totals = useMemo(() => {
     const totalHours = byEmployee.reduce((s, r) => s + r.hours, 0);

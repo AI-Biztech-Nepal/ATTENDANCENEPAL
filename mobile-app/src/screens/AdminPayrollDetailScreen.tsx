@@ -99,7 +99,7 @@ export default function AdminPayrollDetailScreen({ route }: any) {
   }, [employeeId, start, end]);
 
   const paidOffDates = useMemo(() => {
-    const set = weekOffDatesInRange(start, end, weeklyOffDay, holidays);
+    const set = weekOffDatesInRange(start, end, weeklyOffDay, holidays, employee?.gender ?? null);
     for (const req of leaveRequests) {
       const cur = new Date((req.start_date < start ? start : req.start_date) + 'T00:00:00Z');
       const endDate = new Date((req.end_date > end ? end : req.end_date) + 'T00:00:00Z');
@@ -109,7 +109,7 @@ export default function AdminPayrollDetailScreen({ route }: any) {
       }
     }
     return set;
-  }, [start, end, weeklyOffDay, holidays, leaveRequests]);
+  }, [start, end, weeklyOffDay, holidays, leaveRequests, employee?.gender]);
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
     const map: DailyShiftByDate = new Map();

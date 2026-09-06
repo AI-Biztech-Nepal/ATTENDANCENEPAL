@@ -147,8 +147,8 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   const companyWeekOffDates = useMemo(() => {
     const since = new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
-    return weekOffDatesInRange(since, today, weeklyOffDay, holidays);
-  }, [weeklyOffDay, holidays]);
+    return weekOffDatesInRange(since, today, weeklyOffDay, holidays, employee?.gender ?? null);
+  }, [weeklyOffDay, holidays, employee?.gender]);
 
   const weeklyPattern: WeeklyPatternByEmployee = useMemo(() => {
     const rows = weeklyPatternRows.map(r => ({ employee_id: employeeId, weekday: r.weekday, shift_id: r.shift_id }));

@@ -7,6 +7,14 @@ export type Branch = {
   radius_meters: number;
 };
 
+/** employees.gender — a null/unset gender behaves like 'other': only
+ * company-wide ('all') holidays apply to them, never a gender-scoped one. */
+export type Gender = 'male' | 'female' | 'other';
+
+/** company_holidays.applies_to — 'all' is the default and every holiday's
+ * behaviour before gender scoping existed. */
+export type HolidayScope = 'all' | 'male' | 'female';
+
 export type Department = {
   id: string;
   name: string;
@@ -31,6 +39,7 @@ export type Employee = {
   fingerprint_id: string | null;
   username: string | null;
   profile_photo_url: string | null;
+  gender: Gender | null;
   status: 'active' | 'inactive';
   date_of_joining: string | null;
   resigned_at: string | null;
@@ -223,6 +232,7 @@ export type CompanyHoliday = {
   company_id: string;
   holiday_date: string;
   name: string;
+  applies_to: HolidayScope;
   created_by: string | null;
   created_at: string;
 };

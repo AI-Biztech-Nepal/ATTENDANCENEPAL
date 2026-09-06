@@ -21,6 +21,7 @@ const EMPTY_FORM = {
   email: '',
   phone: '',
   address: '',
+  gender: '',
   department: '',
   designation: '',
   fingerprint_id: '',
@@ -327,6 +328,7 @@ function EmployeesView() {
       email: form.email || null,
       phone: form.phone || null,
       address: form.address || null,
+      gender: form.gender || null,
       pan_no: form.pan_no || null,
       ssf_no: form.ssf_no || null,
       department: form.department || null,
@@ -1237,6 +1239,20 @@ function EmployeesView() {
                     />
                   </div>
                 ))}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Gender</label>
+                  <select
+                    value={form.gender}
+                    onChange={e => setForm(f => ({ ...f, gender: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+                  >
+                    <option value="">Not set</option>
+                    <option value="female">Female</option>
+                    <option value="male">Male</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <p className="mt-1 text-xs text-slate-400">Used for gender-specific holidays (e.g. Teej).</p>
+                </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Department</label>
                   <select

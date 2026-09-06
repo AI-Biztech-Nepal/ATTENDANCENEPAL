@@ -154,7 +154,7 @@ export default function MyPayrollScreen() {
   const paidOffDates = useMemo(() => {
     if (!employee?.date_of_joining) return new Set<string>();
     const today = nepalTodayIso();
-    const set = weekOffDatesInRange(employee.date_of_joining, today, weeklyOffDay, holidays);
+    const set = weekOffDatesInRange(employee.date_of_joining, today, weeklyOffDay, holidays, employee.gender);
     for (const req of leaveRequests) {
       const cur = new Date(req.start_date + 'T00:00:00Z');
       const endDate = new Date(req.end_date + 'T00:00:00Z');
@@ -164,7 +164,7 @@ export default function MyPayrollScreen() {
       }
     }
     return set;
-  }, [employee?.date_of_joining, weeklyOffDay, holidays, leaveRequests]);
+  }, [employee?.date_of_joining, employee?.gender, weeklyOffDay, holidays, leaveRequests]);
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
     const map: DailyShiftByDate = new Map();

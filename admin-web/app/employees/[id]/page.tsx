@@ -28,6 +28,7 @@ const EMPTY_CORE_FORM = {
   username: '',
   email: '',
   phone: '',
+  gender: '',
   department: '',
   designation: '',
   branch_id: '',
@@ -108,6 +109,7 @@ export default function EmployeeCvPage() {
             username: data.username ?? '',
             email: data.email ?? '',
             phone: data.phone ?? '',
+            gender: data.gender ?? '',
             department: data.department ?? '',
             designation: data.designation ?? '',
             branch_id: data.branch_id ?? '',
@@ -172,6 +174,7 @@ export default function EmployeeCvPage() {
         username: coreForm.username || null,
         email: coreForm.email || null,
         phone: coreForm.phone || null,
+        gender: coreForm.gender || null,
         department: coreForm.department || null,
         designation: coreForm.designation || null,
         branch_id: coreForm.branch_id || null,
@@ -571,6 +574,10 @@ export default function EmployeeCvPage() {
               <span className="text-ink">{employee.fingerprint_id ?? '—'}</span>
             </div>
             <div className="bg-white p-3">
+              <span className="block text-xs text-slate-400">Gender</span>
+              <span className="text-ink capitalize">{employee.gender ?? '—'}</span>
+            </div>
+            <div className="bg-white p-3">
               <span className="block text-xs text-slate-400">Date of joining</span>
               <span className="text-ink">{formatAdDate(employee.date_of_joining, system)}</span>
             </div>
@@ -693,6 +700,19 @@ export default function EmployeeCvPage() {
                 onChange={e => setCoreForm(f => ({ ...f, phone: e.target.value }))}
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Gender</label>
+              <select
+                value={coreForm.gender}
+                onChange={e => setCoreForm(f => ({ ...f, gender: e.target.value }))}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="">Not set</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-600">Department</label>

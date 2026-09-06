@@ -3,7 +3,7 @@ import { View, Text, FlatList, ScrollView, StyleSheet, ActivityIndicator, TextIn
 import * as ImagePicker from 'expo-image-picker';
 import { compressPhoto } from '../lib/compressPhoto';
 import { supabase } from '../lib/supabase';
-import type { Branch, Department, Employee, Profile, Shift } from '../types';
+import type { Branch, Department, Employee, Gender, Profile, Shift } from '../types';
 import { resolveShift, formatShiftHours } from '../lib/shift';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
@@ -11,6 +11,11 @@ import { ChevronIcon, EditIcon, KeyIcon } from '../components/icons';
 import { createLogin, fetchAccounts, resetPassword, updateLoginEmail } from '../lib/accountsApi';
 
 const EMPTY_ADD_FORM = { employee_code: '', name: '', phone: '', email: '', address: '', designation: '', fingerprint_id: '', date_of_joining: '' };
+const GENDER_OPTIONS: { value: Gender; label: string }[] = [
+  { value: 'female', label: 'Female' },
+  { value: 'male', label: 'Male' },
+  { value: 'other', label: 'Other' },
+];
 const PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 function generatePassword(length = 10) {
   let out = '';
@@ -35,6 +40,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
   const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
   const [addDepartment, setAddDepartment] = useState<string | null>(null);
   const [addBranchId, setAddBranchId] = useState<string | null>(null);
+  const [addGender, setAddGender] = useState<Gender | null>(null);
   const [saving, setSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -135,6 +141,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
       designation: addForm.designation || null,
       fingerprint_id: addForm.fingerprint_id || null,
       branch_id: addBranchId,
+      gender: addGender,
       date_of_joining: addForm.date_of_joining || null,
       status: 'active',
     });
@@ -146,6 +153,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
     setAddForm(EMPTY_ADD_FORM);
     setAddDepartment(null);
     setAddBranchId(null);
+    setAddGender(null);
     setShowAddForm(false);
     reload();
   }
@@ -531,6 +539,19 @@ export default function EmployeesScreen({ route, navigation }: any) {
                 <TextInput style={styles.input} value={addForm.fingerprint_id} onChangeText={v => setAddForm(f => ({ ...f, fingerprint_id: v }))} />
                 <Text style={styles.label}>Date of joining (YYYY-MM-DD)</Text>
                 <TextInput style={styles.input} value={addForm.date_of_joining} onChangeText={v => setAddForm(f => ({ ...f, date_of_joining: v }))} placeholder="2026-01-15" placeholderTextColor={colors.slate400} />
+
+                <Text style={styles.label}>Gender</Text>
+                <View style={styles.chipsRow}>
+                  <TouchableOpacity style={[styles.pickChip, addGender === null && styles.pickChipActive]} onPress={() => setAddGender(null)}>
+                    <Text style={[styles.pickChipText, addGender === null && styles.pickChipTextActive]}>Not set</Text>
+                  </TouchableOpacity>
+                  {GENDER_OPTIONS.map(g => (
+                    <TouchableOpacity key={g.value} style={[styles.pickChip, addGender === g.value && styles.pickChipActive]} onPress={() => setAddGender(g.value)}>
+                      <Text style={[styles.pickChipText, addGender === g.value && styles.pickChipTextActive]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.hint}>Used for gender-specific holidays (e.g. Teej).</Text>
 
                 <Text style={styles.label}>Department</Text>
                 <View style={styles.chipsRow}>

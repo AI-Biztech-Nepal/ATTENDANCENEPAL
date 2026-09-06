@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { CompanyHoliday } from './types';
+import type { CompanyHoliday, Gender, HolidayScope } from './types';
 
 /** Company-wide Week-off: a recurring weekly day (0=Sunday..6=Saturday, from
  * companies.weekly_off_day) plus ad-hoc dates (company_holidays). Applies to
@@ -72,16 +72,32 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
   };
 }
 
+type HolidayLike = Pick<CompanyHoliday, 'holiday_date'> & { applies_to?: HolidayScope | null };
+
+/** Whether a holiday's scope covers an employee of this gender. A holiday with
+ * no `applies_to` (or 'all') covers everyone; a 'male'/'female' holiday covers
+ * only that gender — a null/'other' gender is never covered by a scoped one. */
+export function holidayCoversGender(scope: HolidayScope | null | undefined, gender: Gender | null | undefined): boolean {
+  const s = scope ?? 'all';
+  return s === 'all' || s === gender;
+}
+
 /** Dates within [start, end] (inclusive, 'YYYY-MM-DD') that are a company-wide
- * Week-off: either the weekly recurring day or a company_holidays row. */
+ * Week-off: either the weekly recurring day or a company_holidays row. When
+ * `gender` is given, gender-scoped holidays are included only if they cover
+ * that gender; omitting it (or passing null) yields company-wide holidays
+ * only — the behaviour every caller had before holiday scoping existed. */
 export function weekOffDatesInRange(
   start: string,
   end: string,
   weeklyOffDay: number | null,
-  holidays: Pick<CompanyHoliday, 'holiday_date'>[]
+  holidays: HolidayLike[],
+  gender?: Gender | null
 ): Set<string> {
   const set = new Set<string>();
-  for (const h of holidays) set.add(h.holiday_date);
+  for (const h of holidays) {
+    if (holidayCoversGender(h.applies_to, gender)) set.add(h.holiday_date);
+  }
   if (weeklyOffDay == null) return set;
   const cur = new Date(start + 'T00:00:00Z');
   const endDate = new Date(end + 'T00:00:00Z');
@@ -90,6 +106,22 @@ export function weekOffDatesInRange(
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
   return set;
+}
+
+/** For a multi-employee view (the Payroll report, Attendance report, Staff
+ * Salary Sheet): pre-computes the week-off date set for each gender bucket
+ * once, then returns a per-employee lookup. `null`/`'other'` genders get the
+ * company-wide set. */
+export function weekOffDatesByGender(
+  start: string,
+  end: string,
+  weeklyOffDay: number | null,
+  holidays: HolidayLike[]
+): (gender: Gender | null | undefined) => Set<string> {
+  const base = weekOffDatesInRange(start, end, weeklyOffDay, holidays);
+  const male = weekOffDatesInRange(start, end, weeklyOffDay, holidays, 'male');
+  const female = weekOffDatesInRange(start, end, weeklyOffDay, holidays, 'female');
+  return gender => (gender === 'male' ? male : gender === 'female' ? female : base);
 }
 
 /** employee_id -> Set of 'YYYY-MM-DD' dates covered by an approved leave

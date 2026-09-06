@@ -12,7 +12,7 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS } from '@/lib/types';
 import { dateKey, firstCheckIn, isLate, last7Days, presentEmployeeIds, WEEKDAY_LABEL } from '@/lib/metrics';
-import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, weekOffDatesByGender } from '@/lib/weekOff';
 import {
   applyOvernightShiftCorrection,
   buildWeeklyPatternByEmployee,
@@ -175,10 +175,16 @@ export default function DashboardPage() {
   // matters (isLate, applyOvernightShiftCorrection, resolveShiftForDate),
   // so someone who does show up on a company-wide off day isn't marked Late
   // against a shift they were never expecting to work.
-  const companyWeekOffDates = useMemo(
-    () => weekOffDatesInRange(today, today, weeklyOffDay, todayHoliday ? [todayHoliday] : []),
+  // Per-employee: a gender-scoped holiday today (e.g. Teej) is a day off only
+  // for the employees it covers — everyone else works a normal day.
+  const weekOffDatesFor = useMemo(
+    () => weekOffDatesByGender(today, today, weeklyOffDay, todayHoliday ? [todayHoliday] : []),
     [today, weeklyOffDay, todayHoliday]
   );
+  // The base set (weekly off-day + company-wide holidays only) — drives the
+  // "nobody is absent today" banners, which shouldn't fire for a holiday that
+  // only covers one gender.
+  const companyWeekOffDates = useMemo(() => weekOffDatesFor(null), [weekOffDatesFor]);
   const todayIsWeekOff = companyWeekOffDates.has(today);
   const weeklyPattern = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
@@ -186,7 +192,7 @@ export default function DashboardPage() {
     const rows: DetailRow[] = [];
     for (const emp of activeEmployees) {
       const empLogs = todayLogs.filter(l => l.employee_id === emp.id);
-      if (!empLogs.length || !isLate(emp, shifts, empLogs, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern)) continue;
+      if (!empLogs.length || !isLate(emp, shifts, empLogs, today, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern)) continue;
       const checkIn = firstCheckIn(empLogs);
       rows.push({
         id: emp.id,
@@ -195,7 +201,7 @@ export default function DashboardPage() {
       });
     }
     return rows;
-  }, [activeEmployees, todayLogs, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern]);
+  }, [activeEmployees, todayLogs, shifts, today, dailyShiftByDate, weekOffDatesFor, weeklyPattern]);
   const lateCount = lateEmployees.length;
 
   const onLeaveIds = useMemo(() => new Set(onLeave.map(l => l.employee_id)), [onLeave]);
@@ -247,10 +253,10 @@ export default function DashboardPage() {
                 !presentIds.has(emp.id) &&
                 !onLeaveIds.has(emp.id) &&
                 !emp.attendance_exempt &&
-                !isWeekOff(resolveShiftForDate(emp, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern))
+                !isWeekOff(resolveShiftForDate(emp, shifts, today, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern))
             )
             .map(emp => ({ id: emp.id, primary: emp.name, secondary: emp.department ?? undefined })),
-    [activeEmployees, presentIds, onLeaveIds, todayIsWeekOff, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern]
+    [activeEmployees, presentIds, onLeaveIds, todayIsWeekOff, shifts, today, dailyShiftByDate, weekOffDatesFor, weeklyPattern]
   );
   const absentCount = absentRows.length;
 
@@ -261,9 +267,9 @@ export default function DashboardPage() {
   const weekOffRows = useMemo<DetailRow[]>(
     () =>
       activeEmployees
-        .filter(emp => isWeekOff(resolveShiftForDate(emp, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern)))
+        .filter(emp => isWeekOff(resolveShiftForDate(emp, shifts, today, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern)))
         .map(emp => ({ id: emp.id, primary: emp.name, secondary: emp.department ?? undefined })),
-    [activeEmployees, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern]
+    [activeEmployees, shifts, today, dailyShiftByDate, weekOffDatesFor, weeklyPattern]
   );
   const weekOffCount = weekOffRows.length;
 
@@ -284,14 +290,15 @@ export default function DashboardPage() {
         if (list) list.push(log);
         else byDate.set(key, [log]);
       }
-      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
+      const weekOffDates = weekOffDatesFor(emp.gender);
+      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDates, weeklyPattern);
       const dayLogs = byDate.get(today);
       if (!dayLogs || dayLogs.length === 0) continue;
-      const resolved = resolveShiftForDate(emp, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
+      const resolved = resolveShiftForDate(emp, shifts, today, dailyShiftByDate, weekOffDates, weeklyPattern);
       map.set(emp.id, computeDayStatusForResolvedShift(dayLogs, resolved));
     }
     return map;
-  }, [activeEmployees, logs, shifts, dailyShiftByDate, today, companyWeekOffDates, weeklyPattern]);
+  }, [activeEmployees, logs, shifts, dailyShiftByDate, today, weekOffDatesFor, weeklyPattern]);
 
   const workHoursRows = useMemo<DetailRow[]>(() => {
     const entries: { id: string; name: string; hours: number }[] = [];

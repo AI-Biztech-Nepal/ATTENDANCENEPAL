@@ -19,7 +19,7 @@ import {
   resolveShiftForDate,
   type DailyShiftByDate,
 } from '@/lib/shift';
-import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
@@ -187,7 +187,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     return map;
   }, [dailyShiftRows]);
 
-  const weekOffDateSet = useMemo(() => weekOffDatesInRange(from, to, weeklyOffDay, holidays), [from, to, weeklyOffDay, holidays]);
+  // A per-employee lookup: gender-scoped holidays (e.g. Teej) count only for
+  // the employees they cover.
+  const weekOffDatesFor = useMemo(() => weekOffDatesByGender(from, to, weeklyOffDay, holidays), [from, to, weeklyOffDay, holidays]);
   const leaveByEmployee = useMemo(() => leaveDatesByEmployee(leaveRequests), [leaveRequests]);
   const weeklyPattern = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
@@ -215,13 +217,14 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         const dayLogs = empLogs.filter(l => nepalDateKey(l.punch_time) === day);
         if (dayLogs.length > 0) byDate.set(day, dayLogs);
       }
-      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDateSet, weeklyPattern);
+      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern);
       logsByEmployeeDay.set(emp.id, byDate);
     }
 
     const out: Row[] = [];
     for (const day of days) {
       for (const emp of scopedEmployees) {
+        const weekOffDateSet = weekOffDatesFor(emp.gender);
         // Today's own row can still gain punches (e.g. a checkout) after a
         // payroll_summaries row for it was already computed — that row is
         // never re-run until tomorrow's nightly job, so trusting it here
@@ -342,7 +345,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         if (!bId) return -1;
         return aId.localeCompare(bId, undefined, { numeric: true, sensitivity: 'base' });
       });
-  }, [scopedEmployees, summaries, logs, devices, shifts, from, to, status, dailyShiftByDate, weekOffDateSet, leaveByEmployee, weeklyPattern]);
+  }, [scopedEmployees, summaries, logs, devices, shifts, from, to, status, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
 
   const totals = useMemo(() => {
     const workHours = rows.reduce((sum, r) => sum + r.hours, 0);

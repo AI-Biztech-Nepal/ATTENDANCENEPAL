@@ -9,7 +9,7 @@ import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPerio
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildEmployeeDayRows } from '@/lib/payrollDetail';
 import { buildWeeklyPatternByEmployee, formatHoursMinutes, nepalTodayIso, type DailyShiftByDate } from '@/lib/shift';
-import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import type { AttendanceLog, Branch, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
@@ -191,7 +191,7 @@ export default function StaffSalarySheet() {
   // the figures match everywhere. Absent from the fixed-salary math above.
   const attendanceByEmployee = useMemo(() => {
     const { start, end } = period;
-    const weekOffDates = weekOffDatesInRange(start, end, weeklyOffDay, holidays);
+    const weekOffDatesFor = weekOffDatesByGender(start, end, weeklyOffDay, holidays);
     const leaveByEmployee = leaveDatesByEmployee(leaveRequests);
     const weeklyPattern = buildWeeklyPatternByEmployee(weeklyPatternRows);
     const map = new Map<string, AttendanceAgg>();
@@ -204,7 +204,7 @@ export default function StaffSalarySheet() {
         start,
         end,
         dailyShiftByDate,
-        weekOffDates,
+        weekOffDatesFor(emp.gender),
         leaveByEmployee.get(emp.id),
         weeklyPattern
       );

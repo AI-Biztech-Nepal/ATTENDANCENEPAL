@@ -12,7 +12,7 @@ import type { CalendarSystem } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import DatePicker from '../components/DatePicker';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '../lib/weekOff';
-import type { CompanyHoliday } from '../types';
+import type { CompanyHoliday, Gender } from '../types';
 
 type ViewMode = 'menu' | 'fix';
 type PunchModal = {
@@ -59,6 +59,7 @@ export default function CheckInScreen({ navigation }: any) {
   const [correctionError, setCorrectionError] = useState<string | null>(null);
   const [weeklyOffDay, setWeeklyOffDay] = useState<number | null>(null);
   const [todayHoliday, setTodayHoliday] = useState<CompanyHoliday | null>(null);
+  const [myGender, setMyGender] = useState<Gender | null>(null);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -70,14 +71,18 @@ export default function CheckInScreen({ navigation }: any) {
 
   const todayIsWeekOff = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    return weekOffDatesInRange(today, today, weeklyOffDay, todayHoliday ? [todayHoliday] : []).has(today);
-  }, [weeklyOffDay, todayHoliday]);
+    return weekOffDatesInRange(today, today, weeklyOffDay, todayHoliday ? [todayHoliday] : [], myGender).has(today);
+  }, [weeklyOffDay, todayHoliday, myGender]);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       const { data: profile } = await supabase.from('profiles').select('employee_id').eq('id', data.user.id).single();
       setEmployeeId(profile?.employee_id ?? null);
+      if (profile?.employee_id) {
+        const { data: emp } = await supabase.from('employees').select('gender').eq('id', profile.employee_id).single();
+        setMyGender((emp?.gender as Gender) ?? null);
+      }
     });
   }, []);
 

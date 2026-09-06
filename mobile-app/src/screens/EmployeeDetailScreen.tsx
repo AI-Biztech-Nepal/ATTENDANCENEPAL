@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
-import type { Branch, Department, Employee } from '../types';
+import type { Branch, Department, Employee, Gender } from '../types';
 import { colors } from '../theme';
 
 export default function EmployeeDetailScreen({ route, navigation }: any) {
@@ -27,6 +27,7 @@ export default function EmployeeDetailScreen({ route, navigation }: any) {
   });
   const [department, setDepartment] = useState<string | null>(null);
   const [branchId, setBranchId] = useState<string | null>(null);
+  const [gender, setGender] = useState<Gender | null>(null);
 
   function reload() {
     supabase
@@ -53,6 +54,7 @@ export default function EmployeeDetailScreen({ route, navigation }: any) {
         });
         setDepartment(emp.department);
         setBranchId(emp.branch_id);
+        setGender(emp.gender);
       });
     supabase.from('branches').select('*').order('name').then(({ data }) => setBranches((data as Branch[]) ?? []));
     supabase.from('departments').select('*').order('name').then(({ data }) => setDepartments((data as Department[]) ?? []));
@@ -73,6 +75,7 @@ export default function EmployeeDetailScreen({ route, navigation }: any) {
         designation: form.designation || null,
         fingerprint_id: form.fingerprint_id || null,
         branch_id: branchId,
+        gender,
         salary: form.salary ? Number(form.salary) : null,
         pan_no: form.pan_no || null,
         ssf_no: form.ssf_no || null,
@@ -116,6 +119,16 @@ export default function EmployeeDetailScreen({ route, navigation }: any) {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Employment</Text>
         <Field label="Designation" value={form.designation} onChangeText={v => setForm(f => ({ ...f, designation: v }))} />
+        <Text style={styles.label}>Gender</Text>
+        <ChipPicker
+          options={[
+            { label: 'Female', value: 'female' },
+            { label: 'Male', value: 'male' },
+            { label: 'Other', value: 'other' },
+          ]}
+          value={gender}
+          onChange={setGender}
+        />
         <Text style={styles.label}>Department</Text>
         <ChipPicker options={departments.map(d => d.name)} value={department} onChange={setDepartment} />
         <Text style={styles.label}>Branch</Text>

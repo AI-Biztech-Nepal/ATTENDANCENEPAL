@@ -10,7 +10,14 @@ import { buildMonth, formatAdDate, stepAnchor, todayAnchor } from '@/lib/calenda
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso } from '@/lib/shift';
 import { datesInRange, fetchUpcomingHolidays, type PredefinedHoliday } from '@/lib/nepalHolidays';
-import type { CompanyHoliday } from '@/lib/types';
+import type { CompanyHoliday, HolidayScope } from '@/lib/types';
+
+const SCOPE_OPTIONS: { value: HolidayScope; label: string }[] = [
+  { value: 'all', label: 'Everyone' },
+  { value: 'female', label: 'Women only' },
+  { value: 'male', label: 'Men only' },
+];
+const SCOPE_LABEL: Record<HolidayScope, string> = { all: 'Everyone', female: 'Women only', male: 'Men only' };
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
@@ -19,7 +26,7 @@ const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 // write one row per day in the range instead of just holiday_date. It's
 // blanked back out the moment the date is hand-edited away from that pick's
 // start day, or the name no longer matches a predefined entry at all.
-const EMPTY_FORM = { holiday_date: '', holiday_end_date: '', name: '' };
+const EMPTY_FORM = { holiday_date: '', holiday_end_date: '', name: '', applies_to: 'all' as HolidayScope };
 
 // Best-effort: the Edge Function that actually sends push notifications is
 // separate infrastructure (needs an Expo/EAS project + `supabase functions
@@ -106,7 +113,7 @@ export default function WeekOffPage() {
     const { error } = await supabase
       .from('company_holidays')
       .upsert(
-        dates.map(holiday_date => ({ holiday_date, name })),
+        dates.map(holiday_date => ({ holiday_date, name, applies_to: form.applies_to })),
         { onConflict: 'company_id,holiday_date' }
       );
     setSaving(false);
@@ -130,8 +137,8 @@ export default function WeekOffPage() {
   return (
     <AppShell title="Holidays">
       <p className="mb-5 max-w-2xl text-sm text-slate-500">
-        Company-wide holiday dates — applies to every employee at once and is treated as a paid day in Payroll.
-        Distinct from assigning one employee a Week Off on the Shifts page&apos;s Weekly Roster.
+        Holiday dates — treated as a paid day in Payroll. Applies to every employee by default, or just the women or just the men
+        (e.g. Teej). Distinct from assigning one employee a Week Off on the Shifts page&apos;s Weekly Roster.
       </p>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,20rem)_1fr]">
@@ -168,7 +175,12 @@ export default function WeekOffPage() {
                   disabled={!cell.inMonth}
                   title={holiday?.name}
                   onClick={() => {
-                    setForm({ holiday_date: cell.adKey, holiday_end_date: '', name: holiday?.name ?? '' });
+                    setForm({
+                      holiday_date: cell.adKey,
+                      holiday_end_date: '',
+                      name: holiday?.name ?? '',
+                      applies_to: holiday?.applies_to ?? 'all',
+                    });
                     setShowForm(true);
                   }}
                   className={`flex h-9 w-9 flex-col items-center justify-center rounded-lg text-xs transition-colors ${
@@ -214,6 +226,7 @@ export default function WeekOffPage() {
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                   <th className="whitespace-nowrap py-2 pr-4 font-medium">Date</th>
                   <th className="whitespace-nowrap py-2 pr-4 font-medium">Name</th>
+                  <th className="whitespace-nowrap py-2 pr-4 font-medium">Applies to</th>
                   <th className="whitespace-nowrap py-2 font-medium"></th>
                 </tr>
               </thead>
@@ -222,6 +235,15 @@ export default function WeekOffPage() {
                   <tr key={h.id} className="border-b border-slate-100 last:border-0">
                     <td className="whitespace-nowrap py-2.5 pr-4 text-slate-600">{formatAdDate(h.holiday_date, system)}</td>
                     <td className="whitespace-nowrap py-2.5 pr-4 font-medium text-ink">{h.name}</td>
+                    <td className="whitespace-nowrap py-2.5 pr-4">
+                      {h.applies_to === 'all' ? (
+                        <span className="text-slate-400">Everyone</span>
+                      ) : (
+                        <span className="rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                          {SCOPE_LABEL[h.applies_to]}
+                        </span>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap py-2.5">
                       <button onClick={() => handleDeleteHoliday(h.id)} className="text-xs font-medium text-critical hover:underline">
                         Delete
@@ -290,7 +312,28 @@ export default function WeekOffPage() {
                   {formatAdDate(form.holiday_end_date, system)}
                 </p>
               )}
-              {editingExisting && <p className="mb-3 text-xs text-slate-400">This date already has a holiday — saving will rename it.</p>}
+
+              <label className="mb-1 block text-xs font-medium text-slate-600">Applies to</label>
+              <div className="mb-1 flex overflow-hidden rounded-lg border border-slate-200">
+                {SCOPE_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, applies_to: opt.value }))}
+                    className={`flex-1 px-2 py-2 text-xs font-medium transition-colors ${
+                      form.applies_to === opt.value ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mb-3 text-[11px] text-slate-400">
+                A women- or men-only holiday (e.g. Teej) is a paid day off just for those employees — everyone else works a normal day. Employees
+                with no gender set are treated as &ldquo;works a normal day&rdquo;.
+              </p>
+
+              {editingExisting && <p className="mb-3 text-xs text-slate-400">This date already has a holiday — saving will overwrite it.</p>}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"

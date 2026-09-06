@@ -1,5 +1,12 @@
 export type PunchMethod = 'zkteco' | 'gps' | 'qr' | 'selfie';
 
+/** employees.gender — a null/unset gender behaves like 'other': only
+ * company-wide ('all') holidays apply, never a gender-scoped one. */
+export type Gender = 'male' | 'female' | 'other';
+
+/** company_holidays.applies_to — 'all' is the default. */
+export type HolidayScope = 'all' | 'male' | 'female';
+
 export type Profile = {
   id: string;
   employee_id: string | null;
@@ -18,6 +25,7 @@ export type Employee = {
   branch_id: string | null;
   fingerprint_id: string | null;
   username: string | null;
+  gender: Gender | null;
   status: 'active' | 'inactive';
   salary: number | null;
   allowance: number | null;
@@ -180,6 +188,7 @@ export type CompanyHoliday = {
   company_id: string;
   holiday_date: string;
   name: string;
+  applies_to: HolidayScope;
   created_by: string | null;
   created_at: string;
 };

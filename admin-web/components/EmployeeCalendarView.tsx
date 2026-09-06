@@ -142,8 +142,8 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   const companyWeekOffDates = useMemo(() => {
     const windowStart = new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
-    return weekOffDatesInRange(windowStart, today, weeklyOffDay, holidays);
-  }, [weeklyOffDay, holidays]);
+    return weekOffDatesInRange(windowStart, today, weeklyOffDay, holidays, employee?.gender ?? null);
+  }, [weeklyOffDay, holidays, employee?.gender]);
 
   const dayStatus = useMemo(() => {
     const byDate = new Map<string, AttendanceLog[]>();

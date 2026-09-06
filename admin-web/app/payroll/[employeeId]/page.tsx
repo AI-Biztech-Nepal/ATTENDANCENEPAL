@@ -158,7 +158,12 @@ function PayrollEmployeeDetailView() {
   // hour instead (see dailySalaryEarning() in lib/payrollDetail.ts).
   const salaryPerDay = useMemo(() => (employee?.salary != null ? employee.salary / daysInRange : null), [employee, daysInRange]);
 
-  const weekOffDates = useMemo(() => weekOffDatesInRange(start, end, weeklyOffDay, holidays), [start, end, weeklyOffDay, holidays]);
+  // Gender-scoped holidays (e.g. Teej) count as a paid day off only for the
+  // employees they cover — see weekOffDatesInRange().
+  const weekOffDates = useMemo(
+    () => weekOffDatesInRange(start, end, weeklyOffDay, holidays, employee?.gender ?? null),
+    [start, end, weeklyOffDay, holidays, employee?.gender]
+  );
 
   const leaveDates = useMemo(() => {
     const set = new Set<string>();

@@ -191,7 +191,7 @@ export default function MyPayrollPage() {
   const paidOffDates = useMemo(() => {
     if (!employee?.date_of_joining) return new Set<string>();
     const today = nepalTodayIso();
-    const set = weekOffDatesInRange(employee.date_of_joining, today, weeklyOffDay, holidays);
+    const set = weekOffDatesInRange(employee.date_of_joining, today, weeklyOffDay, holidays, employee.gender);
     for (const req of leaveRequests) {
       const cur = new Date(req.start_date + 'T00:00:00Z');
       const endDate = new Date(req.end_date + 'T00:00:00Z');
@@ -201,7 +201,7 @@ export default function MyPayrollPage() {
       }
     }
     return set;
-  }, [employee?.date_of_joining, weeklyOffDay, holidays, leaveRequests]);
+  }, [employee?.date_of_joining, employee?.gender, weeklyOffDay, holidays, leaveRequests]);
 
   // employeeId -> work_date -> shift_id, covering this employee's whole
   // employment history so it's valid for both the selected period's rows
