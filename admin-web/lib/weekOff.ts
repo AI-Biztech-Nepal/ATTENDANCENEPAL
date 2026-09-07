@@ -64,9 +64,20 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
   if (!companyId) return DEFAULT_CONFIG;
   const { data: company } = await supabase
     .from('companies')
-    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate, overtime_rate')
+    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate')
     .eq('id', companyId)
     .single();
+
+  // `overtime_rate` lives in a later migration (20260906120000) that may not
+  // be applied on every deployment yet. Selecting a non-existent column fails
+  // the WHOLE row request, which would silently revert pf/ssf/tds to their
+  // defaults on every page load — so read it on its own and ignore the error.
+  const { data: extra } = await supabase
+    .from('companies')
+    .select('overtime_rate')
+    .eq('id', companyId)
+    .single();
+
   return {
     companyId,
     weeklyOffDay: company?.weekly_off_day ?? null,
@@ -76,7 +87,7 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
     pfRate: company?.pf_rate ?? DEFAULT_CONFIG.pfRate,
     ssfRate: company?.ssf_rate ?? DEFAULT_CONFIG.ssfRate,
     tdsRate: company?.tds_rate ?? DEFAULT_CONFIG.tdsRate,
-    overtimeRate: company?.overtime_rate ?? DEFAULT_CONFIG.overtimeRate,
+    overtimeRate: (extra as { overtime_rate?: number } | null)?.overtime_rate ?? DEFAULT_CONFIG.overtimeRate,
   };
 }
 

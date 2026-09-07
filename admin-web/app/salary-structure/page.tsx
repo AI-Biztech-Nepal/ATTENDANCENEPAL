@@ -208,12 +208,26 @@ export default function SalaryStructurePage() {
     setSaving(true);
     const { error } = await supabase
       .from('companies')
-      .update({ pf_rate: pf, ssf_rate: ssf, tds_rate: tds, overtime_rate: overtime })
+      .update({ pf_rate: pf, ssf_rate: ssf, tds_rate: tds })
       .eq('id', companyId);
+
+    // `overtime_rate` is from a later migration (20260906120000) that may not
+    // be applied yet — save it separately so a missing column can't block the
+    // PF / SSF rates. If it fails, warn but keep the rest.
+    const { error: overtimeError } = await supabase
+      .from('companies')
+      .update({ overtime_rate: overtime })
+      .eq('id', companyId);
+
     setSaving(false);
     if (error) {
       alert(`Could not save the rates: ${error.message}`);
       return;
+    }
+    if (overtimeError) {
+      alert(
+        `PF and SSF rates were saved, but the Overtime rate could not be — the database is missing the overtime_rate column. Run migration 20260906120000_ssf_override_and_overtime_rate.sql.`
+      );
     }
     setSavedRates({ pf, ssf, tds, overtime });
   }
