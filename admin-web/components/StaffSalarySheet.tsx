@@ -398,6 +398,14 @@ export default function StaffSalarySheet() {
   // only the cell padding either side. A floor gives them room without
   // touching the money columns, whose long headings already set their own.
   const thAtt = `${thNum} min-w-[5rem]`;
+
+  // ID and Employee Name stay frozen while the other eleven columns scroll
+  // past them, so those columns really do pass underneath — that is what
+  // freezing means. The frozen edge therefore carries a visible border and a
+  // deeper shadow: without them a heading half-covered by the Employee Name
+  // column read as chopped text (WORKED showing as RKED) rather than as a
+  // column sliding under a fixed edge. Headings range left, so they meet that
+  // edge sooner than the right-aligned figures below them do.
   const td = 'whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700';
 
   const colCount = 10 + visibleAttCols.length;
@@ -488,7 +496,7 @@ export default function StaffSalarySheet() {
             <thead>
               <tr className="border-y border-slate-200 bg-slate-50">
                 <th className={`${th} sticky left-0 z-10 w-16 bg-slate-50 text-left shadow-none`}>ID</th>
-                <th className={`${th} sticky left-16 z-10 min-w-[10rem] bg-slate-50 text-left shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none`}>
+                <th className={`${th} sticky left-16 z-10 min-w-[10rem] bg-slate-50 text-left border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none`}>
                   Employee Name
                 </th>
                 {visibleCols.workedDays && (
@@ -546,7 +554,7 @@ export default function StaffSalarySheet() {
                     <td className="sticky left-0 z-[1] whitespace-nowrap bg-white px-2.5 py-1.5 text-center tabular-nums text-slate-400">
                       {item.row.enrollId}
                     </td>
-                    <td className="sticky left-16 z-[1] whitespace-nowrap bg-white px-2.5 py-1.5 text-left font-medium text-ink shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none">
+                    <td className="sticky left-16 z-[1] whitespace-nowrap bg-white px-2.5 py-1.5 text-left font-medium text-ink border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none">
                       <Link href={detailHref(item.row.id)} className="hover:text-accent hover:underline print:no-underline print:text-ink">
                         {item.row.name}
                       </Link>
@@ -585,7 +593,7 @@ export default function StaffSalarySheet() {
                 <tr className="border-t-2 border-slate-300 bg-slate-50 text-[12.5px] font-bold text-ink">
                   <td
                     colSpan={2}
-                    className="sticky left-0 z-[1] bg-slate-50 px-2.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none"
+                    className="sticky left-0 z-[1] bg-slate-50 px-2.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none"
                   >
                     Total
                   </td>
