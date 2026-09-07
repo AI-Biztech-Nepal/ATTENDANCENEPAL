@@ -16,6 +16,8 @@ import {
 } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { fetchMyCompanyWeekOffConfig } from '@/lib/weekOff';
+import { fetchCompanyPayrollFormat, type PayrollFormat } from '@/lib/payrollFormat';
+import StaffSalarySheet from '@/components/StaffSalarySheet';
 import type { Employee } from '@/lib/types';
 
 /** The one place a company's salary structure is set: the three contribution
@@ -36,6 +38,15 @@ export default function SalaryStructurePage() {
 
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // One customer (companies.payroll_format = 'staff_salary_sheet') sees the
+  // same fixed-salary Staff Salary Sheet here as on the Payroll report, so
+  // the two pages stay logically identical for them. Isolated fetch — no
+  // other company's Salary Structure code path changes.
+  const [payrollFormat, setPayrollFormat] = useState<PayrollFormat | null>(null);
+  useEffect(() => {
+    fetchCompanyPayrollFormat().then(setPayrollFormat);
+  }, []);
 
   // Saved rates (what's in the DB) vs the draft strings the header inputs
   // edit. The table previews with the draft so editing recalculates live;
@@ -301,6 +312,13 @@ export default function SalaryStructurePage() {
   const modeLine = perDay
     ? `Per-day amounts — one day of ${period.label} (${daysInMonth} days)`
     : `Full monthly amounts · ${period.label}`;
+
+  // Standard companies never hit this branch (format resolves to 'standard').
+  // The one Staff Salary Sheet customer gets the same sheet as their Payroll
+  // report, with Basic / Dearness editable inline.
+  if (payrollFormat === 'staff_salary_sheet') {
+    return <StaffSalarySheet editable />;
+  }
 
   return (
     <AppShell title="Salary Structure">
