@@ -10,6 +10,8 @@ import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import { useConfirm } from '@/components/ConfirmDialog';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
+import { formatAdDate } from '@/lib/calendar';
+import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, Shift, Profile, Branch, Department } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
 
@@ -95,6 +97,7 @@ export default function EmployeesPage() {
 
 function EmployeesView() {
   const confirm = useConfirm();
+  const { system } = useCalendarSystem();
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -778,6 +781,10 @@ function EmployeesView() {
                     <dt className="text-xs text-slate-400">ID</dt>
                     <dd className="font-semibold text-ink">{emp.fingerprint_id ?? '—'}</dd>
                   </div>
+                  <div>
+                    <dt className="text-xs text-slate-400">Date of Joining</dt>
+                    <dd className="text-slate-600">{emp.date_of_joining ? formatAdDate(emp.date_of_joining, system) : '—'}</dd>
+                  </div>
                   <div className="col-span-2">
                     <dt className="text-xs text-slate-400">Username</dt>
                     <dd>
@@ -949,6 +956,7 @@ function EmployeesView() {
                 <th className="px-2 py-3 text-center font-medium">ID</th>
                 <th className="px-3 py-3 text-center font-medium">Employee Name</th>
                 <th className="px-2 py-3 text-center font-medium">Username</th>
+                <th className="w-32 px-2 py-3 text-center font-medium">Date of Joining</th>
                 <th className="w-28 px-2 py-3 text-center font-medium">Branch</th>
                 <th className="w-32 px-2 py-3 text-center font-medium">Department</th>
                 <th className="w-28 px-2 py-3 text-center font-medium">Designation</th>
@@ -1038,6 +1046,9 @@ function EmployeesView() {
                       ) : (
                         <span className="text-xs text-slate-300">—</span>
                       )}
+                    </td>
+                    <td className="w-32 px-2 py-3 text-center text-xs text-slate-500">
+                      {emp.date_of_joining ? formatAdDate(emp.date_of_joining, system) : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="w-28 px-2 py-3">
                       <select
@@ -1161,7 +1172,7 @@ function EmployeesView() {
               })}
               {pageItems.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-slate-400">
+                  <td colSpan={10} className="px-3 py-8 text-center text-slate-400">
                     No employees match this filter.
                   </td>
                 </tr>
