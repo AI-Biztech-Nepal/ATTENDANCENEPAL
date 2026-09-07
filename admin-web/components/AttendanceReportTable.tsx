@@ -56,44 +56,54 @@ function fmtPunch(iso: string | null) {
   return iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '–:–';
 }
 
-/** The In / Out cell — each time coloured by how it landed vs the shift:
- * check-in amber if late / teal if early, check-out red if left early /
- * blue if left late. Plain slate when on time. Prints black. */
-function InOutCell({ row }: { row: Row }) {
-  const inClass =
-    row.lateMinutes > 0
-      ? 'font-medium text-warning-text print:text-ink'
-      : row.earlyArrivalMinutes > 0
-        ? 'font-medium text-good-text print:text-ink'
-        : 'print:text-ink';
-  const inTitle =
-    row.lateMinutes > 0
-      ? `In ${formatHoursMinutes(row.lateMinutes)} late`
-      : row.earlyArrivalMinutes > 0
-        ? `In ${formatHoursMinutes(row.earlyArrivalMinutes)} early`
-        : undefined;
-  const outClass =
-    row.earlyMinutes > 0
-      ? 'font-medium text-critical-text print:text-ink'
-      : row.lateDepartureMinutes > 0
-        ? 'font-medium text-info-text print:text-ink'
-        : 'print:text-ink';
-  const outTitle =
-    row.earlyMinutes > 0
-      ? `Out ${formatHoursMinutes(row.earlyMinutes)} early`
-      : row.lateDepartureMinutes > 0
-        ? `Out ${formatHoursMinutes(row.lateDepartureMinutes)} late`
-        : undefined;
+/** The Check-In cell — the punch time in its own column, coloured by how
+ * it landed vs the shift (amber if late, teal if early), with the amount
+ * late/early spelled out on a second line. Plain slate when on time, or
+ * when there's no punch. Prints black. Mirrors the employee's Payroll
+ * detail page so the two reports read the same way. */
+function CheckInCell({ row }: { row: Row }) {
+  const late = row.lateMinutes > 0;
+  const early = row.earlyArrivalMinutes > 0;
+  const timeClass = late
+    ? 'font-medium text-warning-text print:text-ink'
+    : early
+      ? 'font-medium text-good-text print:text-ink'
+      : 'text-slate-600 print:text-ink';
   return (
-    <>
-      <span className={inClass} title={inTitle}>
-        {fmtPunch(row.checkIn)}
-      </span>
-      {' – '}
-      <span className={outClass} title={outTitle}>
-        {fmtPunch(row.checkOut)}
-      </span>
-    </>
+    <span className="flex flex-col leading-tight">
+      <span className={timeClass}>{fmtPunch(row.checkIn)}</span>
+      {late && (
+        <span className="text-[10px] font-medium text-warning-text print:text-ink">Late {formatHoursMinutes(row.lateMinutes)}</span>
+      )}
+      {early && (
+        <span className="text-[10px] font-medium text-good-text print:text-ink">Early {formatHoursMinutes(row.earlyArrivalMinutes)}</span>
+      )}
+    </span>
+  );
+}
+
+/** The Check-Out cell — the punch time in its own column, coloured by how
+ * it landed vs the shift (red if left early, blue if left late), with the
+ * amount early/late spelled out on a second line. Plain slate when on
+ * time, or when there's no punch. Prints black. */
+function CheckOutCell({ row }: { row: Row }) {
+  const earlyOut = row.earlyMinutes > 0;
+  const lateOut = row.lateDepartureMinutes > 0;
+  const timeClass = earlyOut
+    ? 'font-medium text-critical-text print:text-ink'
+    : lateOut
+      ? 'font-medium text-info-text print:text-ink'
+      : 'text-slate-600 print:text-ink';
+  return (
+    <span className="flex flex-col leading-tight">
+      <span className={timeClass}>{fmtPunch(row.checkOut)}</span>
+      {earlyOut && (
+        <span className="text-[10px] font-medium text-critical-text print:text-ink">Early {formatHoursMinutes(row.earlyMinutes)}</span>
+      )}
+      {lateOut && (
+        <span className="text-[10px] font-medium text-info-text print:text-ink">Late {formatHoursMinutes(row.lateDepartureMinutes)}</span>
+      )}
+    </span>
   );
 }
 
@@ -480,7 +490,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">ID</th>
               <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Employee</th>
               <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Shift</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">In / Out</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Check-In</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Check-Out</th>
               <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Work Hours</th>
               <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Overtime</th>
               <th className="whitespace-nowrap px-2 py-1.5 font-medium print:w-16 print:border print:border-slate-400 print:px-1 print:py-1">Status</th>
@@ -495,7 +506,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className="whitespace-nowrap px-2 py-1 font-medium text-ink print:border print:border-slate-400 print:px-2 print:py-1">{r.employeeName}</td>
                 <td className="px-2 py-1 whitespace-nowrap text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.shiftLabel}</td>
                 <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
-                  <InOutCell row={r} />
+                  <CheckInCell row={r} />
+                </td>
+                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                  <CheckOutCell row={r} />
                 </td>
                 <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.hours)}
@@ -514,7 +528,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={10} className="px-4 py-6 text-center text-slate-400">
                   {loading ? 'Loading…' : 'No records in this range.'}
                 </td>
               </tr>
@@ -526,6 +540,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td colSpan={4} className="whitespace-nowrap px-2 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 print:border print:border-slate-400 print:px-2 print:text-[10px] print:text-ink">
                   Total
                 </td>
+                <td className="print:border print:border-slate-400" />
                 <td className="print:border print:border-slate-400" />
                 <td className="whitespace-nowrap px-2 py-1.5 print:border print:border-slate-400 print:px-2">{fmtHrs(totals.workHours)}</td>
                 <td className="whitespace-nowrap px-2 py-1.5 print:border print:border-slate-400 print:px-2">{fmtHrs(totals.overtimeHours)}</td>
