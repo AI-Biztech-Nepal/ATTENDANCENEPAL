@@ -108,27 +108,33 @@ function CheckOutCell({ row }: { row: Row }) {
 
 /** Both ends of the day's punctuality in one column: how far the arrival
  * missed the shift start, and under it how far the departure missed the
- * shift end. Stacked rather than run together on one line — side by side
- * the two amounts read as one confusing phrase ("Early 0h 6m Late 0h 4m")
- * with only colour telling you where the first ends and the second begins;
- * on their own lines the arrival is always the top one. Each keeps its own
- * colour — amber arrived late, teal arrived early, red left early, blue
- * stayed late. Early arrival and late departure are carried here rather
- * than dropped: they're the same measurements signed the other way, and a
- * day that started early is not the same as one that started on time. An
- * em dash when both ends landed exactly on the shift, or there are no
- * punches to compare. */
+ * shift end.
+ *
+ * Each line names its end — "Late In", "Early In", "Late Out", "Early Out"
+ * — rather than just "Late"/"Early". Two stacked lines both reading "Late
+ * 0h 30m / Late 0h 4m" left colour and row position as the only clue to
+ * which was the arrival and which the departure, which is unreadable in
+ * print (every tone flattens to black) and invisible to anyone who doesn't
+ * know the colour code. The colours stay as a fast second signal — amber
+ * arrived late, teal arrived early, red left early, blue stayed late — but
+ * nothing depends on them any more.
+ *
+ * Early arrival and late departure are carried here rather than dropped:
+ * they're the same measurements signed the other way, and a day that
+ * started early is not the same as one that started on time. An em dash
+ * when both ends landed exactly on the shift, or there are no punches to
+ * compare. */
 function LateEarlyCell({ row }: { row: Row }) {
   const parts: { key: string; text: string; tone: string }[] = [];
   if (row.lateMinutes > 0) {
-    parts.push({ key: 'in', text: `Late ${formatHoursMinutes(row.lateMinutes)}`, tone: 'text-warning-text' });
+    parts.push({ key: 'in', text: `Late In ${formatHoursMinutes(row.lateMinutes)}`, tone: 'text-warning-text' });
   } else if (row.earlyArrivalMinutes > 0) {
-    parts.push({ key: 'in', text: `Early ${formatHoursMinutes(row.earlyArrivalMinutes)}`, tone: 'text-good-text' });
+    parts.push({ key: 'in', text: `Early In ${formatHoursMinutes(row.earlyArrivalMinutes)}`, tone: 'text-good-text' });
   }
   if (row.earlyMinutes > 0) {
-    parts.push({ key: 'out', text: `Early ${formatHoursMinutes(row.earlyMinutes)}`, tone: 'text-critical-text' });
+    parts.push({ key: 'out', text: `Early Out ${formatHoursMinutes(row.earlyMinutes)}`, tone: 'text-critical-text' });
   } else if (row.lateDepartureMinutes > 0) {
-    parts.push({ key: 'out', text: `Late ${formatHoursMinutes(row.lateDepartureMinutes)}`, tone: 'text-info-text' });
+    parts.push({ key: 'out', text: `Late Out ${formatHoursMinutes(row.lateDepartureMinutes)}`, tone: 'text-info-text' });
   }
   if (parts.length === 0) return <span className="text-slate-300 print:text-ink">—</span>;
   return (
