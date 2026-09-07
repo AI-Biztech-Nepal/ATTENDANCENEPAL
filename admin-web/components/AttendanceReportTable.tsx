@@ -48,11 +48,6 @@ type Row = {
   earlyMinutes: number;
   lateDepartureMinutes: number;
   overtime: number;
-  /** No payroll_summaries row yet (only computed by the nightly job or
-   * "Recalculate month" on the Payroll page) — late/early/hours/overtime
-   * here are computed live client-side from the raw punches (same math,
-   * see lib/shift.ts) rather than left blank until that job runs. */
-  pending?: boolean;
 };
 
 /** Decimal hours -> "Xh Ym". */
@@ -111,16 +106,18 @@ function CheckOutCell({ row }: { row: Row }) {
   return <span className={timeClass}>{fmtPunch(row.checkOut)}</span>;
 }
 
-/** Both ends of the day's punctuality in one column, on one line: how far
- * the arrival missed the shift start and how far the departure missed the
- * shift end, joined by a middot when a day was off at both ends. Each half
- * keeps its own colour — amber arrived late, teal arrived early, red left
- * early, blue stayed late — so which end is off still reads at a glance
- * without a second column to scan. Early arrival and late departure are
- * carried here rather than dropped: they're the same measurements signed
- * the other way, and a day that started early is not the same as one that
- * started on time. An em dash when both ends landed exactly on the shift,
- * or there are no punches to compare. */
+/** Both ends of the day's punctuality in one column: how far the arrival
+ * missed the shift start, and under it how far the departure missed the
+ * shift end. Stacked rather than run together on one line — side by side
+ * the two amounts read as one confusing phrase ("Early 0h 6m Late 0h 4m")
+ * with only colour telling you where the first ends and the second begins;
+ * on their own lines the arrival is always the top one. Each keeps its own
+ * colour — amber arrived late, teal arrived early, red left early, blue
+ * stayed late. Early arrival and late departure are carried here rather
+ * than dropped: they're the same measurements signed the other way, and a
+ * day that started early is not the same as one that started on time. An
+ * em dash when both ends landed exactly on the shift, or there are no
+ * punches to compare. */
 function LateEarlyCell({ row }: { row: Row }) {
   const parts: { key: string; text: string; tone: string }[] = [];
   if (row.lateMinutes > 0) {
@@ -135,11 +132,10 @@ function LateEarlyCell({ row }: { row: Row }) {
   }
   if (parts.length === 0) return <span className="text-slate-300 print:text-ink">—</span>;
   return (
-    <span className="whitespace-nowrap">
-      {parts.map((p, i) => (
-        <span key={p.key}>
-          {i > 0 && <span className="text-slate-300 print:text-ink"> · </span>}
-          <span className={`font-medium ${p.tone} print:text-ink`}>{p.text}</span>
+    <span className="flex flex-col leading-tight">
+      {parts.map(p => (
+        <span key={p.key} className={`whitespace-nowrap font-medium ${p.tone} print:text-ink`}>
+          {p.text}
         </span>
       ))}
     </span>
@@ -244,7 +240,18 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const weeklyPattern = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
   const rows: Row[] = useMemo(() => {
-    const deviceName = (id: string | null) => devices.find(d => d.id === id)?.name ?? 'Mobile / QR / Selfie';
+    // Where the day's attendance actually came from: the registered
+    // terminal's own name for a machine punch (method 'zkteco'), or "App"
+    // for one recorded in the mobile app (gps / qr / selfie). Read from the
+    // day's first punch rather than from device_id alone — a null device_id
+    // was the old proxy for "not a machine", but it says nothing about which
+    // flow was used and mislabels a machine punch whose device row has since
+    // been deleted. Em dash when there are no punches to attribute.
+    const punchSource = (log: AttendanceLog | undefined) => {
+      if (!log) return '—';
+      if (log.method === 'zkteco') return devices.find(d => d.id === log.device_id)?.name ?? 'Machine';
+      return 'App';
+    };
     const days: string[] = [];
     const cur = new Date(from + 'T00:00:00Z');
     const end = new Date(to + 'T00:00:00Z');
@@ -303,7 +310,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             date: day,
             enrollId: emp.fingerprint_id ?? '—',
             employeeName: emp.name,
-            device: deviceName(dayLogs[0]?.device_id ?? null),
+            device: punchSource(dayLogs[0]),
             shiftLabel,
             shiftName,
             shiftTime,
@@ -329,7 +336,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             date: day,
             enrollId: emp.fingerprint_id ?? '—',
             employeeName: emp.name,
-            device: deviceName(dayLogs[0].device_id ?? null),
+            device: punchSource(dayLogs[0]),
             shiftLabel,
             shiftName,
             shiftTime,
@@ -342,7 +349,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             earlyMinutes: emp.attendance_exempt ? 0 : live.earlyMinutes,
             lateDepartureMinutes: emp.attendance_exempt ? 0 : live.lateDepartureMinutes,
             overtime: live.overtimeMinutes / 60,
-            pending: true,
           });
         } else {
           // A company Week-off, a per-employee roster Week Off, or an
@@ -587,11 +593,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 </td>
                 <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.hours)}
-                  {r.pending && <span className="ml-1 text-[9px] text-slate-400 print:hidden">(live)</span>}
                 </td>
                 <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.overtime)}
-                  {r.pending && <span className="ml-1 text-[9px] text-slate-400 print:hidden">(live)</span>}
                 </td>
                 <td className="whitespace-nowrap px-2 py-1 print:w-20 print:border print:border-slate-400 print:px-1 print:py-1">
                   <span className="print:hidden">{statusBadge(r)}</span>
