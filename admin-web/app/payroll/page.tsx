@@ -29,13 +29,14 @@ import {
   resolveShiftForDate,
   type DailyShiftByDate,
 } from '@/lib/shift';
+import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import {
   DEFAULT_PAYROLL_REPORT_COLUMNS,
-  fetchMyCompanyWeekOffConfig,
-  leaveDatesByEmployee,
-  weekOffDatesByGender,
+  loadPayrollReportColumns,
+  normalizePayrollReportColumns,
+  PAYROLL_REPORT_COLUMNS_KEY,
   type PayrollReportColumns,
-} from '@/lib/weekOff';
+} from '@/lib/payrollReportColumns';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
@@ -86,11 +87,28 @@ export default function PayrollPage() {
   // Null until resolved. One customer runs a completely different
   // fixed-salary report (StaffSalarySheet) instead of this one.
   const [payrollFormat, setPayrollFormat] = useState<PayrollFormat | null>(null);
-  // Optional columns hidden from the report. The choice is company-wide and
-  // set on the Salary Structure page now (companies.payroll_report_columns) —
-  // this page only reads it. A hidden column is dropped from the table AND
-  // from the printed / PDF copy — it's simply not rendered, not print:hidden.
+  // Optional columns hidden from the report. The switches live on the Salary
+  // Structure page (the cog above its table); this page only reads the saved
+  // choice (localStorage, see lib/payrollReportColumns). A hidden column is
+  // dropped from the table AND from the printed / PDF copy — it's simply not
+  // rendered, not print:hidden. Loaded in an effect (not useState init) so
+  // server render and first client render match; a `storage` listener keeps
+  // an open report tab in sync when the choice is changed elsewhere.
   const [visibleCols, setVisibleCols] = useState<PayrollReportColumns>(DEFAULT_PAYROLL_REPORT_COLUMNS);
+
+  useEffect(() => {
+    setVisibleCols(loadPayrollReportColumns());
+    function onStorage(e: StorageEvent) {
+      if (e.key !== PAYROLL_REPORT_COLUMNS_KEY) return;
+      try {
+        setVisibleCols(e.newValue ? normalizePayrollReportColumns(JSON.parse(e.newValue)) : DEFAULT_PAYROLL_REPORT_COLUMNS);
+      } catch {
+        setVisibleCols(DEFAULT_PAYROLL_REPORT_COLUMNS);
+      }
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   // Whether Total Salary / Net Payable are prorated by actual hours/days
   // worked ('attendance', the long-standing default) or just pay everyone
   // their full stored Basic every period regardless of attendance ('flat',
@@ -135,7 +153,7 @@ export default function PayrollPage() {
   // The oldest/newest punch on record — bounds the period dropdown to
   // months that actually have data instead of listing years of empty ones.
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ companyId, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate, overtimeRate, payrollReportColumns }) => {
+    fetchMyCompanyWeekOffConfig().then(({ companyId, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate, overtimeRate }) => {
       setCompanyId(companyId);
       setWeeklyOffDay(weeklyOffDay);
       setOtHoursPerDay(otHoursPerDay);
@@ -144,7 +162,6 @@ export default function PayrollPage() {
       setSsfRate(ssfRate);
       setSsfByEmployeeRate(tdsRate);
       setOvertimeAllowanceRate(overtimeRate);
-      setVisibleCols(payrollReportColumns);
       // Not date-scoped (a pattern applies to every week), and only ever
       // relevant in 'weekly' roster_mode — see resolveShiftForDate().
       if (rosterMode === 'weekly') {

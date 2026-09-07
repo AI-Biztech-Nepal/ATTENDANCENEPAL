@@ -16,11 +16,13 @@ import {
   type CalendarPeriod,
 } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
+import { fetchMyCompanyWeekOffConfig } from '@/lib/weekOff';
 import {
   DEFAULT_PAYROLL_REPORT_COLUMNS,
-  fetchMyCompanyWeekOffConfig,
+  loadPayrollReportColumns,
+  savePayrollReportColumns,
   type PayrollReportColumns,
-} from '@/lib/weekOff';
+} from '@/lib/payrollReportColumns';
 import type { Employee } from '@/lib/types';
 
 /** The one place a company's salary structure is set: the three contribution
@@ -63,14 +65,17 @@ export default function SalaryStructurePage() {
   // by the number of days in the selected period's calendar month.
   const [viewMode, setViewMode] = useState<'monthly' | 'perDay'>('monthly');
 
-  // Which optional columns the monthly Payroll report shows
-  // (companies.payroll_report_columns). Set here — the cog menu in the table
-  // header — and only read by the Payroll report. Each toggle persists
-  // immediately (optimistic), company-wide, admin-only.
+  // Which optional columns the monthly Payroll report shows. Set here — the
+  // cog above this table — and read by the Payroll report. Persisted in
+  // localStorage (lib/payrollReportColumns), so it takes effect immediately
+  // and needs no migration; loaded in an effect so SSR and first render agree.
   const [reportCols, setReportCols] = useState<PayrollReportColumns>(DEFAULT_PAYROLL_REPORT_COLUMNS);
-  const [savingReportCols, setSavingReportCols] = useState(false);
   const [reportColsOpen, setReportColsOpen] = useState(false);
   const reportColsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setReportCols(loadPayrollReportColumns());
+  }, []);
 
   useEffect(() => {
     if (!reportColsOpen) return;
@@ -105,14 +110,13 @@ export default function SalaryStructurePage() {
       setIsAdmin(profile?.role === 'admin');
     });
 
-    fetchMyCompanyWeekOffConfig().then(({ companyId, pfRate, ssfRate, tdsRate, overtimeRate, payrollReportColumns }) => {
+    fetchMyCompanyWeekOffConfig().then(({ companyId, pfRate, ssfRate, tdsRate, overtimeRate }) => {
       setCompanyId(companyId);
       setSavedRates({ pf: pfRate, ssf: ssfRate, tds: tdsRate, overtime: overtimeRate });
       setPfDraft(String(pfRate));
       setSsfDraft(String(ssfRate));
       setTdsDraft(String(tdsRate));
       setOvertimeDraft(String(overtimeRate));
-      setReportCols(payrollReportColumns);
     });
 
     supabase
@@ -214,20 +218,15 @@ export default function SalaryStructurePage() {
     setSavedRates({ pf, ssf, tds, overtime });
   }
 
-  // Each column toggle saves on its own, right away — no dirty state. The
-  // whole map is written every time (jsonb column), so a half-written value
-  // can't happen. Reverts the optimistic flip if the write fails.
-  async function toggleReportCol(key: keyof PayrollReportColumns) {
-    if (!companyId || savingReportCols) return;
-    const next = { ...reportCols, [key]: !reportCols[key] };
-    setReportCols(next);
-    setSavingReportCols(true);
-    const { error } = await supabase.from('companies').update({ payroll_report_columns: next }).eq('id', companyId);
-    setSavingReportCols(false);
-    if (error) {
-      setReportCols(reportCols);
-      alert(`Could not save: ${error.message}`);
-    }
+  // Each switch takes effect at once — flip it, save the whole map to
+  // localStorage. The Payroll report reads it on its next load, or live via
+  // a `storage` event if it's already open in another tab.
+  function toggleReportCol(key: keyof PayrollReportColumns) {
+    setReportCols(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      savePayrollReportColumns(next);
+      return next;
+    });
   }
 
   function cancelRates() {
@@ -408,9 +407,8 @@ export default function SalaryStructurePage() {
                 <button
                   key={key}
                   type="button"
-                  disabled={savingReportCols}
                   onClick={() => toggleReportCol(key)}
-                  className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm text-ink hover:bg-slate-50 disabled:opacity-60"
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm text-ink hover:bg-slate-50"
                 >
                   {label}
                   <span className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-good' : 'bg-slate-300'}`}>
