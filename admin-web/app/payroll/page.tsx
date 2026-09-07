@@ -109,12 +109,18 @@ export default function PayrollPage() {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
-  // Whether Total Salary / Net Payable are prorated by actual hours/days
-  // worked ('attendance', the long-standing default) or just pay everyone
-  // their full stored Basic every period regardless of attendance ('flat',
-  // same idea as StaffSalarySheet's fixed-salary model) — a per-view choice,
-  // not persisted, so switching back to 'attendance' is always one click.
-  const [salaryMode, setSalaryMode] = useState<'attendance' | 'flat'>('attendance');
+  // How Basic is turned into this period's pay:
+  //  'hourly' — monthly Basic ÷ (working days × hours/day) = an hourly rate,
+  //             paid per hour actually worked (+ a clean day per paid-off day).
+  //             The long-standing default; a partial day pays partial.
+  //  'daily'  — monthly Basic ÷ working days = a day rate, paid per day present
+  //             (a partial day still counts as a whole day) + each paid-off day.
+  //  'flat'   — ignore attendance, pay the full stored Basic every period
+  //             (StaffSalarySheet's fixed-salary model).
+  // "Working days" = calendar days in the period − weekly-offs − holidays, so a
+  // full month of attendance earns exactly the full Basic. A per-view choice,
+  // not persisted.
+  const [salaryMode, setSalaryMode] = useState<'hourly' | 'daily' | 'flat'>('hourly');
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
   // The Overtime toggle drives two columns (Overtime hours + Overtime
@@ -313,7 +319,18 @@ export default function PayrollPage() {
         overtime: number;
         lateDays: number;
         earlyDays: number;
+        /** Punchless-but-paid days: company Week-off + approved Leave. Used for
+         * the absent-days headline. */
         paidOffDays: number;
+        /** Approved-Leave days that fall on a working day (a subset of
+         * paidOffDays, minus the week-offs). Only these earn extra pay on top
+         * of days present — week-offs are already priced into the working-days
+         * divisor below. */
+        paidLeaveDays: number;
+        /** Days in the period that count toward a full month's pay: calendar
+         * days minus this employee's weekly-offs and (gender-scoped) holidays.
+         * The divisor for the per-day / per-hour rate. */
+        workingDays: number;
       }
     >();
     for (const emp of scopedEmployees) {
@@ -329,6 +346,8 @@ export default function PayrollPage() {
         lateDays: 0,
         earlyDays: 0,
         paidOffDays: 0,
+        paidLeaveDays: 0,
+        workingDays: Math.max(1, Math.round(daysInRange) - weekOffDatesFor(emp.gender).size),
       });
     }
 
@@ -377,8 +396,14 @@ export default function PayrollPage() {
           // from `hours`/`days` (which stay a pure worked-attendance count)
           // and added as its own credit in calculatedSalary() below.
           const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
-          if (isWeekOff(resolved) || leaveByEmployee.get(emp.id)?.has(day)) {
+          const offDay = isWeekOff(resolved);
+          const onLeave = leaveByEmployee.get(emp.id)?.has(day) ?? false;
+          if (offDay || onLeave) {
             row.paidOffDays += 1;
+            // Leave on an actual working day is the only paid-off day that
+            // earns pay on top of days present — a week-off is already covered
+            // by dividing Basic over working days, not calendar days.
+            if (onLeave && !offDay) row.paidLeaveDays += 1;
           }
           continue;
         }
@@ -394,7 +419,7 @@ export default function PayrollPage() {
       }
     }
     return Array.from(map.values()).sort((a, b) => a.enrollId.localeCompare(b.enrollId, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [summaries, logs, shifts, scopedEmployees, start, end, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
+  }, [summaries, logs, shifts, scopedEmployees, start, end, daysInRange, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
 
   const totals = useMemo(() => {
     const totalHours = byEmployee.reduce((s, r) => s + r.hours, 0);
@@ -408,11 +433,7 @@ export default function PayrollPage() {
     const attendancePct = possibleDays ? Math.round((workedDays / possibleDays) * 1000) / 10 : 0;
     const totalEmployeeSalary = byEmployee.reduce((s, r) => s + (r.salary ?? 0), 0);
     const totalSalaryPayable = byEmployee.reduce((s, r) => s + (calculatedSalary(r) ?? 0), 0);
-    const totalOvertimeSalary = byEmployee.reduce((s, r) => {
-      if (r.salary == null || r.overtime <= 0) return s;
-      const hourlyRate = r.salary / (daysInRange * otHoursPerDay);
-      return s + hourlyRate * otMultiplier * r.overtime;
-    }, 0);
+    const totalOvertimeSalary = byEmployee.reduce((s, r) => s + (overtimeSalary(r) ?? 0), 0);
     const totalAllowance = byEmployee.reduce((s, r) => s + r.allowance, 0);
     const totalPf = byEmployee.reduce((s, r) => s + (pfDeduction(r) ?? 0), 0);
     const totalSsf = byEmployee.reduce((s, r) => s + (ssfDeduction(r) ?? 0), 0);
@@ -439,37 +460,45 @@ export default function PayrollPage() {
     };
   }, [byEmployee, scopedEmployees, daysInRange, elapsedDaysInRange, otHoursPerDay, otMultiplier, pfRate, ssfRate, ssfByEmployeeRate, overtimeAllowanceRate, salaryMode]);
 
-  // Pay is earned per hour actually worked, not per day shown up — a day
-  // where someone left after 2 hours pays 2 hours, not a full day's worth.
-  // Overtime hours are already counted inside `hours` (see computeDayStatus),
-  // so they're subtracted back out here and paid separately below at the
-  // overtime multiplier instead of twice at the regular rate.
+  // Row shape the pay math needs — a `byEmployee` entry.
+  type PayRow = (typeof byEmployee)[number];
+
+  // Basic → this period's earned pay, per the `salaryMode` picked above.
+  // The rate divisor is the employee's WORKING days (calendar days − weekly-offs
+  // − holidays), so a full month of attendance earns exactly the full Basic.
   //
-  // paidOffDays (company Week-off / approved Leave with no punch) each add
-  // one full standard day's pay — hourlyRate * otHoursPerDay is exactly
-  // salary / daysInRange, i.e. one clean day of the monthly salary — kept as
-  // a separate term rather than folded into `hours` so "Total Hours" keeps
-  // meaning actual worked hours.
-  function calculatedSalary(row: { salary: number | null; hours: number; overtime: number; paidOffDays: number }): number | null {
+  //  hourly: rate = Basic / (workingDays × hours/day); pay = rate × hours
+  //          actually worked. Overtime hours (already inside `hours`) are taken
+  //          back out and paid separately below at the multiplier. Each paid
+  //          Leave day on a working day adds one clean standard day = rate ×
+  //          hours/day (week-offs are already priced into the divisor).
+  //  daily:  rate = Basic / workingDays; pay = rate × (days present + paid
+  //          Leave days). A partial day still counts as one whole day.
+  //  flat:   the full stored Basic, attendance ignored.
+  function calculatedSalary(row: PayRow): number | null {
     if (row.salary == null) return null;
-    // Flat mode ignores attendance entirely — everyone gets their full
-    // stored Basic every period, same idea as StaffSalarySheet.
     if (salaryMode === 'flat') return row.salary;
-    const hourlyRate = row.salary / (daysInRange * otHoursPerDay);
+    const divisorDays = Math.max(1, row.workingDays);
+    if (salaryMode === 'daily') {
+      const dayRate = row.salary / divisorDays;
+      return Math.round(dayRate * (row.days + row.paidLeaveDays));
+    }
+    const hourlyRate = row.salary / (divisorDays * otHoursPerDay);
     const regularHours = Math.max(0, row.hours - row.overtime);
-    return Math.round(hourlyRate * regularHours + hourlyRate * otHoursPerDay * row.paidOffDays);
+    return Math.round(hourlyRate * regularHours + hourlyRate * otHoursPerDay * row.paidLeaveDays);
   }
 
-  function overtimeSalary(row: { salary: number | null; overtime: number }): number | null {
+  // Overtime is always paid by the hour (even in 'daily' mode) — it's extra
+  // hours, not extra days — at the working-days hourly rate × the multiplier.
+  function overtimeSalary(row: PayRow): number | null {
     if (row.salary == null) return null;
-    // No overtime concept in flat mode — pay isn't derived from hours at all.
     if (salaryMode === 'flat') return 0;
     if (row.overtime <= 0) return 0;
-    const hourlyRate = row.salary / (daysInRange * otHoursPerDay);
+    const hourlyRate = row.salary / (Math.max(1, row.workingDays) * otHoursPerDay);
     return Math.round(hourlyRate * otMultiplier * row.overtime);
   }
 
-  function totalSalary(row: { salary: number | null; hours: number; overtime: number; paidOffDays: number }): number | null {
+  function totalSalary(row: PayRow): number | null {
     const calculated = calculatedSalary(row);
     if (calculated == null) return null;
     // Hiding the Overtime column also takes overtime pay out of the total —
@@ -484,7 +513,7 @@ export default function PayrollPage() {
   // flat monthly Basic — so these shrink for a partial/absent period the
   // same way the pay itself does. Overtime Allowance is a flat % add-on,
   // distinct from the hours-based Overtime Salary already in this report.
-  function netPayableBase(row: { salary: number | null; hours: number; overtime: number; paidOffDays: number }): number | null {
+  function netPayableBase(row: PayRow): number | null {
     const calculated = calculatedSalary(row);
     if (calculated == null) return null;
     return calculated + (overtimeSalary(row) ?? 0);
@@ -762,22 +791,27 @@ export default function PayrollPage() {
             <h2 className="text-lg font-bold text-ink">{period.label} Salary Report</h2>
           </div>
 
-          <div className="flex items-center gap-1.5" title="Whether Total Salary / Net Payable prorate for attendance, or pay everyone's full stored Basic every period regardless">
+          <div
+            className="flex items-center gap-1.5"
+            title="How Basic becomes this period's pay: per hour worked, per day present, or the full stored Basic regardless of attendance. The per-hour / per-day rate divides Basic by the month's working days (calendar days minus weekly-offs and holidays)."
+          >
             <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs font-semibold shadow-sm">
-              <button
-                type="button"
-                onClick={() => setSalaryMode('attendance')}
-                className={`px-3 py-2 ${salaryMode === 'attendance' ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-              >
-                Attendance-based
-              </button>
-              <button
-                type="button"
-                onClick={() => setSalaryMode('flat')}
-                className={`px-3 py-2 ${salaryMode === 'flat' ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
-              >
-                Flat Monthly
-              </button>
+              {(
+                [
+                  ['hourly', 'Per Hour'],
+                  ['daily', 'Per Day'],
+                  ['flat', 'Flat Monthly'],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setSalaryMode(mode)}
+                  className={`px-3 py-2 ${salaryMode === mode ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
