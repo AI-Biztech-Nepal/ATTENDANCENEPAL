@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -8,6 +8,7 @@ import AppShell from '@/components/AppShell';
 import Badge from '@/components/Badge';
 import TimingPair, { TimingCell, TimingTotal } from '@/components/PunctualityCell';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import StatusText from '@/components/StatusText';
 import { buildMonth, formatAdDate, formatDdMmYyyy, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -59,6 +60,7 @@ export default function PayrollEmployeeDetailPage() {
 
 function PayrollEmployeeDetailView() {
   const { system } = useCalendarSystem();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const params = useParams<{ employeeId: string }>();
   const searchParams = useSearchParams();
   const employeeId = params.employeeId;
@@ -470,7 +472,8 @@ function PayrollEmployeeDetailView() {
               </table>
             </div>
 
-            <div className="mt-4 hidden overflow-x-auto pb-2 md:block print:!block print:overflow-visible">
+            <HorizontalScrollButtons targetRef={tableScrollRef} />
+            <div ref={tableScrollRef} className="mt-4 hidden overflow-x-auto pb-2 md:block print:!block print:overflow-visible">
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-y border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">

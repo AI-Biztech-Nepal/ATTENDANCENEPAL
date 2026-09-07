@@ -9,6 +9,7 @@ import WeeklyRosterGrid from '@/components/WeeklyRosterGrid';
 import WeeklyPatternGrid from '@/components/WeeklyPatternGrid';
 import MonthlyRosterGrid from '@/components/MonthlyRosterGrid';
 import { useConfirm } from '@/components/ConfirmDialog';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import type { Employee, Shift } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, type RosterMode } from '@/lib/weekOff';
@@ -70,12 +71,15 @@ export default function ShiftsPage() {
 
 function ShiftsView() {
   const confirm = useConfirm();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const initialTabParam = searchParams.get('tab');
   const initialTab = initialTabParam === 'roster' ? 'roster' : initialTabParam === 'monthly' ? 'monthly' : 'templates';
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [rosterEmployeeIds, setRosterEmployeeIds] = useState<Set<string>>(new Set());
+  const [dailyRows, setDailyRows] = useState<{ employee_id: string; shift_id: string | null }[]>([]);
+  const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -89,8 +93,15 @@ function ShiftsView() {
     supabase.from('employees').select('*').eq('status', 'active').then(({ data }) => setEmployees(data ?? []));
     supabase
       .from('employee_daily_shifts')
-      .select('employee_id')
-      .then(({ data }) => setRosterEmployeeIds(new Set((data ?? []).map(r => r.employee_id))));
+      .select('employee_id, shift_id')
+      .then(({ data }) => {
+        setDailyRows(data ?? []);
+        setRosterEmployeeIds(new Set((data ?? []).map(r => r.employee_id)));
+      });
+    supabase
+      .from('employee_weekly_pattern')
+      .select('employee_id, weekday, shift_id')
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
     fetchMyCompanyWeekOffConfig().then(({ companyId, rosterMode }) => {
       setCompanyId(companyId);
       setRosterMode(rosterMode);
@@ -100,14 +111,53 @@ function ShiftsView() {
 
   const templateShifts = useMemo(() => shifts.filter(s => s.employee_id === null), [shifts]);
 
+  // employee_id -> set of every real (non-Week-Off) shift_id they've ever
+  // been put on via the roster that's actually active for this company
+  // (employee_daily_shifts for 'monthly' mode, employee_weekly_pattern for
+  // 'weekly' — RosterModeSwitch keeps both tables around across a switch,
+  // so only reading the active one avoids resurrecting stale counts from a
+  // mode this company isn't using any more).
+  const shiftEmployeeIds = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    function add(shiftId: string | null, employeeId: string) {
+      if (!shiftId) return;
+      let set = map.get(shiftId);
+      if (!set) {
+        set = new Set();
+        map.set(shiftId, set);
+      }
+      set.add(employeeId);
+    }
+    if (rosterMode === 'weekly') {
+      for (const r of weeklyPatternRows) add(r.shift_id, r.employee_id);
+    } else {
+      for (const r of dailyRows) add(r.shift_id, r.employee_id);
+    }
+    return map;
+  }, [rosterMode, weeklyPatternRows, dailyRows]);
+
+  // Employees on the Weekly/Monthly Roster work a different shift on
+  // different days, so resolveShift() alone (each employee's static
+  // fallback: their own override, else their department's, else Default)
+  // never reflects what a roster-driven company is actually running —
+  // every real shift template showed "0 employees" no matter how many
+  // people were ever put on it. Counting everyone the roster has EVER
+  // assigned to a shift (under every shift they've ever worked, not just
+  // one) only falls back to the static default for someone with no roster
+  // history at all.
   const countsByShift = useMemo(() => {
     const counts = new Map<string, number>();
     for (const emp of employees) {
-      const shift = resolveShift(emp, shifts);
-      counts.set(shift.id, (counts.get(shift.id) ?? 0) + 1);
+      const assignedShiftIds = [...shiftEmployeeIds.entries()].filter(([, ids]) => ids.has(emp.id)).map(([shiftId]) => shiftId);
+      if (assignedShiftIds.length > 0) {
+        for (const shiftId of assignedShiftIds) counts.set(shiftId, (counts.get(shiftId) ?? 0) + 1);
+      } else {
+        const shift = resolveShift(emp, shifts);
+        counts.set(shift.id, (counts.get(shift.id) ?? 0) + 1);
+      }
     }
     return counts;
-  }, [employees, shifts]);
+  }, [employees, shifts, shiftEmployeeIds]);
 
   // Shift *templates* are edited above; here we only pick which template (if
   // any) applies to this one employee — an upsert into the same
@@ -254,7 +304,8 @@ function ShiftsView() {
 
       <div className="mt-8 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <h2 className="mb-4 text-base font-semibold text-ink">All Shifts</h2>
-        <div className="overflow-x-auto">
+        <HorizontalScrollButtons targetRef={tableScrollRef} />
+        <div ref={tableScrollRef} className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">

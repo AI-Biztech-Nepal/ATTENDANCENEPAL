@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
 import Badge from '@/components/Badge';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalDateKey, nepalDateTimeToUtcMs, nepalTodayIso, punchMinuteOfDay, punchTypeLabel, selectDayPunches } from '@/lib/shift';
@@ -35,6 +36,7 @@ type UnifiedRequest =
 
 export default function CorrectionsPage() {
   const { system } = useCalendarSystem();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [requests, setRequests] = useState<CorrectionRequest[]>([]);
   const [gpsRequests, setGpsRequests] = useState<AttendanceGpsRequest[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -314,7 +316,8 @@ export default function CorrectionsPage() {
           {filtered.length === 0 && <p className="p-8 text-center text-sm text-slate-400">No {filter !== 'All' ? filter : ''} requests.</p>}
         </div>
 
-        <div className="hidden overflow-x-auto md:block">
+        <HorizontalScrollButtons targetRef={tableScrollRef} />
+        <div ref={tableScrollRef} className="hidden overflow-x-auto md:block">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">

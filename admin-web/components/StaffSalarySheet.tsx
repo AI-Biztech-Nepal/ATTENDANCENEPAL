@@ -5,16 +5,14 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPeriod, type CalendarPeriod } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildEmployeeDayRows } from '@/lib/payrollDetail';
 import { buildWeeklyPatternByEmployee, formatHoursMinutes, nepalTodayIso, type DailyShiftByDate } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
-import { fetchStaffSheetConfig, type StaffSheetConfig } from '@/lib/payrollFormat';
 import type { AttendanceLog, Branch, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
-
-const DEFAULT_CFG: StaffSheetConfig = { ssfEmployerRate: 20, ssfEmployeeRate: 11, otHoursPerDay: 8, otMultiplier: 1.5 };
 
 function money(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -36,40 +34,34 @@ const ATTENDANCE_COLUMNS = [
 ] as const;
 type AttendanceColKey = (typeof ATTENDANCE_COLUMNS)[number][0];
 
-type AttendanceAgg = {
-  days: number; // worked (Present + Late)
-  hours: number;
-  overtime: number;
-  paidOffDays: number;
-  /** Attendance proration factor for pay: (worked + paid-leave) / (worked +
-   * paid-leave + absent). 1 when there are no elapsed working days yet. */
-  factor: number;
-};
+type AttendanceAgg = { days: number; hours: number; overtime: number; paidOffDays: number };
 
 type SheetRow = {
   id: string;
+  enrollId: string;
   name: string;
   basic: number;
   dearness: number;
-  ssfBasis: number; // employer % of basic — the "SSF (X% of basic)" build-up column
-  mgs: number; // basic + dearness + employer SSF (full monthly structure)
+  ssfBasis: number; // 20% of basic — the "SSF (20% of basic)" build-up column
+  mgs: number; // basic + dearness + employer SSF
   ssfEmployer: number;
   ssfEmployee: number;
   totalSsf: number;
-  /** ACTUAL amount payable this month — (basic + dearness − employee SSF)
-   * prorated by attendance, plus overtime pay when the toggle is on. */
-  net: number;
-  otPay: number;
+  net: number; // mgs - totalSsf
 };
 
 /**
  * The "Staff Salary Sheet" — a fixed-salary payroll report for one customer
  * (companies.payroll_format = 'staff_salary_sheet'). Everyone is paid their
  * full Basic + full Allowance (shown as "Dearness Allowance" here) every
- * month, with a 20%/11% SSF gross-up. There is NO attendance, proration,
- * overtime, PF or TDS. Basic and Allowance are set per employee on the
- * Salary Structure page. Rendered by app/payroll/page.tsx in place of the
- * standard attendance-based report.
+ * month, with an SSF gross-up using the company's own "SSF by Employer" /
+ * "SSF by Employee" rates (companies.ssf_rate/tds_rate, set on the Salary
+ * Structure page — the same two fields the standard Payroll report reads,
+ * defaulting to 11%/0% until an admin sets them here to match this sheet's
+ * actual 20%/11% policy). There is NO attendance, proration, overtime, or
+ * PF. Basic and Allowance are set per employee on the Salary Structure page.
+ * Rendered by app/payroll/page.tsx in place of the standard attendance-based
+ * report.
  */
 export default function StaffSalarySheet() {
   const { system } = useCalendarSystem();
@@ -93,26 +85,22 @@ export default function StaffSalarySheet() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [weeklyOffDay, setWeeklyOffDay] = useState<number | null>(null);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
-  const [cfg, setCfg] = useState<StaffSheetConfig>(DEFAULT_CFG);
-  useEffect(() => {
-    fetchStaffSheetConfig().then(setCfg);
-  }, []);
+  // "SSF by Employer" / "SSF by Employee" — same company-wide rates the
+  // Salary Structure page and standard Payroll report use (ssf_rate/tds_rate),
+  // read-only here.
+  const [ssfEmployerRate, setSsfEmployerRate] = useState(11);
+  const [ssfEmployeeRate, setSsfEmployeeRate] = useState(0);
 
   // The cog menu — toggles the three attendance columns on/off for the
-  // screen, print and Excel copies alike, plus whether overtime pay is
-  // added into Net Monthly. Columns on by default; overtime pay off.
+  // screen, print and Excel copies alike. On by default.
   const [visibleCols, setVisibleCols] = useState<Record<AttendanceColKey, boolean>>({
     workedDays: true,
     totalHours: true,
     overtime: true,
   });
-  const [includeOtPay, setIncludeOtPay] = useState(false);
-  // Net Monthly is prorated by attendance by default (per the customer's
-  // request). Turn OFF to fall back to the full contracted monthly amount —
-  // the safety valve if attendance isn't being captured for a period.
-  const [prorate, setProrate] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -136,8 +124,10 @@ export default function StaffSalarySheet() {
   }, []);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, ssfRate, tdsRate }) => {
       setWeeklyOffDay(weeklyOffDay);
+      setSsfEmployerRate(ssfRate);
+      setSsfEmployeeRate(tdsRate);
       if (rosterMode === 'weekly') {
         supabase
           .from('employee_weekly_pattern')
@@ -231,55 +221,30 @@ export default function StaffSalarySheet() {
       let hours = 0;
       let overtime = 0;
       let paidOffDays = 0;
-      let absent = 0;
-      let paidLeave = 0;
       for (const d of rows) {
+        if (d.status === 'Present' || d.status === 'Late') days += 1;
         if (d.paidOff) paidOffDays += 1;
         hours += d.hours;
         overtime += d.overtime;
-        if (d.status === 'Present' || d.status === 'Late') days += 1;
-        else if (d.status === 'Absent') absent += 1;
-        else if (d.status === 'Leave') d.paidOff ? (paidLeave += 1) : (absent += 1);
-        // 'Week Off' / 'Upcoming' — not an elapsed working day, ignored for proration
       }
-      const num = days + paidLeave;
-      const denom = num + absent;
-      map.set(emp.id, { days, hours, overtime, paidOffDays, factor: denom > 0 ? num / denom : 1 });
+      map.set(emp.id, { days, hours, overtime, paidOffDays });
     }
     return map;
   }, [employees, shifts, summaries, logs, dailyShiftByDate, holidays, leaveRequests, weeklyOffDay, weeklyPatternRows, period]);
 
-  // Days in the selected period — the OT hourly-rate divisor, same basis as
-  // the standard Payroll report (monthly pay / (days × standard hours/day)).
-  const daysInPeriod = useMemo(
-    () => Math.round((new Date(period.end).getTime() - new Date(period.start).getTime()) / 86400000) + 1,
-    [period]
-  );
-
   const groups = useMemo(() => {
-    const empFrac = cfg.ssfEmployerRate / 100;
-    const eeFrac = cfg.ssfEmployeeRate / 100;
     const rows: (SheetRow & { branch: string })[] = employees
       .filter(e => e.salary != null)
       .map(e => {
         const basic = e.salary!;
         const dearness = Number(e.allowance ?? 0) || 0;
-        const ssfEmployer = basic * empFrac;
-        const ssfEmployee = basic * eeFrac;
+        const ssfEmployer = (basic * ssfEmployerRate) / 100;
+        const ssfEmployee = (basic * ssfEmployeeRate) / 100;
         const mgs = basic + dearness + ssfEmployer;
         const totalSsf = ssfEmployer + ssfEmployee;
-
-        // Actual payable: take-home (basic + dearness − employee SSF) prorated
-        // by attendance, + overtime pay when the toggle is on. The structure
-        // columns above stay at the full contracted monthly amounts.
-        const a = attendanceByEmployee.get(e.id);
-        const factor = prorate ? a?.factor ?? 1 : 1;
-        const takeHomeMonthly = basic + dearness - ssfEmployee;
-        const otHourly = (basic + dearness) / (daysInPeriod * cfg.otHoursPerDay);
-        const otPay = includeOtPay && a ? a.overtime * otHourly * cfg.otMultiplier : 0;
-
         return {
           id: e.id,
+          enrollId: e.fingerprint_id ?? '—',
           name: e.name,
           branch: e.branch_id ? branchName.get(e.branch_id) ?? 'Unassigned' : 'Unassigned',
           basic,
@@ -289,8 +254,7 @@ export default function StaffSalarySheet() {
           ssfEmployer,
           ssfEmployee,
           totalSsf,
-          net: takeHomeMonthly * factor + otPay,
-          otPay,
+          net: mgs - totalSsf,
         };
       });
 
@@ -302,23 +266,17 @@ export default function StaffSalarySheet() {
     return [...byBranch.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([branch, list]) => ({ branch, list: list.sort((a, b) => a.name.localeCompare(b.name)) }));
-  }, [employees, branchName, attendanceByEmployee, cfg, includeOtPay, prorate, daysInPeriod]);
+  }, [employees, branchName, ssfEmployerRate, ssfEmployeeRate]);
 
   const allRows = useMemo(() => groups.flatMap(g => g.list), [groups]);
 
-  // Flat render list: a group header row, then its employee rows with a
-  // running S.No. that carries across branches.
+  // Flat render list: a group header row, then its employee rows.
   const renderItems = useMemo(() => {
-    const items: (
-      | { kind: 'group'; branch: string }
-      | { kind: 'row'; sno: number; row: SheetRow & { branch: string } }
-    )[] = [];
-    let sno = 0;
+    const items: ({ kind: 'group'; branch: string } | { kind: 'row'; row: SheetRow & { branch: string } })[] = [];
     for (const g of groups) {
       items.push({ kind: 'group', branch: g.branch });
       for (const r of g.list) {
-        sno += 1;
-        items.push({ kind: 'row', sno, row: r });
+        items.push({ kind: 'row', row: r });
       }
     }
     return items;
@@ -338,7 +296,7 @@ export default function StaffSalarySheet() {
     };
   }, [allRows]);
 
-  const att = (id: string): AttendanceAgg => attendanceByEmployee.get(id) ?? { days: 0, hours: 0, overtime: 0, paidOffDays: 0, factor: 1 };
+  const att = (id: string): AttendanceAgg => attendanceByEmployee.get(id) ?? { days: 0, hours: 0, overtime: 0, paidOffDays: 0 };
 
   // Column footer for the attendance columns — mirrors the standard Payroll
   // report: Worked Days shows "{present}P / {absent}A", the other two a
@@ -369,7 +327,7 @@ export default function StaffSalarySheet() {
 
   function exportCsv() {
     const header = [
-      'S.No.',
+      'Enroll ID',
       'Branch',
       'Employee Name',
       ...(visibleCols.workedDays ? ['Worked Days'] : []),
@@ -377,21 +335,19 @@ export default function StaffSalarySheet() {
       ...(visibleCols.overtime ? ['Overtime'] : []),
       'Basic Salary',
       'Dearness Allowance',
-      `SSF ${cfg.ssfEmployerRate}% of Basic`,
+      `SSF ${ssfEmployerRate}% of Basic`,
       'Monthly Gross (MGS)',
-      `SSF by Employer ${cfg.ssfEmployerRate}%`,
-      `SSF by Employee ${cfg.ssfEmployeeRate}%`,
+      `SSF by Employer ${ssfEmployerRate}%`,
+      `SSF by Employee ${ssfEmployeeRate}%`,
       'Total SSF Payable',
       'Net Monthly',
     ];
-    let n = 0;
     const lines: (string | number)[][] = [];
     for (const g of groups) {
       for (const r of g.list) {
-        n += 1;
         const a = att(r.id);
         lines.push([
-          n,
+          r.enrollId,
           g.branch,
           r.name,
           ...(visibleCols.workedDays ? [a.days] : []),
@@ -463,31 +419,6 @@ export default function StaffSalarySheet() {
               );
             })}
           </div>
-          <p className="border-t border-slate-100 px-4 pb-1 pt-2 text-[11px] leading-snug text-slate-400">
-            How Net Monthly is worked out.
-          </p>
-          <div className="p-1.5">
-            {(
-              [
-                ['prorate', prorate, setProrate, 'Prorate by worked days'],
-                ['ot', includeOtPay, setIncludeOtPay, `Add overtime pay (${cfg.otMultiplier}×)`],
-              ] as const
-            ).map(([key, on, set, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => set(v => !v)}
-                className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm text-ink hover:bg-slate-50"
-              >
-                {label}
-                <span className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-good' : 'bg-slate-300'}`}>
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-0.5'}`}
-                  />
-                </span>
-              </button>
-            ))}
-          </div>
         </div>
       )}
     </div>
@@ -522,14 +453,12 @@ export default function StaffSalarySheet() {
         <div className="rounded-xl bg-warning-bg p-3.5 shadow-sm ring-1 ring-inset ring-warning/10">
           <span className="text-xs font-medium text-warning-text/80">Total SSF Payable</span>
           <div className="mt-1 text-lg font-bold tabular-nums text-warning-text">{money(grand.totalSsf)}</div>
-          <div className="mt-0.5 text-[11px] text-warning-text/70">Employer {cfg.ssfEmployerRate}% + Employee {cfg.ssfEmployeeRate}%</div>
+          <div className="mt-0.5 text-[11px] text-warning-text/70">Employer {ssfEmployerRate}% + Employee {ssfEmployeeRate}%</div>
         </div>
         <div className="rounded-xl bg-good-bg p-3.5 shadow-sm ring-1 ring-inset ring-good/10">
           <span className="text-xs font-medium text-good-text/80">Net Monthly Payable</span>
           <div className="mt-1 text-lg font-bold tabular-nums text-good-text">{money(grand.net)}</div>
-          <div className="mt-0.5 text-[11px] text-good-text/70">
-            take-home{prorate ? ', prorated by worked days' : ''}{includeOtPay ? ' + overtime' : ''}
-          </div>
+          <div className="mt-0.5 text-[11px] text-good-text/70">Gross − Total SSF</div>
         </div>
       </div>
 
@@ -543,11 +472,6 @@ export default function StaffSalarySheet() {
               <h2 className="text-lg font-bold text-ink">Staff Salary Sheet</h2>
               <p className="text-xs text-slate-500">
                 {period.label} · {formatDdMmYyyy(period.start, system)} to {formatDdMmYyyy(period.end, system)}
-              </p>
-              <p className="mt-0.5 text-[11px] text-slate-400">
-                Net Monthly = Basic + Allowance − Employee SSF
-                {prorate ? ', prorated by worked days' : ' (full month)'}
-                {includeOtPay ? ' + overtime pay' : ''}
               </p>
             </div>
           </div>
@@ -580,12 +504,15 @@ export default function StaffSalarySheet() {
           </p>
         </div>
 
-        <div className="mt-4 overflow-x-auto pb-2 print:overflow-visible">
+        <HorizontalScrollButtons targetRef={tableScrollRef} />
+        <div ref={tableScrollRef} className="mt-4 overflow-x-auto pb-2 print:overflow-visible">
           <table className="ssheet w-full text-right text-[12.5px]">
             <thead>
               <tr className="border-y border-slate-200 bg-slate-50">
-                <th className={`${th} w-10 text-center`}>S.No.</th>
-                <th className={`${th} min-w-[10rem] text-left`}>Employee Name</th>
+                <th className={`${th} sticky left-0 z-10 w-16 bg-slate-50 text-center shadow-none`}>Enroll ID</th>
+                <th className={`${th} sticky left-16 z-10 min-w-[10rem] bg-slate-50 text-left shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none`}>
+                  Employee Name
+                </th>
                 {visibleCols.workedDays && (
                   <th className={thNum}>
                     Worked<br />
@@ -608,7 +535,7 @@ export default function StaffSalarySheet() {
                   Allowance
                 </th>
                 <th className={thNum}>
-                  SSF {cfg.ssfEmployerRate}%<br />
+                  SSF {ssfEmployerRate}%<br />
                   of Basic
                 </th>
                 <th className={thNum}>
@@ -617,20 +544,17 @@ export default function StaffSalarySheet() {
                 </th>
                 <th className={thNum}>
                   SSF by Employer<br />
-                  {cfg.ssfEmployerRate}% of Basic
+                  {ssfEmployerRate}% of Basic
                 </th>
                 <th className={thNum}>
                   SSF by Employee<br />
-                  {cfg.ssfEmployeeRate}% — Deduction
+                  {ssfEmployeeRate}% — Deduction
                 </th>
                 <th className={thNum}>
                   Total SSF<br />
                   Payable
                 </th>
-                <th className={thNum}>
-                  Net Monthly<br />
-                  <span className="font-normal normal-case tracking-normal text-slate-400">payable</span>
-                </th>
+                <th className={thNum}>Net Monthly</th>
               </tr>
             </thead>
             <tbody>
@@ -643,8 +567,10 @@ export default function StaffSalarySheet() {
                   </tr>
                 ) : (
                   <tr key={item.row.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                    <td className="px-2.5 py-1.5 text-center tabular-nums text-slate-400">{item.sno}</td>
-                    <td className="whitespace-nowrap px-2.5 py-1.5 text-left font-medium text-ink">
+                    <td className="sticky left-0 z-[1] whitespace-nowrap bg-white px-2.5 py-1.5 text-center tabular-nums text-slate-400">
+                      {item.row.enrollId}
+                    </td>
+                    <td className="sticky left-16 z-[1] whitespace-nowrap bg-white px-2.5 py-1.5 text-left font-medium text-ink shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none">
                       <Link href={detailHref(item.row.id)} className="hover:text-accent hover:underline print:no-underline print:text-ink">
                         {item.row.name}
                       </Link>
@@ -659,14 +585,7 @@ export default function StaffSalarySheet() {
                     <td className={td}>{money(item.row.ssfEmployer)}</td>
                     <td className={`${td} text-critical-text`}>{money(item.row.ssfEmployee)}</td>
                     <td className={td}>{money(item.row.totalSsf)}</td>
-                    <td
-                      className={`${td} font-bold text-good-text`}
-                      title={`${money(item.row.basic + item.row.dearness - item.row.ssfEmployee)} take-home × ${(att(item.row.id).factor * 100).toFixed(1)}% attendance${
-                        item.row.otPay ? ` + ${money(item.row.otPay)} overtime` : ''
-                      }`}
-                    >
-                      {money(item.row.net)}
-                    </td>
+                    <td className={`${td} font-bold text-good-text`}>{money(item.row.net)}</td>
                   </tr>
                 )
               )}
@@ -688,7 +607,10 @@ export default function StaffSalarySheet() {
             {allRows.length > 0 && (
               <tfoot>
                 <tr className="border-t-2 border-slate-300 bg-slate-50 text-[12.5px] font-bold text-ink">
-                  <td colSpan={2} className="px-2.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <td
+                    colSpan={2}
+                    className="sticky left-0 z-[1] bg-slate-50 px-2.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none"
+                  >
                     Total
                   </td>
                   {visibleCols.workedDays && (

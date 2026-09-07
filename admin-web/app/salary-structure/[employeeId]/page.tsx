@@ -59,7 +59,7 @@ function SalaryStructureEmployeeView() {
   const listQuery = `?start=${start}&end=${end}&view=${view}`;
 
   const [employee, setEmployee] = useState<Employee | null>(null);
-  const [rates, setRates] = useState({ pf: 10, ssf: 11, tds: 0 });
+  const [rates, setRates] = useState({ pf: 10, ssf: 11, tds: 0, overtime: 0 });
   const [config, setConfig] = useState({ weeklyOffDay: null as number | null, otHoursPerDay: 8, otMultiplier: 1.5 });
   const [loading, setLoading] = useState(true);
 
@@ -81,8 +81,8 @@ function SalaryStructureEmployeeView() {
   }, [start, end]);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ pfRate, ssfRate, tdsRate, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier }) => {
-      setRates({ pf: pfRate, ssf: ssfRate, tds: tdsRate });
+    fetchMyCompanyWeekOffConfig().then(({ pfRate, ssfRate, tdsRate, overtimeRate, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier }) => {
+      setRates({ pf: pfRate, ssf: ssfRate, tds: tdsRate, overtime: overtimeRate });
       setConfig({ weeklyOffDay, otHoursPerDay, otMultiplier });
       if (rosterMode === 'weekly') {
         supabase
@@ -116,12 +116,12 @@ function SalaryStructureEmployeeView() {
     });
   }, [employeeId, start, end]);
 
-  const { pf, ssf, tds } = rates;
+  const { pf, ssf, tds, overtime } = rates;
   const { weeklyOffDay, otHoursPerDay, otMultiplier } = config;
 
   const figures = useMemo(
-    () => computeSalaryFigures(employee?.salary ?? null, employee?.allowance ?? null, pf, ssf, tds),
-    [employee, pf, ssf, tds]
+    () => computeSalaryFigures(employee?.salary ?? null, employee?.allowance ?? null, pf, ssf, tds, overtime),
+    [employee, pf, ssf, tds, overtime]
   );
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
@@ -196,7 +196,7 @@ function SalaryStructureEmployeeView() {
 
   function exportCsv() {
     if (!employee) return;
-    const lines: (string | number)[][] = salaryBreakdownLines(figures, pf, ssf, tds).map(l => [
+    const lines: (string | number)[][] = salaryBreakdownLines(figures, pf, ssf, tds, overtime).map(l => [
       l.label,
       l.value == null ? '' : l.value,
       l.value == null ? '' : Number((l.value / daysInMonth).toFixed(2)),
@@ -258,7 +258,7 @@ function SalaryStructureEmployeeView() {
 
           <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <SalaryTile label="Gross Pay" value={figures.gross} daysInMonth={daysInMonth} tone="bg-info-bg text-info-text ring-info/10" />
-            <SalaryTile label="Total Deductions" value={deductions} daysInMonth={daysInMonth} tone="bg-critical-bg text-critical-text ring-critical/10" sub="PF + SSF + TDS only" />
+            <SalaryTile label="Total Deductions" value={deductions} daysInMonth={daysInMonth} tone="bg-critical-bg text-critical-text ring-critical/10" sub="PF + SSF by Employer + SSF by Employee only" />
             <div className={`rounded-xl p-3 shadow-sm ring-1 ring-inset ${adjPositive ? 'bg-good-bg text-good-text ring-good/10' : 'bg-critical-bg text-critical-text ring-critical/10'}`}>
               <span className="text-xs font-medium opacity-80">
                 Attendance {adjPositive ? 'Surplus' : 'Deduction'}
@@ -292,6 +292,7 @@ function SalaryStructureEmployeeView() {
             pf={pf}
             ssf={ssf}
             tds={tds}
+            overtimeRate={overtime}
             daysInMonth={daysInMonth}
             monthLabel={monthLabel}
             system={system}
@@ -320,10 +321,11 @@ function SalaryStructureEmployeeView() {
           )}
 
           <p className="mt-3 text-xs text-slate-400">
-            Net Payable = Basic + Allowance − PF − SSF − TDS (the fixed structure). The Attendance box is separate: it is the
-            month&apos;s absence / late-arrival / early-departure shortfall (pay is earned per hour actually worked) plus any
-            overtime pay earned on top — one figure that goes negative for a net deduction or positive for a net surplus.
-            Per-day figures divide by the {daysInMonth} days in {monthLabel}.
+            Net Payable = Basic + Allowance − PF − SSF by Employer − SSF by Employee + Overtime allowance (the fixed structure). The Attendance box is
+            separate: it is the month&apos;s absence / late-arrival / early-departure shortfall (pay is earned per hour
+            actually worked) plus the real overtime pay earned on top from actual hours — one figure that goes negative for a
+            net deduction or positive for a net surplus. That real overtime figure is unrelated to the flat Overtime allowance
+            % above. Per-day figures divide by the {daysInMonth} days in {monthLabel}.
           </p>
         </>
       )}

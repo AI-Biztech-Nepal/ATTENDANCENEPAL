@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
 import DatePicker from '@/components/DatePicker';
 import ComboBox from '@/components/ComboBox';
 import { useConfirm } from '@/components/ConfirmDialog';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { buildMonth, formatAdDate, stepAnchor, todayAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso } from '@/lib/shift';
@@ -49,6 +50,7 @@ export default function WeekOffPage() {
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -252,7 +254,8 @@ export default function WeekOffPage() {
               + New Holiday
             </button>
           </div>
-          <div className="overflow-x-auto">
+          <HorizontalScrollButtons targetRef={tableScrollRef} />
+          <div ref={tableScrollRef} className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">

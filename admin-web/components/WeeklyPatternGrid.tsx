@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/Avatar';
 import RosterModeSwitch from '@/components/RosterModeSwitch';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { useConfirm } from '@/components/ConfirmDialog';
 import type { Employee, Shift } from '@/lib/types';
 import type { RosterMode } from '@/lib/weekOff';
@@ -32,6 +33,7 @@ export default function WeeklyPatternGrid({
   onRosterModeChange: (mode: RosterMode) => void;
 }) {
   const confirm = useConfirm();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [patternRows, setPatternRows] = useState<PatternRow[]>([]);
@@ -227,7 +229,9 @@ export default function WeeklyPatternGrid({
             one of those to each employee per weekday.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <>
+          <HorizontalScrollButtons targetRef={tableScrollRef} />
+          <div ref={tableScrollRef} className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
@@ -314,6 +318,7 @@ export default function WeeklyPatternGrid({
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         {saveError && <p className="mt-3 text-sm text-critical">Could not save: {saveError}</p>}

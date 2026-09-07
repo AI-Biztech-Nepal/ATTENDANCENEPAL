@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/Avatar';
 import RosterModeSwitch from '@/components/RosterModeSwitch';
-import { useConfirm } from '@/components/ConfirmDialog';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, Shift } from '@/lib/types';
@@ -23,15 +23,6 @@ type RosterRow = { employee_id: string; work_date: string; shift_id: string | nu
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-/** 'YYYY-MM-DD' -> 'M/D', joined and capped at 10 dates (a full month of
- * conflicts would otherwise make the confirm dialog unreadable) with a
- * "+N more" tail for the rest. */
-function describeDates(dates: string[]): string {
-  const shown = dates.slice(0, 10).map(d => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`);
-  const rest = dates.length - shown.length;
-  return rest > 0 ? `${shown.join(', ')}, +${rest} more` : shown.join(', ');
-}
-
 /** Same grid/data model as WeeklyRosterGrid (employee_daily_shifts, one exact
  * date per column) just spanning a whole AD/BS month instead of one week —
  * filling in a month of exceptions (someone covering nights all month, a
@@ -46,8 +37,8 @@ export default function MonthlyRosterGrid({
   onRosterModeChange: (mode: RosterMode) => void;
 }) {
   const { system } = useCalendarSystem();
-  const confirm = useConfirm();
   const isInactive = rosterMode === 'weekly';
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState(todayAnchor);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -63,27 +54,6 @@ export default function MonthlyRosterGrid({
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [copyDone, setCopyDone] = useState(false);
-  const [copyingRowId, setCopyingRowId] = useState<string | null>(null);
-  // Clipboard-style copy/paste between employees: Copy marks a source
-  // employee, then Paste on any other employee's row writes that source's
-  // whole month onto them immediately — no modal, no separate Save step.
-  // Stays set across multiple pastes so one Copy can go out to several
-  // employees one click at a time.
-  const [copiedEmployeeId, setCopiedEmployeeId] = useState<string | null>(null);
-  const [pastingEmployeeId, setPastingEmployeeId] = useState<string | null>(null);
-  const [pasteError, setPasteError] = useState<string | null>(null);
-  // Multi-target paste: check several employees below a Copy, then one
-  // "Paste to N selected" writes the copied month to all of them in a single
-  // request instead of clicking Paste on each row individually. Cleared
-  // whenever the copied source changes so a stale selection never carries
-  // over to a different source's paste.
-  const [selectedTargetIds, setSelectedTargetIds] = useState<Set<string>>(new Set());
-  const [pastingSelected, setPastingSelected] = useState(false);
-
-  useEffect(() => {
-    setSelectedTargetIds(new Set());
-  }, [copiedEmployeeId]);
-
   const month = useMemo(() => buildMonth(system, anchor), [system, anchor]);
   const monthCells = useMemo(() => month.weeks.flat().filter(c => c.inMonth), [month]);
   const dates = useMemo(() => monthCells.map(c => c.adKey), [monthCells]);
@@ -138,134 +108,11 @@ export default function MonthlyRosterGrid({
     setPending(p => ({ ...p, [`${employeeId}|${date}`]: value }));
   }
 
-  // Writes the month's first day's pick onto every other day in that row
-  // straight to Supabase — deliberately NOT staged into `pending` (unlike a
-  // manual per-cell pick): staging it made the button feel like it did
-  // nothing until a separate, easy-to-miss "Save changes" click, which is
-  // exactly the "I can copy but can't paste" complaint this replaced.
-  // Overwrites every other day unconditionally (there's no "leave day 2
-  // alone" concept for a single source value), so it confirms first.
-  async function copyRowToAll(employeeId: string) {
-    const sourceValue = currentValue(employeeId, dates[0]);
-    if (sourceValue === UNSET) return;
-    const emp = employees.find(e => e.id === employeeId);
-    const proceed = await confirm(
-      `Copy ${emp?.name ?? 'this employee'}'s day-1 pick to every other day this month? This overwrites all ${
-        dates.length - 1
-      } remaining days in their row right away.`,
-      { title: 'Overwrite this row?', confirmLabel: 'Overwrite', tone: 'danger' }
-    );
-    if (!proceed) return;
-    setCopyingRowId(employeeId);
-    const shiftId = sourceValue === WEEK_OFF_VALUE ? null : sourceValue;
-    const upserts = dates.slice(1).map(date => ({ employee_id: employeeId, work_date: date, shift_id: shiftId }));
-    const { error } = await supabase.from('employee_daily_shifts').upsert(upserts, { onConflict: 'employee_id,work_date' });
-    setCopyingRowId(null);
-    if (error) {
-      setSaveError(error.message);
-      return;
-    }
-    reload();
-  }
-
-  // Writes the copied employee's whole month onto `targetId` straight to
-  // Supabase. Only a source day that actually has a pick (not —) writes
-  // anything, leaving whatever's already on that target day alone if the
-  // source day itself is blank. A target day that already has its OWN
-  // assignment is a real conflict, though — that's silently destructive
-  // without a specific warning, so it's only allowed through an explicit
-  // confirm naming exactly which days already have a roster and would get
-  // overwritten. A target with no conflicts at all pastes immediately, no
-  // dialog — the whole point of Paste is fast, repeated application onto
-  // still-blank rows. Also drops any of the target's own still-unsaved
-  // manual picks on the days just written, so the grid doesn't keep
-  // showing a stale pending value that no longer matches what Paste just
-  // saved underneath it.
-  async function pasteToEmployee(targetId: string) {
-    if (!copiedEmployeeId || copiedEmployeeId === targetId) return;
-    const sourceName = employees.find(e => e.id === copiedEmployeeId)?.name ?? 'the copied employee';
-    const targetName = employees.find(e => e.id === targetId)?.name ?? 'this employee';
-    const sourcePicks = dates.map(date => ({ date, value: currentValue(copiedEmployeeId, date) })).filter(p => p.value !== UNSET);
-    if (sourcePicks.length === 0) return;
-    const conflictDates = sourcePicks.filter(p => currentValue(targetId, p.date) !== UNSET).map(p => p.date);
-    if (conflictDates.length > 0) {
-      const denyMsg =
-        `${targetName} already has a shift roster assigned on ${conflictDates.length} of these day` +
-        `${conflictDates.length === 1 ? '' : 's'} (${describeDates(conflictDates)}).\n\n` +
-        `Paste ${sourceName}'s month anyway and overwrite ${conflictDates.length === 1 ? 'it' : 'them'}?`;
-      if (!(await confirm(denyMsg, { title: 'Roster already assigned', confirmLabel: 'Overwrite', tone: 'danger' }))) return;
-    }
-    setPastingEmployeeId(targetId);
-    setPasteError(null);
-    const upserts = sourcePicks.map(p => ({
-      employee_id: targetId,
-      work_date: p.date,
-      shift_id: p.value === WEEK_OFF_VALUE ? null : p.value,
-    }));
-    if (upserts.length === 0) {
-      setPastingEmployeeId(null);
-      return;
-    }
-    const { error } = await supabase.from('employee_daily_shifts').upsert(upserts, { onConflict: 'employee_id,work_date' });
-    setPastingEmployeeId(null);
-    if (error) {
-      setPasteError(error.message);
-      return;
-    }
-    setPending(p => {
-      const next = { ...p };
-      for (const u of upserts) delete next[`${targetId}|${u.work_date}`];
-      return next;
-    });
-    reload();
-  }
-
-  // Same paste as pasteToEmployee, but fanned out to every selected target
-  // in one batch upsert instead of one request per click — same conflict
-  // rule too: only a target that already has its own roster on one of the
-  // pasted days needs an explicit confirm, and the dialog names which of the
-  // selected employees those are, not just a raw count of days.
-  async function pasteToSelected() {
-    if (!copiedEmployeeId || selectedTargetIds.size === 0) return;
-    const targetIds = [...selectedTargetIds].filter(id => id !== copiedEmployeeId);
-    if (targetIds.length === 0) return;
-    const sourceName = employees.find(e => e.id === copiedEmployeeId)?.name ?? 'the copied employee';
-    const sourcePicks = dates.map(date => ({ date, value: currentValue(copiedEmployeeId, date) })).filter(p => p.value !== UNSET);
-    if (sourcePicks.length === 0) return;
-    const conflictingTargetIds = targetIds.filter(id => sourcePicks.some(p => currentValue(id, p.date) !== UNSET));
-    if (conflictingTargetIds.length > 0) {
-      const names = conflictingTargetIds.map(id => employees.find(e => e.id === id)?.name ?? 'Unknown').join(', ');
-      const denyMsg =
-        `${conflictingTargetIds.length} of the ${targetIds.length} selected employees already ` +
-        `${conflictingTargetIds.length === 1 ? 'has' : 'have'} a shift roster assigned on some of these days: ${names}.\n\n` +
-        `Paste ${sourceName}'s month anyway and overwrite ${conflictingTargetIds.length === 1 ? 'that roster' : 'those rosters'}?`;
-      if (!(await confirm(denyMsg, { title: 'Roster already assigned', confirmLabel: 'Overwrite', tone: 'danger' }))) return;
-    }
-    setPastingSelected(true);
-    setPasteError(null);
-    const upserts: { employee_id: string; work_date: string; shift_id: string | null }[] = [];
-    for (const targetId of targetIds) {
-      for (const { date, value } of sourcePicks) {
-        upserts.push({ employee_id: targetId, work_date: date, shift_id: value === WEEK_OFF_VALUE ? null : value });
-      }
-    }
-    if (upserts.length === 0) {
-      setPastingSelected(false);
-      return;
-    }
-    const { error } = await supabase.from('employee_daily_shifts').upsert(upserts, { onConflict: 'employee_id,work_date' });
-    setPastingSelected(false);
-    if (error) {
-      setPasteError(error.message);
-      return;
-    }
-    setPending(p => {
-      const next = { ...p };
-      for (const u of upserts) delete next[`${u.employee_id}|${u.work_date}`];
-      return next;
-    });
-    setSelectedTargetIds(new Set());
-    reload();
+  // The day columns run a whole month wide, so dragging the native
+  // scrollbar while also trying to open a shift dropdown further along the
+  // row is fiddly — these jump a week at a time instead.
+  function scrollDays(days: number) {
+    scrollRef.current?.scrollBy({ left: days * 100, behavior: 'smooth' });
   }
 
   function openCopyModal() {
@@ -354,25 +201,6 @@ export default function MonthlyRosterGrid({
     reload();
   }
 
-  const selectableTargetIds = useMemo(
-    () => employees.filter(e => e.id !== copiedEmployeeId).map(e => e.id),
-    [employees, copiedEmployeeId]
-  );
-  const allTargetsSelected = selectableTargetIds.length > 0 && selectableTargetIds.every(id => selectedTargetIds.has(id));
-
-  function toggleSelectedTarget(employeeId: string) {
-    setSelectedTargetIds(prev => {
-      const next = new Set(prev);
-      if (next.has(employeeId)) next.delete(employeeId);
-      else next.add(employeeId);
-      return next;
-    });
-  }
-
-  function toggleSelectAllTargets() {
-    setSelectedTargetIds(allTargetsSelected ? new Set() : new Set(selectableTargetIds));
-  }
-
   function cellTone(value: string, dirty: boolean) {
     if (dirty) return 'border-accent bg-accent/10 text-ink font-medium';
     if (value === WEEK_OFF_VALUE) return 'border-warning/30 bg-warning-bg text-warning-text font-semibold';
@@ -443,34 +271,6 @@ export default function MonthlyRosterGrid({
         </div>
       )}
 
-      {!isInactive && copiedEmployeeId && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-good/20 bg-good-bg px-4 py-2.5 text-sm sm:px-6">
-          <span className="font-medium text-good-text">
-            📋 Copied {employees.find(e => e.id === copiedEmployeeId)?.name ?? 'an employee'}&apos;s month — click{' '}
-            <strong>📋 Paste</strong> on one employee below, or check several then{' '}
-            <strong>Paste to selected</strong>. Saves immediately, as many times as you like.
-          </span>
-          <div className="flex shrink-0 items-center gap-2">
-            {selectedTargetIds.size > 0 && (
-              <button
-                type="button"
-                onClick={pasteToSelected}
-                disabled={pastingSelected}
-                className="rounded-md border border-accent bg-accent px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {pastingSelected ? 'Pasting…' : `📋 Paste to ${selectedTargetIds.size} selected`}
-              </button>
-            )}
-            <button onClick={() => setCopiedEmployeeId(null)} className="shrink-0 text-xs font-medium text-slate-600 hover:underline">
-              ✕ Clear
-            </button>
-          </div>
-        </div>
-      )}
-      {pasteError && (
-        <div className="border-b border-critical/20 bg-critical-bg px-4 py-2.5 text-sm text-critical-text sm:px-6">Could not paste: {pasteError}</div>
-      )}
-
       <div className="p-4 sm:p-6">
         {loading ? (
           <p className="text-center text-sm text-slate-400">Loading…</p>
@@ -482,25 +282,30 @@ export default function MonthlyRosterGrid({
             those to each employee per day.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <>
+          <div className="mb-2 flex items-center justify-end gap-2">
+            <span className="text-xs text-slate-400">Scroll days:</span>
+            <button
+              type="button"
+              onClick={() => scrollDays(-7)}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500 shadow-sm hover:border-accent/40 hover:text-accent"
+            >
+              ‹ Back
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollDays(7)}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500 shadow-sm hover:border-accent/40 hover:text-accent"
+            >
+              Forward ›
+            </button>
+          </div>
+          <HorizontalScrollButtons targetRef={scrollRef} step={700} />
+          <div ref={scrollRef} className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                  <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 font-medium">
-                    {!isInactive && copiedEmployeeId ? (
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={allTargetsSelected}
-                          onChange={toggleSelectAllTargets}
-                          className="h-3.5 w-3.5 rounded border-slate-300 text-accent focus:ring-accent/30"
-                        />
-                        Employee
-                      </label>
-                    ) : (
-                      'Employee'
-                    )}
-                  </th>
+                  <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 font-medium">Employee</th>
                   {monthCells.map(cell => (
                     <th key={cell.adKey} className={`whitespace-nowrap px-1 py-2.5 text-center font-medium ${cell.adKey === today ? 'bg-accent/10 text-accent' : ''}`}>
                       {WEEKDAY_LABELS[new Date(cell.adKey + 'T00:00:00Z').getUTCDay()]}
@@ -516,55 +321,8 @@ export default function MonthlyRosterGrid({
                     <tr key={emp.id} className="border-b border-slate-100 last:border-0">
                       <td className={`sticky left-0 z-10 whitespace-nowrap px-3 py-2 ${rowBg}`}>
                         <div className="flex items-center gap-2">
-                          {!isInactive && copiedEmployeeId && emp.id !== copiedEmployeeId && (
-                            <input
-                              type="checkbox"
-                              checked={selectedTargetIds.has(emp.id)}
-                              onChange={() => toggleSelectedTarget(emp.id)}
-                              className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 text-accent focus:ring-accent/30"
-                            />
-                          )}
                           <Avatar name={emp.name} photoUrl={emp.profile_photo_url} className="h-12 w-12 text-sm" />
                           <span className="truncate font-medium text-ink">{emp.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => copyRowToAll(emp.id)}
-                            disabled={isInactive || currentValue(emp.id, dates[0]) === UNSET || copyingRowId === emp.id}
-                            title="Copy the first day's pick to every day this month — saves immediately"
-                            className="ml-1 shrink-0 rounded-md border border-slate-200 px-1.5 py-1 text-[10px] font-semibold text-slate-500 hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            {copyingRowId === emp.id ? 'Copying…' : '⧉ Copy all'}
-                          </button>
-                          {copiedEmployeeId === emp.id ? (
-                            <button
-                              type="button"
-                              onClick={() => setCopiedEmployeeId(null)}
-                              title="This employee's month is copied — click to clear"
-                              className="shrink-0 rounded-md border border-good/30 bg-good-bg px-1.5 py-1 text-[10px] font-semibold text-good-text"
-                            >
-                              📋 Copied ✓
-                            </button>
-                          ) : copiedEmployeeId ? (
-                            <button
-                              type="button"
-                              onClick={() => pasteToEmployee(emp.id)}
-                              disabled={isInactive || pastingEmployeeId === emp.id}
-                              title={`Paste ${employees.find(e => e.id === copiedEmployeeId)?.name ?? "the copied employee"}'s month onto ${emp.name} — saves immediately`}
-                              className="shrink-0 rounded-md border border-accent/40 bg-accent/5 px-1.5 py-1 text-[10px] font-semibold text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {pastingEmployeeId === emp.id ? 'Pasting…' : '📋 Paste'}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setCopiedEmployeeId(emp.id)}
-                              disabled={isInactive || !dates.some(date => currentValue(emp.id, date) !== UNSET)}
-                              title="Copy this employee's whole month — then click Paste on another employee"
-                              className="shrink-0 rounded-md border border-slate-200 px-1.5 py-1 text-[10px] font-semibold text-slate-500 hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
-                            >
-                              📋 Copy
-                            </button>
-                          )}
                         </div>
                       </td>
                       {dates.map(date => {
@@ -605,6 +363,7 @@ export default function MonthlyRosterGrid({
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         {saveError && <p className="mt-3 text-sm text-critical">Could not save: {saveError}</p>}

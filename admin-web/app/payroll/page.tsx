@@ -7,6 +7,7 @@ import AppShell from '@/components/AppShell';
 import Avatar from '@/components/Avatar';
 import StaffSalarySheet from '@/components/StaffSalarySheet';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { fetchCompanyPayrollFormat, type PayrollFormat } from '@/lib/payrollFormat';
 import {
   buildPeriodOptions,
@@ -62,6 +63,15 @@ export default function PayrollPage() {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [otHoursPerDay, setOtHoursPerDay] = useState(8);
   const [otMultiplier, setOtMultiplier] = useState(1.5);
+  // Read-only here — set on the Salary Structure page. Applied to each
+  // row's attendance-adjusted Total Salary (not the flat monthly Basic), so
+  // these amounts shrink for a partial/absent period just like the pay
+  // itself does; "SSF by Employee" is the renamed former "TDS" rate, same
+  // company-wide column (companies.tds_rate) under the hood.
+  const [pfRate, setPfRate] = useState(10);
+  const [ssfRate, setSsfRate] = useState(11);
+  const [ssfByEmployeeRate, setSsfByEmployeeRate] = useState(0);
+  const [overtimeAllowanceRate, setOvertimeAllowanceRate] = useState(0);
   const [otDefaultsDirty, setOtDefaultsDirty] = useState(false);
   const [savingOtDefaults, setSavingOtDefaults] = useState(false);
   const [dataRange, setDataRange] = useState<{ earliest: Date; latest: Date } | null>(null);
@@ -73,9 +83,16 @@ export default function PayrollPage() {
   // Optional columns the admin can hide from the report (the cog menu in
   // the report header). A hidden column is dropped from the table AND from
   // the printed / PDF copy — it's simply not rendered, not print:hidden.
-  const [visibleCols, setVisibleCols] = useState({ workedDays: true, totalHours: true, overtime: true, lateEarly: true });
+  const [visibleCols, setVisibleCols] = useState({ workedDays: true, totalHours: true, overtime: true, lateEarly: true, deductions: true });
+  // Whether Total Salary / Net Payable are prorated by actual hours/days
+  // worked ('attendance', the long-standing default) or just pay everyone
+  // their full stored Basic every period regardless of attendance ('flat',
+  // same idea as StaffSalarySheet's fixed-salary model) — a per-view choice,
+  // not persisted, so switching back to 'attendance' is always one click.
+  const [salaryMode, setSalaryMode] = useState<'attendance' | 'flat'>('attendance');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -87,12 +104,15 @@ export default function PayrollPage() {
     return () => document.removeEventListener('mousedown', onDown);
   }, [settingsOpen]);
 
-  // The Overtime toggle drives two columns (Overtime hours + Overtime Salary).
+  // The Overtime toggle drives two columns (Overtime hours + Overtime
+  // Salary); Deductions drives six (Allowance, PF, SSF by Employer, SSF by
+  // Employee, Overtime Allowance, Net Payable).
   const hiddenColCount =
     (visibleCols.workedDays ? 0 : 1) +
     (visibleCols.totalHours ? 0 : 1) +
     (visibleCols.overtime ? 0 : 2) +
-    (visibleCols.lateEarly ? 0 : 1);
+    (visibleCols.lateEarly ? 0 : 1) +
+    (visibleCols.deductions ? 0 : 6);
 
   const { start, end } = period;
 
@@ -120,11 +140,15 @@ export default function PayrollPage() {
   // The oldest/newest punch on record — bounds the period dropdown to
   // months that actually have data instead of listing years of empty ones.
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ companyId, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier }) => {
+    fetchMyCompanyWeekOffConfig().then(({ companyId, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate, overtimeRate }) => {
       setCompanyId(companyId);
       setWeeklyOffDay(weeklyOffDay);
       setOtHoursPerDay(otHoursPerDay);
       setOtMultiplier(otMultiplier);
+      setPfRate(pfRate);
+      setSsfRate(ssfRate);
+      setSsfByEmployeeRate(tdsRate);
+      setOvertimeAllowanceRate(overtimeRate);
       // Not date-scoped (a pattern applies to every week), and only ever
       // relevant in 'weekly' roster_mode — see resolveShiftForDate().
       if (rosterMode === 'weekly') {
@@ -270,6 +294,7 @@ export default function PayrollPage() {
         enrollId: string;
         name: string;
         salary: number | null;
+        allowance: number;
         days: number;
         hours: number;
         overtime: number;
@@ -284,6 +309,7 @@ export default function PayrollPage() {
         enrollId: emp.fingerprint_id ?? '—',
         name: emp.name,
         salary: emp.salary,
+        allowance: emp.allowance ?? 0,
         days: 0,
         hours: 0,
         overtime: 0,
@@ -374,6 +400,12 @@ export default function PayrollPage() {
       const hourlyRate = r.salary / (daysInRange * otHoursPerDay);
       return s + hourlyRate * otMultiplier * r.overtime;
     }, 0);
+    const totalAllowance = byEmployee.reduce((s, r) => s + r.allowance, 0);
+    const totalPf = byEmployee.reduce((s, r) => s + (pfDeduction(r) ?? 0), 0);
+    const totalSsf = byEmployee.reduce((s, r) => s + (ssfDeduction(r) ?? 0), 0);
+    const totalSsfByEmployee = byEmployee.reduce((s, r) => s + (ssfByEmployeeDeduction(r) ?? 0), 0);
+    const totalOvertimeAllowance = byEmployee.reduce((s, r) => s + (overtimeAllowance(r) ?? 0), 0);
+    const totalNetPayable = byEmployee.reduce((s, r) => s + (netPayable(r) ?? 0), 0);
     return {
       totalHours,
       overtimeHours,
@@ -385,8 +417,14 @@ export default function PayrollPage() {
       totalEmployeeSalary,
       totalSalaryPayable,
       totalOvertimeSalary,
+      totalAllowance,
+      totalPf,
+      totalSsf,
+      totalSsfByEmployee,
+      totalOvertimeAllowance,
+      totalNetPayable,
     };
-  }, [byEmployee, scopedEmployees, daysInRange, elapsedDaysInRange, otHoursPerDay, otMultiplier]);
+  }, [byEmployee, scopedEmployees, daysInRange, elapsedDaysInRange, otHoursPerDay, otMultiplier, pfRate, ssfRate, ssfByEmployeeRate, overtimeAllowanceRate, salaryMode]);
 
   // Pay is earned per hour actually worked, not per day shown up — a day
   // where someone left after 2 hours pays 2 hours, not a full day's worth.
@@ -401,6 +439,9 @@ export default function PayrollPage() {
   // meaning actual worked hours.
   function calculatedSalary(row: { salary: number | null; hours: number; overtime: number; paidOffDays: number }): number | null {
     if (row.salary == null) return null;
+    // Flat mode ignores attendance entirely — everyone gets their full
+    // stored Basic every period, same idea as StaffSalarySheet.
+    if (salaryMode === 'flat') return row.salary;
     const hourlyRate = row.salary / (daysInRange * otHoursPerDay);
     const regularHours = Math.max(0, row.hours - row.overtime);
     return Math.round(hourlyRate * regularHours + hourlyRate * otHoursPerDay * row.paidOffDays);
@@ -408,6 +449,8 @@ export default function PayrollPage() {
 
   function overtimeSalary(row: { salary: number | null; overtime: number }): number | null {
     if (row.salary == null) return null;
+    // No overtime concept in flat mode — pay isn't derived from hours at all.
+    if (salaryMode === 'flat') return 0;
     if (row.overtime <= 0) return 0;
     const hourlyRate = row.salary / (daysInRange * otHoursPerDay);
     return Math.round(hourlyRate * otMultiplier * row.overtime);
@@ -419,6 +462,44 @@ export default function PayrollPage() {
     // Hiding the Overtime column also takes overtime pay out of the total —
     // "not shown" means "not counted" for this report.
     return calculated + (visibleCols.overtime ? overtimeSalary(row) ?? 0 : 0);
+  }
+
+  // PF / SSF by Employer / SSF by Employee / Overtime Allowance from the Salary
+  // Structure page, applied here to the attendance-adjusted amount actually
+  // earned this period (calculatedSalary + real overtime pay, regardless of
+  // whether the Overtime column itself is currently hidden) rather than the
+  // flat monthly Basic — so these shrink for a partial/absent period the
+  // same way the pay itself does. Overtime Allowance is a flat % add-on,
+  // distinct from the hours-based Overtime Salary already in this report.
+  function netPayableBase(row: { salary: number | null; hours: number; overtime: number; paidOffDays: number }): number | null {
+    const calculated = calculatedSalary(row);
+    if (calculated == null) return null;
+    return calculated + (overtimeSalary(row) ?? 0);
+  }
+  function pfDeduction(row: Parameters<typeof netPayableBase>[0]): number | null {
+    const base = netPayableBase(row);
+    return base == null ? null : Math.round((base * pfRate) / 100);
+  }
+  function ssfDeduction(row: Parameters<typeof netPayableBase>[0]): number | null {
+    const base = netPayableBase(row);
+    return base == null ? null : Math.round((base * ssfRate) / 100);
+  }
+  function ssfByEmployeeDeduction(row: Parameters<typeof netPayableBase>[0]): number | null {
+    const base = netPayableBase(row);
+    return base == null ? null : Math.round((base * ssfByEmployeeRate) / 100);
+  }
+  function overtimeAllowance(row: Parameters<typeof netPayableBase>[0]): number | null {
+    const base = netPayableBase(row);
+    return base == null ? null : Math.round((base * overtimeAllowanceRate) / 100);
+  }
+  // Allowance is added flat here (same as Salary Structure's Gross = Basic +
+  // Allowance), never prorated by attendance and never part of the PF/SSF/
+  // SSF-by-Employee/Overtime-Allowance percentage base above — those stay
+  // Basic-only, exactly like computeSalaryFigures() on Salary Structure.
+  function netPayable(row: Parameters<typeof netPayableBase>[0] & { allowance: number }): number | null {
+    const base = netPayableBase(row);
+    if (base == null) return null;
+    return base + row.allowance - pfDeduction(row)! - ssfDeduction(row)! - ssfByEmployeeDeduction(row)! + overtimeAllowance(row)!;
   }
 
   function exportCsv() {
@@ -436,6 +517,9 @@ export default function PayrollPage() {
       'Calculated Salary',
       ...(visibleCols.overtime ? ['Overtime Salary'] : []),
       'Total Salary',
+      ...(visibleCols.deductions
+        ? ['Allowance', `PF (${pfRate}%)`, `SSF by Employer (${ssfRate}%)`, `SSF by Employee (${ssfByEmployeeRate}%)`, `Overtime Allowance (${overtimeAllowanceRate}%)`, 'Net Payable']
+        : []),
     ];
     const lines = byEmployee.map(row => [
       row.enrollId,
@@ -449,6 +533,9 @@ export default function PayrollPage() {
       calculatedSalary(row) ?? '',
       ...(visibleCols.overtime ? [overtimeSalary(row) ?? ''] : []),
       totalSalary(row) ?? '',
+      ...(visibleCols.deductions
+        ? [row.allowance, pfDeduction(row) ?? '', ssfDeduction(row) ?? '', ssfByEmployeeDeduction(row) ?? '', overtimeAllowance(row) ?? '', netPayable(row) ?? '']
+        : []),
     ]);
     downloadExcel(`payroll_${start}_to_${end}.csv`, header, lines);
   }
@@ -547,6 +634,7 @@ export default function PayrollPage() {
     ['totalHours', 'Total Hours'],
     ['overtime', 'Overtime'],
     ['lateEarly', 'Late / Early Days'],
+    ['deductions', 'Allowance / PF / SSF / Net Payable'],
   ] as const;
 
   const columnSettings = (
@@ -567,7 +655,9 @@ export default function PayrollPage() {
           </div>
           <p className="px-4 pb-1 pt-2 text-[11px] leading-snug text-slate-400">
             Show or hide these columns in the report and its printed / PDF copy. Hiding Overtime also drops
-            overtime pay from the totals.
+            overtime pay from the totals. Allowance comes straight from Salary Structure (flat, not attendance-adjusted); PF /
+            SSF by Employer / SSF by Employee / Overtime Allowance are the same rates set there too, applied to each row&apos;s
+            attendance-adjusted Total Salary this period, with Allowance added on top for Net Payable.
           </p>
           <div className="p-1.5">
             {COLUMN_OPTIONS.map(([key, label]) => {
@@ -656,7 +746,10 @@ export default function PayrollPage() {
         <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
           <span className="text-xs font-medium text-good-text/80">Total Salary Payable</span>
           <div className="mt-1 text-base font-bold text-good-text">{totals.totalSalaryPayable.toLocaleString()}</div>
-          <div className="mt-0.5 text-[11px] text-good-text/70">Earned so far this period</div>
+          <div className="mt-0.5 text-[11px] text-good-text/70">
+            Earned so far this period
+            {visibleCols.deductions && ` · Net Payable ${totals.totalNetPayable.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+          </div>
         </div>
         <div className="rounded-xl bg-info-bg p-3 shadow-sm ring-1 ring-inset ring-info/10">
           <span className="text-xs font-medium text-info-text/80">Total Employees Salary</span>
@@ -713,6 +806,25 @@ export default function PayrollPage() {
               <ReportIcon className="h-5 w-5" />
             </span>
             <h2 className="text-lg font-bold text-ink">{period.label} Salary Report</h2>
+          </div>
+
+          <div className="flex items-center gap-1.5" title="Whether Total Salary / Net Payable prorate for attendance, or pay everyone's full stored Basic every period regardless">
+            <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs font-semibold shadow-sm">
+              <button
+                type="button"
+                onClick={() => setSalaryMode('attendance')}
+                className={`px-3 py-2 ${salaryMode === 'attendance' ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              >
+                Attendance-based
+              </button>
+              <button
+                type="button"
+                onClick={() => setSalaryMode('flat')}
+                className={`px-3 py-2 ${salaryMode === 'flat' ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+              >
+                Flat Monthly
+              </button>
+            </div>
           </div>
 
           <div className="relative">
@@ -825,6 +937,36 @@ export default function PayrollPage() {
                     </dd>
                   </div>
                 )}
+                {visibleCols.deductions && (
+                  <>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate-400">Allowance</dt>
+                      <dd className="text-ink tabular-nums">{row.allowance.toLocaleString()}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate-400">PF</dt>
+                      <dd className="text-critical-text tabular-nums">{pfDeduction(row) != null ? pfDeduction(row)!.toLocaleString() : '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate-400">SSF by Employer</dt>
+                      <dd className="text-critical-text tabular-nums">{ssfDeduction(row) != null ? ssfDeduction(row)!.toLocaleString() : '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate-400">SSF by Employee</dt>
+                      <dd className="text-critical-text tabular-nums">
+                        {ssfByEmployeeDeduction(row) != null ? ssfByEmployeeDeduction(row)!.toLocaleString() : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate-400">Overtime Allowance</dt>
+                      <dd className="text-good-text tabular-nums">{overtimeAllowance(row) != null ? overtimeAllowance(row)!.toLocaleString() : '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate-400">Net Payable</dt>
+                      <dd className="font-bold text-good-text tabular-nums">{netPayable(row) != null ? netPayable(row)!.toLocaleString() : '—'}</dd>
+                    </div>
+                  </>
+                )}
               </dl>
             </div>
           ))}
@@ -840,12 +982,15 @@ export default function PayrollPage() {
           )}
         </div>
 
-        <div className="print-report mt-4 hidden max-h-[65vh] overflow-auto md:block print:!block print:max-h-none print:overflow-visible">
+        <HorizontalScrollButtons targetRef={tableScrollRef} />
+        <div ref={tableScrollRef} className="print-report mt-4 hidden max-h-[65vh] overflow-auto md:block print:!block print:max-h-none print:overflow-visible">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="sticky top-0 z-10 border-y border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <th className="whitespace-nowrap px-3 py-2 font-medium">ID</th>
-              <th className="whitespace-nowrap px-3 py-2 font-medium">Employee</th>
+              <th className="sticky left-0 z-20 w-16 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium">ID</th>
+              <th className="sticky left-16 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none">
+                Employee
+              </th>
               {visibleCols.workedDays && <th className="whitespace-nowrap px-3 py-2 font-medium">Worked Days</th>}
               {visibleCols.totalHours && <th className="whitespace-nowrap px-3 py-2 font-medium">Total Hours</th>}
               {visibleCols.overtime && <th className="whitespace-nowrap px-3 py-2 font-medium">Overtime</th>}
@@ -853,9 +998,27 @@ export default function PayrollPage() {
               <th className="whitespace-nowrap px-3 py-2 font-medium">Salary</th>
               <th className="whitespace-nowrap px-3 py-2 font-medium">Calculated Salary</th>
               {visibleCols.overtime && <th className="whitespace-nowrap pl-2 pr-3 py-2 font-medium">Overtime Salary</th>}
-              <th className="sticky right-0 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none">
+              <th
+                className={`whitespace-nowrap px-3 py-2 font-medium ${
+                  visibleCols.deductions
+                    ? ''
+                    : 'sticky right-0 z-20 bg-slate-50 shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none'
+                }`}
+              >
                 Total Salary
               </th>
+              {visibleCols.deductions && (
+                <>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">Allowance</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-critical-text">PF ({pfRate}%)</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-critical-text">SSF by Employer ({ssfRate}%)</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-critical-text">SSF by Employee ({ssfByEmployeeRate}%)</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-good-text">Overtime Allowance ({overtimeAllowanceRate}%)</th>
+                  <th className="sticky right-0 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none">
+                    Net Payable
+                  </th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -863,8 +1026,10 @@ export default function PayrollPage() {
               const rowBg = i % 2 === 1 ? 'bg-slate-50' : 'bg-white';
               return (
                 <tr key={row.id} className={`border-b border-slate-100 last:border-0 hover:bg-slate-100 ${i % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
-                  <td className="whitespace-nowrap px-3 py-2 text-slate-600">{row.enrollId}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-medium text-ink">
+                  <td className={`sticky left-0 z-[1] whitespace-nowrap px-3 py-2 text-slate-600 ${rowBg}`}>{row.enrollId}</td>
+                  <td
+                    className={`sticky left-16 z-[1] whitespace-nowrap px-3 py-2 font-medium text-ink shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none ${rowBg}`}
+                  >
                     <Link href={detailHref(row.id)} className="flex items-center gap-2.5 hover:text-accent hover:underline">
                       <span className="print:hidden">
                         <Avatar name={row.name} />
@@ -897,16 +1062,40 @@ export default function PayrollPage() {
                     </td>
                   )}
                   <td
-                    className={`sticky right-0 z-[1] whitespace-nowrap px-3 py-2 font-bold text-good-text shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none ${rowBg}`}
+                    className={`whitespace-nowrap px-3 py-2 font-bold text-good-text ${
+                      visibleCols.deductions ? '' : `sticky right-0 z-[1] shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none ${rowBg}`
+                    }`}
                   >
                     {totalSalary(row) != null ? totalSalary(row)!.toLocaleString() : '—'}
                   </td>
+                  {visibleCols.deductions && (
+                    <>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-600 tabular-nums">{row.allowance.toLocaleString()}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-critical-text tabular-nums">
+                        {pfDeduction(row) != null ? pfDeduction(row)!.toLocaleString() : '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-critical-text tabular-nums">
+                        {ssfDeduction(row) != null ? ssfDeduction(row)!.toLocaleString() : '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-critical-text tabular-nums">
+                        {ssfByEmployeeDeduction(row) != null ? ssfByEmployeeDeduction(row)!.toLocaleString() : '—'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-good-text tabular-nums">
+                        {overtimeAllowance(row) != null ? overtimeAllowance(row)!.toLocaleString() : '—'}
+                      </td>
+                      <td
+                        className={`sticky right-0 z-[1] whitespace-nowrap px-3 py-2 font-bold text-good-text shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none ${rowBg}`}
+                      >
+                        {netPayable(row) != null ? netPayable(row)!.toLocaleString() : '—'}
+                      </td>
+                    </>
+                  )}
                 </tr>
               );
             })}
             {byEmployee.length === 0 && (
               <tr>
-                <td colSpan={10 - hiddenColCount} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={16 - hiddenColCount} className="px-4 py-8 text-center text-slate-400">
                   {loading ? 'Loading…' : 'No active employees.'}
                 </td>
               </tr>
@@ -915,7 +1104,10 @@ export default function PayrollPage() {
           {byEmployee.length > 0 && (
             <tfoot>
               <tr className="sticky bottom-0 border-t-2 border-slate-200 bg-slate-50 text-sm font-bold text-ink">
-                <td colSpan={2} className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <td
+                  colSpan={2}
+                  className="sticky left-0 z-[1] whitespace-nowrap bg-slate-50 px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none"
+                >
                   Total
                 </td>
                 {visibleCols.workedDays && (
@@ -944,11 +1136,29 @@ export default function PayrollPage() {
                     {totals.totalOvertimeSalary.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   </td>
                 )}
-                <td className="sticky right-0 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 text-good-text shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none">
+                <td
+                  className={`whitespace-nowrap px-3 py-2 text-good-text ${
+                    visibleCols.deductions ? '' : 'sticky right-0 z-20 bg-slate-50 shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none'
+                  }`}
+                >
                   {(totals.totalSalaryPayable + (visibleCols.overtime ? totals.totalOvertimeSalary : 0)).toLocaleString(undefined, {
                     maximumFractionDigits: 0,
                   })}
                 </td>
+                {visibleCols.deductions && (
+                  <>
+                    <td className="whitespace-nowrap px-3 py-2">{totals.totalAllowance.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{totals.totalPf.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{totals.totalSsf.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{totals.totalSsfByEmployee.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-good-text">
+                      {totals.totalOvertimeAllowance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </td>
+                    <td className="sticky right-0 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 text-good-text shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none">
+                      {totals.totalNetPayable.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </td>
+                  </>
+                )}
               </tr>
             </tfoot>
           )}

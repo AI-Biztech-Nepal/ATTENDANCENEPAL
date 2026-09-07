@@ -9,6 +9,7 @@ import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import { useConfirm } from '@/components/ConfirmDialog';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import type { Employee, Shift, Profile, Branch, Department } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
 
@@ -94,6 +95,7 @@ export default function EmployeesPage() {
 
 function EmployeesView() {
   const confirm = useConfirm();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [rosterEmployeeIds, setRosterEmployeeIds] = useState<Set<string>>(new Set());
@@ -939,7 +941,8 @@ function EmployeesView() {
         </div>
 
         {/* Desktop: full table. */}
-        <div className="hidden overflow-x-auto md:block">
+        <HorizontalScrollButtons targetRef={tableScrollRef} />
+        <div ref={tableScrollRef} className="hidden overflow-x-auto md:block">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">

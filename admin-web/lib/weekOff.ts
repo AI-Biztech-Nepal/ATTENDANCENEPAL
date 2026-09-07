@@ -31,6 +31,12 @@ export type CompanyWeekOffConfig = {
   pfRate: number;
   ssfRate: number;
   tdsRate: number;
+  /** A flat "% of Basic" Overtime allowance (companies.overtime_rate,
+   * 20260906120000_ssf_override_and_overtime_rate.sql) — same simple pattern
+   * as PF/SSF/TDS, set on the Salary Structure page. Deliberately unrelated
+   * to the real attendance-based overtime pay computed elsewhere from
+   * otHoursPerDay/otMultiplier. Defaults to 0 when there's no company yet. */
+  overtimeRate: number;
 };
 
 const DEFAULT_CONFIG: CompanyWeekOffConfig = {
@@ -42,6 +48,7 @@ const DEFAULT_CONFIG: CompanyWeekOffConfig = {
   pfRate: 10,
   ssfRate: 11,
   tdsRate: 0,
+  overtimeRate: 0,
 };
 
 /** The current user's own company_id + weekly_off_day + roster_mode +
@@ -57,7 +64,7 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
   if (!companyId) return DEFAULT_CONFIG;
   const { data: company } = await supabase
     .from('companies')
-    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate')
+    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate, overtime_rate')
     .eq('id', companyId)
     .single();
   return {
@@ -69,6 +76,7 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
     pfRate: company?.pf_rate ?? DEFAULT_CONFIG.pfRate,
     ssfRate: company?.ssf_rate ?? DEFAULT_CONFIG.ssfRate,
     tdsRate: company?.tds_rate ?? DEFAULT_CONFIG.tdsRate,
+    overtimeRate: company?.overtime_rate ?? DEFAULT_CONFIG.overtimeRate,
   };
 }
 

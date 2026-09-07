@@ -1,15 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
 import Badge from '@/components/Badge';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, LeaveRequest } from '@/lib/types';
 
 export default function LeavePage() {
   const { system } = useCalendarSystem();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filter, setFilter] = useState<'All' | 'pending' | 'approved' | 'rejected'>('pending');
@@ -107,7 +109,8 @@ export default function LeavePage() {
           )}
         </div>
 
-        <div className="hidden overflow-x-auto md:block">
+        <HorizontalScrollButtons targetRef={tableScrollRef} />
+        <div ref={tableScrollRef} className="hidden overflow-x-auto md:block">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">

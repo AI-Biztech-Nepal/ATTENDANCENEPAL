@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Badge from '@/components/Badge';
 import DateRangePicker from '@/components/DateRangePicker';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
@@ -124,6 +125,7 @@ function statusBadge(r: Row) {
 
 export default function AttendanceReportTable({ initialEmployeeId }: { initialEmployeeId?: string | null }) {
   const { system } = useCalendarSystem();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [from, setFrom] = useState(isoDaysAgo(0));
   const [to, setTo] = useState(isoDaysAgo(0));
   const [status, setStatus] = useState<'All' | 'Present' | 'Late' | 'Early' | 'Absent' | 'Week Off' | 'Leave' | 'Exempt'>('All');
@@ -472,7 +474,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             horizontal scroll instead of a condensed/truncated mobile layout,
             so it always matches the desktop web view exactly. Print gets the
             full table instead of just the scrolled-into-view slice. */}
-        <div className="max-h-[65vh] overflow-auto rounded-lg print:max-h-none print:overflow-visible">
+        <HorizontalScrollButtons targetRef={tableScrollRef} />
+        <div ref={tableScrollRef} className="max-h-[65vh] overflow-auto rounded-lg print:max-h-none print:overflow-visible">
         {/* print:-prefixed classes below only take effect inside the browser's
             print/Save-as-PDF preview — the on-screen table (colors, compact
             10-12px sizing) is untouched. Print gets a plain black-and-white

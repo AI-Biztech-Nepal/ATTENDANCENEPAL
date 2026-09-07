@@ -9,41 +9,47 @@ export type SalaryFigures = {
   pfAmt: number | null;
   ssfAmt: number | null;
   tdsAmt: number | null;
+  overtimeAmt: number | null;
   net: number | null;
 };
 
 /** Turns an employee's stored Basic / Allowance plus the company-wide
- * PF / SSF / TDS percentages into the seven figures every salary view
+ * PF / SSF / TDS / Overtime percentages into the figures every salary view
  * shows. One place so the list page, the per-employee page and any export
- * never drift apart. */
+ * never drift apart. Overtime here is a flat allowance (ADDED to Net
+ * Payable), not the real attendance-based overtime pay computed elsewhere
+ * from actual hours worked — the two are intentionally different numbers. */
 export function computeSalaryFigures(
   salary: number | null,
   allowanceRaw: number | null,
   pf: number,
   ssf: number,
-  tds: number
+  tds: number,
+  overtimeRate: number = 0
 ): SalaryFigures {
   const allowance = allowanceRaw ?? 0;
   if (salary == null) {
-    return { basic: null, allowance, gross: null, pfAmt: null, ssfAmt: null, tdsAmt: null, net: null };
+    return { basic: null, allowance, gross: null, pfAmt: null, ssfAmt: null, tdsAmt: null, overtimeAmt: null, net: null };
   }
   const pfAmt = Math.round((salary * pf) / 100);
   const ssfAmt = Math.round((salary * ssf) / 100);
   const tdsAmt = Math.round((salary * tds) / 100);
+  const overtimeAmt = Math.round((salary * overtimeRate) / 100);
   const gross = salary + allowance;
-  return { basic: salary, allowance, gross, pfAmt, ssfAmt, tdsAmt, net: gross - pfAmt - ssfAmt - tdsAmt };
+  return { basic: salary, allowance, gross, pfAmt, ssfAmt, tdsAmt, overtimeAmt, net: gross - pfAmt - ssfAmt - tdsAmt + overtimeAmt };
 }
 
 export type BreakdownLine = { label: string; value: number | null; sign?: '+' | '−'; strong?: boolean };
 
-export function salaryBreakdownLines(f: SalaryFigures, pf: number, ssf: number, tds: number): BreakdownLine[] {
+export function salaryBreakdownLines(f: SalaryFigures, pf: number, ssf: number, tds: number, overtimeRate: number = 0): BreakdownLine[] {
   return [
     { label: 'Basic', value: f.basic },
     { label: 'Allowance', value: f.allowance, sign: '+' },
     { label: 'Gross Pay', value: f.gross, strong: true },
     { label: `PF (${pf}% of basic)`, value: f.pfAmt, sign: '−' },
-    { label: `SSF (${ssf}% of basic)`, value: f.ssfAmt, sign: '−' },
-    { label: `TDS (${tds}% of basic)`, value: f.tdsAmt, sign: '−' },
+    { label: `SSF by Employer (${ssf}% of basic)`, value: f.ssfAmt, sign: '−' },
+    { label: `SSF by Employee (${tds}% of basic)`, value: f.tdsAmt, sign: '−' },
+    { label: `Overtime allowance (${overtimeRate}% of basic)`, value: f.overtimeAmt, sign: '+' },
     { label: 'Net Payable', value: f.net, strong: true },
   ];
 }
@@ -63,6 +69,7 @@ export default function SalaryBreakdown({
   pf,
   ssf,
   tds,
+  overtimeRate = 0,
   daysInMonth,
   monthLabel,
   system,
@@ -72,6 +79,7 @@ export default function SalaryBreakdown({
   pf: number;
   ssf: number;
   tds: number;
+  overtimeRate?: number;
   daysInMonth: number;
   monthLabel: string;
   system: CalendarSystem;
@@ -86,7 +94,7 @@ export default function SalaryBreakdown({
     ['SSF no', employee.ssf_no || '—'],
   ];
 
-  const lines = salaryBreakdownLines(figures, pf, ssf, tds);
+  const lines = salaryBreakdownLines(figures, pf, ssf, tds, overtimeRate);
 
   return (
     <div className="grid gap-5 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm sm:grid-cols-2 print:border-slate-300 print:shadow-none">

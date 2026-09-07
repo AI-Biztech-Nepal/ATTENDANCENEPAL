@@ -7,6 +7,7 @@ import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import Leaderboard from '@/components/Leaderboard';
 import TaskHoursChart from '@/components/TaskHoursChart';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso } from '@/lib/shift';
@@ -25,6 +26,7 @@ const STATUS_TONE: Record<TaskStatus, 'good' | 'warning' | 'critical' | 'info' |
 
 export default function TasksPage() {
   const { system } = useCalendarSystem();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filter, setFilter] = useState<TaskStatus | 'All'>('submitted');
@@ -267,7 +269,8 @@ export default function TasksPage() {
             )}
           </div>
 
-          <div className="hidden overflow-x-auto md:block">
+          <HorizontalScrollButtons targetRef={tableScrollRef} />
+          <div ref={tableScrollRef} className="hidden overflow-x-auto md:block">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
