@@ -149,6 +149,14 @@ export default function SalaryStructurePage() {
   const perDay = viewMode === 'perDay';
   const factor = perDay ? 1 / daysInMonth : 1;
 
+  // The Payroll report's column cog governs this table's Overtime column too
+  // — it's the same flat "% of Basic" allowance both places. Off ⇒ the column
+  // is hidden here AND left out of Net Payable, matching the report's
+  // "not shown means not counted" rule for overtime.
+  const showOvertime = reportCols.overtime;
+  const effectiveOvertime = showOvertime ? overtime : 0;
+  const structureColCount = showOvertime ? 10 : 9;
+
   /** Monthly figure -> the number shown, scaled to the active view. */
   function shown(n: number | null | undefined): string {
     if (n == null) return '—';
@@ -163,8 +171,8 @@ export default function SalaryStructurePage() {
           ? true
           : [e.name, e.designation, e.employee_code].filter(Boolean).some(v => (v as string).toLowerCase().includes(term))
       )
-      .map(e => ({ e, ...computeSalaryFigures(e.salary, e.allowance, pf, ssf, tds, overtime) }));
-  }, [employees, search, pf, ssf, tds, overtime]);
+      .map(e => ({ e, ...computeSalaryFigures(e.salary, e.allowance, pf, ssf, tds, effectiveOvertime) }));
+  }, [employees, search, pf, ssf, tds, effectiveOvertime]);
 
   const totals = useMemo(() => {
     let basic = 0,
@@ -319,7 +327,7 @@ export default function SalaryStructurePage() {
       `PF (${pf}%)${suffix}`,
       `SSF by Employer (${ssf}%)${suffix}`,
       `SSF by Employee (${tds}%)${suffix}`,
-      `Overtime (${overtime}%)${suffix}`,
+      ...(showOvertime ? [`Overtime (${overtime}%)${suffix}`] : []),
       `Net Payable${suffix}`,
     ];
     const cell = (n: number | null) => (n == null ? '' : Number((n * factor).toFixed(perDay ? 2 : 0)));
@@ -332,7 +340,7 @@ export default function SalaryStructurePage() {
       cell(r.pfAmt),
       cell(r.ssfAmt),
       cell(r.tdsAmt),
-      cell(r.overtimeAmt),
+      ...(showOvertime ? [cell(r.overtimeAmt)] : []),
       cell(r.net),
     ]);
     downloadExcel(`salary_structure_${start}_to_${end}${perDay ? '_per_day' : ''}.csv`, header, lines);
@@ -390,7 +398,8 @@ export default function SalaryStructurePage() {
           </div>
           <p className="px-4 pb-1 pt-2 text-[11px] leading-snug text-slate-400">
             Show or hide these columns in the monthly Payroll report and its printed / PDF copy — a company-wide
-            choice. Hiding Overtime also drops overtime pay from that report&apos;s totals.
+            choice. Hiding Overtime also drops overtime pay from that report&apos;s totals, and hides the Overtime
+            allowance column here (and out of Net Payable).
           </p>
           <div className="p-1.5">
             {REPORT_COLUMN_OPTIONS.map(([key, label]) => {
@@ -533,7 +542,8 @@ export default function SalaryStructurePage() {
         <div className="hidden px-4 pt-4 sm:px-6 print:block">
           <h1 className="text-lg font-bold text-ink">Monthly Salary Structure — {period.label}</h1>
           <p className="text-xs text-slate-500">
-            {modeLine} · PF {pf}% · SSF by Employer {ssf}% · SSF by Employee {tds}% · Overtime {overtime}% of Basic
+            {modeLine} · PF {pf}% · SSF by Employer {ssf}% · SSF by Employee {tds}%
+            {showOvertime && ` · Overtime ${overtime}% of Basic`}
           </p>
         </div>
 
@@ -558,9 +568,11 @@ export default function SalaryStructurePage() {
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
                   {rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}
                 </th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-good-text">
-                  {rateHeader('Overtime', overtimeDraft, setOvertimeDraft)}
-                </th>
+                {showOvertime && (
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-good-text">
+                    {rateHeader('Overtime', overtimeDraft, setOvertimeDraft)}
+                  </th>
+                )}
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Net Payable</th>
               </tr>
             </thead>
@@ -580,13 +592,15 @@ export default function SalaryStructurePage() {
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(pfAmt)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(ssfAmt)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(tdsAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(overtimeAmt)}</td>
+                  {showOvertime && (
+                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(overtimeAmt)}</td>
+                  )}
                   <td className="whitespace-nowrap px-3 py-2 text-right font-bold tabular-nums text-good-text">{shown(net)}</td>
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={structureColCount} className="px-4 py-8 text-center text-slate-400">
                     {loading ? 'Loading…' : 'No active employees.'}
                   </td>
                 </tr>
@@ -607,7 +621,9 @@ export default function SalaryStructurePage() {
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.pfAmt)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.ssfAmt)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.tdsAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.overtimeAmt)}</td>
+                  {showOvertime && (
+                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.overtimeAmt)}</td>
+                  )}
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.net)}</td>
                 </tr>
               </tfoot>
@@ -617,12 +633,15 @@ export default function SalaryStructurePage() {
       </div>
 
       <p className="mt-3 text-xs text-slate-400">
-        Net Payable = Basic + Allowance − PF − SSF by Employer − SSF by Employee + Overtime. Click a Basic or Allowance figure
-        to edit it for that employee, or click a name to open that employee&apos;s full salary breakdown. PF / SSF by
-        Employer / SSF by Employee /
-        Overtime are all company-wide rates. Per-day figures divide the monthly amount by the number of days in {period.label}. The monthly
-        Payroll report reads these figures and is not edited there. The Overtime line is a flat allowance (% of Basic), not
-        the real attendance-based overtime pay the Payroll report calculates from actual hours worked.
+        Net Payable = Basic + Allowance − PF − SSF by Employer − SSF by Employee{showOvertime && ' + Overtime'}. Click a Basic
+        or Allowance figure to edit it for that employee, or click a name to open that employee&apos;s full salary breakdown. PF
+        / SSF by Employer / SSF by Employee{showOvertime && ' / Overtime'} are all company-wide rates. Per-day figures divide the
+        monthly amount by the number of days in {period.label}. The monthly Payroll report reads these figures and is not edited
+        there.
+        {showOvertime &&
+          ' The Overtime line is a flat allowance (% of Basic), not the real attendance-based overtime pay the Payroll report calculates from actual hours worked.'}
+        {!showOvertime &&
+          ' The Overtime allowance is currently hidden (Payroll report column cog) — it is left out of the table and of Net Payable; each employee’s own breakdown page still shows it.'}
         {isAdmin && ' The cog above the table picks which optional columns the Payroll report shows.'}
       </p>
     </AppShell>
