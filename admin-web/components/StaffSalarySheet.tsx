@@ -265,7 +265,10 @@ export default function StaffSalarySheet() {
     }
     return [...byBranch.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([branch, list]) => ({ branch, list: list.sort((a, b) => a.name.localeCompare(b.name)) }));
+      .map(([branch, list]) => ({
+        branch,
+        list: list.sort((a, b) => a.enrollId.localeCompare(b.enrollId, undefined, { numeric: true, sensitivity: 'base' })),
+      }));
   }, [employees, branchName, ssfEmployerRate, ssfEmployeeRate]);
 
   const allRows = useMemo(() => groups.flatMap(g => g.list), [groups]);
