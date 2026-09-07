@@ -18,8 +18,7 @@ import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 const SSF_EMPLOYER_RATE = 0.2;
 const SSF_EMPLOYEE_RATE = 0.11;
 
-function money(n: number | null | undefined) {
-  if (n == null) return '—';
+function money(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
@@ -44,31 +43,26 @@ type AttendanceAgg = { days: number; hours: number; overtime: number; paidOffDay
 type SheetRow = {
   id: string;
   name: string;
-  basic: number | null;
+  basic: number;
   dearness: number;
-  ssfBasis: number | null; // 20% of basic — the "SSF (20% of basic)" build-up column
-  mgs: number | null; // basic + dearness + employer SSF
-  ssfEmployer: number | null;
-  ssfEmployee: number | null;
-  totalSsf: number | null;
-  net: number | null; // mgs - totalSsf
+  ssfBasis: number; // 20% of basic — the "SSF (20% of basic)" build-up column
+  mgs: number; // basic + dearness + employer SSF
+  ssfEmployer: number;
+  ssfEmployee: number;
+  totalSsf: number;
+  net: number; // mgs - totalSsf
 };
 
 /**
- * The "Staff Salary Sheet" — a fixed-salary payroll format for one customer
+ * The "Staff Salary Sheet" — a fixed-salary payroll report for one customer
  * (companies.payroll_format = 'staff_salary_sheet'). Everyone is paid their
  * full Basic + full Allowance (shown as "Dearness Allowance" here) every
  * month, with a 20%/11% SSF gross-up. There is NO attendance, proration,
- * overtime, PF or TDS.
- *
- * Renders in place of BOTH the standard attendance-based Payroll report
- * (app/payroll/page.tsx) and the standard Salary Structure list
- * (app/salary-structure/page.tsx) — same columns and math on both, so the
- * two pages stay logically identical for this customer. `editable` turns on
- * inline Basic / Dearness editing (Salary Structure) and links each name to
- * the Salary Structure detail page instead of the Payroll one.
+ * overtime, PF or TDS. Basic and Allowance are set per employee on the
+ * Salary Structure page. Rendered by app/payroll/page.tsx in place of the
+ * standard attendance-based report.
  */
-export default function StaffSalarySheet({ editable = false }: { editable?: boolean }) {
+export default function StaffSalarySheet() {
   const { system } = useCalendarSystem();
   const [period, setPeriod] = useState<CalendarPeriod>(() => {
     const { year, month } = currentSystemYearMonth(system);
@@ -100,12 +94,6 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
-
-  // Inline Basic / Dearness editing — only when `editable` (Salary Structure).
-  // Same edit-in-place pattern as the standard Salary Structure page.
-  const [editingCell, setEditingCell] = useState<{ id: string; field: 'salary' | 'allowance' } | null>(null);
-  const [cellDraft, setCellDraft] = useState('');
-  const [savingCell, setSavingCell] = useState(false);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -169,40 +157,13 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
 
   const periodOptions = useMemo(() => buildPeriodOptions(system, null, period), [system, period]);
 
-  // Opening an employee row drills into that employee's detail page — the
-  // Salary Structure detail from the editable sheet, the Payroll detail
-  // otherwise, matching whichever standard page this is standing in for.
+  // Opening an employee row drills into the shared per-employee day-by-day
+  // breakdown page (app/payroll/[employeeId]) — same page the standard
+  // Payroll report links to. This sheet carries no overtime settings, so
+  // that page falls back to its own 8h/1.5x defaults.
   function detailHref(id: string) {
     const params = new URLSearchParams({ start: period.start, end: period.end });
-    return `${editable ? '/salary-structure' : '/payroll'}/${id}?${params.toString()}`;
-  }
-
-  function startEditCell(id: string, field: 'salary' | 'allowance', current: number | null) {
-    setEditingCell({ id, field });
-    setCellDraft(current != null ? String(current) : '');
-  }
-  function cancelEditCell() {
-    setEditingCell(null);
-    setCellDraft('');
-  }
-  async function saveCell() {
-    if (!editingCell) return;
-    const { id, field } = editingCell;
-    const trimmed = cellDraft.trim();
-    const value = trimmed === '' ? null : Number(trimmed);
-    if (value != null && (Number.isNaN(value) || value < 0)) {
-      alert('Enter a valid amount (0 or more), or clear it to unset.');
-      return;
-    }
-    setSavingCell(true);
-    const { error } = await supabase.from('employees').update({ [field]: value }).eq('id', id);
-    setSavingCell(false);
-    if (error) {
-      alert(`Could not save: ${error.message}`);
-      return;
-    }
-    setEmployees(prev => prev.map(e => (e.id === id ? { ...e, [field]: value } : e)));
-    cancelEditCell();
+    return `/payroll/${id}?${params.toString()}`;
   }
 
   const branchName = useMemo(() => {
@@ -263,18 +224,11 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
   }, [employees, shifts, summaries, logs, dailyShiftByDate, holidays, leaveRequests, weeklyOffDay, weeklyPatternRows, period]);
 
   const groups = useMemo(() => {
-    // The read-only sheet (Payroll report) lists only staff who have a Basic
-    // set; the editable sheet (Salary Structure) lists everyone so a Basic
-    // can be entered for the first time.
     const rows: (SheetRow & { branch: string })[] = employees
-      .filter(e => editable || e.salary != null)
+      .filter(e => e.salary != null)
       .map(e => {
+        const basic = e.salary!;
         const dearness = Number(e.allowance ?? 0) || 0;
-        const branch = e.branch_id ? branchName.get(e.branch_id) ?? 'Unassigned' : 'Unassigned';
-        if (e.salary == null) {
-          return { id: e.id, name: e.name, branch, basic: null, dearness, ssfBasis: null, mgs: null, ssfEmployer: null, ssfEmployee: null, totalSsf: null, net: null };
-        }
-        const basic = e.salary;
         const ssfEmployer = basic * SSF_EMPLOYER_RATE;
         const ssfEmployee = basic * SSF_EMPLOYEE_RATE;
         const mgs = basic + dearness + ssfEmployer;
@@ -282,7 +236,7 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
         return {
           id: e.id,
           name: e.name,
-          branch,
+          branch: e.branch_id ? branchName.get(e.branch_id) ?? 'Unassigned' : 'Unassigned',
           basic,
           dearness,
           ssfBasis: ssfEmployer,
@@ -302,7 +256,7 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
     return [...byBranch.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([branch, list]) => ({ branch, list: list.sort((a, b) => a.name.localeCompare(b.name)) }));
-  }, [employees, branchName, editable]);
+  }, [employees, branchName]);
 
   const allRows = useMemo(() => groups.flatMap(g => g.list), [groups]);
 
@@ -325,7 +279,7 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
   }, [groups]);
 
   const grand = useMemo(() => {
-    const sum = (f: (r: SheetRow) => number | null) => allRows.reduce((s, r) => s + (f(r) ?? 0), 0);
+    const sum = (f: (r: SheetRow) => number) => allRows.reduce((s, r) => s + f(r), 0);
     return {
       basic: sum(r => r.basic),
       dearness: sum(r => r.dearness),
@@ -335,7 +289,6 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
       ssfEmployee: sum(r => r.ssfEmployee),
       totalSsf: sum(r => r.totalSsf),
       net: sum(r => r.net),
-      counted: allRows.filter(r => r.basic != null).length,
     };
   }, [allRows]);
 
@@ -385,7 +338,6 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
       'Total SSF Payable',
       'Net Monthly',
     ];
-    const n2 = (v: number | null) => (v == null ? '' : v.toFixed(2));
     let n = 0;
     const lines: (string | number)[][] = [];
     for (const g of groups) {
@@ -399,18 +351,18 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
           ...(visibleCols.workedDays ? [a.days] : []),
           ...(visibleCols.totalHours ? [fmtHrs(a.hours)] : []),
           ...(visibleCols.overtime ? [fmtHrs(a.overtime)] : []),
-          n2(r.basic),
-          n2(r.dearness),
-          n2(r.ssfBasis),
-          n2(r.mgs),
-          n2(r.ssfEmployer),
-          n2(r.ssfEmployee),
-          n2(r.totalSsf),
-          n2(r.net),
+          r.basic.toFixed(2),
+          r.dearness.toFixed(2),
+          r.ssfBasis.toFixed(2),
+          r.mgs.toFixed(2),
+          r.ssfEmployer.toFixed(2),
+          r.ssfEmployee.toFixed(2),
+          r.totalSsf.toFixed(2),
+          r.net.toFixed(2),
         ]);
       }
     }
-    downloadExcel(`${editable ? 'salary_structure' : 'staff_salary_sheet'}_${period.key}.csv`, header, lines);
+    downloadExcel(`staff_salary_sheet_${period.key}.csv`, header, lines);
   }
 
   // No text-align in the base class — Tailwind emits `text-right` after
@@ -419,54 +371,6 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
   const th = 'whitespace-nowrap px-2.5 py-2 align-bottom text-[11px] font-semibold uppercase leading-tight tracking-wide text-slate-500';
   const thNum = `${th} text-right`;
   const td = 'whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700';
-
-  // Basic / Dearness cell — a plain figure on the read-only sheet, click-to-edit
-  // on the editable one (Salary Structure). Not a nested component so the input
-  // keeps focus mid-type.
-  const amountCell = (id: string, field: 'salary' | 'allowance', value: number | null) => {
-    if (!editable) return <td className={td}>{money(value)}</td>;
-    if (editingCell?.id === id && editingCell.field === field) {
-      return (
-        <td className={`${td} align-top print:hidden`}>
-          <input
-            autoFocus
-            type="number"
-            min="0"
-            step="0.01"
-            value={cellDraft}
-            onChange={e => setCellDraft(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') saveCell();
-              if (e.key === 'Escape') cancelEditCell();
-            }}
-            className="w-24 rounded-md border border-slate-200 px-2 py-1 text-right text-xs tabular-nums text-ink focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-          />
-          <div className="mt-1 flex justify-end gap-2">
-            <button onClick={cancelEditCell} disabled={savingCell} className="text-[11px] font-medium text-slate-500 hover:underline disabled:opacity-60">
-              Cancel
-            </button>
-            <button onClick={saveCell} disabled={savingCell} className="text-[11px] font-semibold text-accent hover:underline disabled:opacity-60">
-              {savingCell ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </td>
-      );
-    }
-    return (
-      <td className={td}>
-        <span className="inline-flex items-center gap-1.5">
-          <span className={value == null ? 'text-slate-300' : undefined}>{money(value)}</span>
-          <button
-            onClick={() => startEditCell(id, field, value)}
-            title={field === 'salary' ? 'Edit basic salary' : 'Edit dearness allowance'}
-            className="text-slate-300 hover:text-accent print:hidden"
-          >
-            <EditIcon className="h-3.5 w-3.5" />
-          </button>
-        </span>
-      </td>
-    );
-  };
 
   const colCount = 10 + visibleAttCols.length;
 
@@ -519,7 +423,7 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
   );
 
   return (
-    <AppShell title={editable ? 'Salary Structure' : 'Payroll Report'}>
+    <AppShell title="Payroll Report">
       {/* 10–13 columns need landscape — scoped here so it only affects THIS
           report's print, leaving every other page's orientation toggle
           alone. The global @media-print table rules are otherwise tuned
@@ -537,7 +441,7 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
         <div className="rounded-xl bg-info-bg p-3.5 shadow-sm ring-1 ring-inset ring-info/10">
           <span className="text-xs font-medium text-info-text/80">Total Basic Salary</span>
           <div className="mt-1 text-lg font-bold tabular-nums text-info-text">{money(grand.basic)}</div>
-          <div className="mt-0.5 text-[11px] text-info-text/70">{grand.counted} staff</div>
+          <div className="mt-0.5 text-[11px] text-info-text/70">{allRows.length} staff</div>
         </div>
         <div className="rounded-xl bg-accent/10 p-3.5 shadow-sm ring-1 ring-inset ring-accent/10">
           <span className="text-xs font-medium text-accent/80">Total Dearness Allowance</span>
@@ -565,7 +469,6 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
             <div>
               <h2 className="text-lg font-bold text-ink">Staff Salary Sheet</h2>
               <p className="text-xs text-slate-500">
-                {editable ? 'Click a Basic or Dearness figure to edit it · ' : ''}
                 {period.label} · {formatDdMmYyyy(period.start, system)} to {formatDdMmYyyy(period.end, system)}
               </p>
             </div>
@@ -668,8 +571,8 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
                     {visibleCols.workedDays && <td className={td}>{att(item.row.id).days}</td>}
                     {visibleCols.totalHours && <td className={td}>{fmtHrs(att(item.row.id).hours)}</td>}
                     {visibleCols.overtime && <td className={td}>{fmtHrs(att(item.row.id).overtime)}</td>}
-                    {amountCell(item.row.id, 'salary', item.row.basic)}
-                    {amountCell(item.row.id, 'allowance', item.row.dearness)}
+                    <td className={td}>{money(item.row.basic)}</td>
+                    <td className={td}>{money(item.row.dearness)}</td>
                     <td className={td}>{money(item.row.ssfBasis)}</td>
                     <td className={td}>{money(item.row.mgs)}</td>
                     <td className={td}>{money(item.row.ssfEmployer)}</td>
@@ -725,14 +628,6 @@ export default function StaffSalarySheet({ editable = false }: { editable?: bool
 
       </div>
     </AppShell>
-  );
-}
-
-function EditIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-    </svg>
   );
 }
 
