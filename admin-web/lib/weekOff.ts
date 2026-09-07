@@ -37,7 +37,45 @@ export type CompanyWeekOffConfig = {
    * to the real attendance-based overtime pay computed elsewhere from
    * otHoursPerDay/otMultiplier. Defaults to 0 when there's no company yet. */
   overtimeRate: number;
+  /** Which optional columns the monthly Payroll report shows
+   * (companies.payroll_report_columns,
+   * 20260907130000_company_payroll_report_columns.sql) — one company-wide
+   * choice set on the Salary Structure page, read by the Payroll report.
+   * A missing key falls back to true (shown). Defaults to everything shown
+   * when there's no company yet. */
+  payrollReportColumns: PayrollReportColumns;
 };
+
+/** The Payroll report's optional columns — mirrors its `visibleCols`. */
+export type PayrollReportColumns = {
+  workedDays: boolean;
+  totalHours: boolean;
+  overtime: boolean;
+  lateEarly: boolean;
+  deductions: boolean;
+};
+
+export const DEFAULT_PAYROLL_REPORT_COLUMNS: PayrollReportColumns = {
+  workedDays: true,
+  totalHours: true,
+  overtime: true,
+  lateEarly: true,
+  deductions: true,
+};
+
+/** Coerce whatever is in companies.payroll_report_columns (jsonb, possibly
+ * null / partial) into a full PayrollReportColumns, each missing key shown. */
+export function normalizePayrollReportColumns(raw: unknown): PayrollReportColumns {
+  const obj = (raw ?? {}) as Record<string, unknown>;
+  const pick = (k: keyof PayrollReportColumns) => (typeof obj[k] === 'boolean' ? (obj[k] as boolean) : true);
+  return {
+    workedDays: pick('workedDays'),
+    totalHours: pick('totalHours'),
+    overtime: pick('overtime'),
+    lateEarly: pick('lateEarly'),
+    deductions: pick('deductions'),
+  };
+}
 
 const DEFAULT_CONFIG: CompanyWeekOffConfig = {
   companyId: null,
@@ -49,6 +87,7 @@ const DEFAULT_CONFIG: CompanyWeekOffConfig = {
   ssfRate: 11,
   tdsRate: 0,
   overtimeRate: 0,
+  payrollReportColumns: DEFAULT_PAYROLL_REPORT_COLUMNS,
 };
 
 /** The current user's own company_id + weekly_off_day + roster_mode +
@@ -64,7 +103,7 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
   if (!companyId) return DEFAULT_CONFIG;
   const { data: company } = await supabase
     .from('companies')
-    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate, overtime_rate')
+    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate, overtime_rate, payroll_report_columns')
     .eq('id', companyId)
     .single();
   return {
@@ -77,6 +116,7 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
     ssfRate: company?.ssf_rate ?? DEFAULT_CONFIG.ssfRate,
     tdsRate: company?.tds_rate ?? DEFAULT_CONFIG.tdsRate,
     overtimeRate: company?.overtime_rate ?? DEFAULT_CONFIG.overtimeRate,
+    payrollReportColumns: normalizePayrollReportColumns(company?.payroll_report_columns),
   };
 }
 

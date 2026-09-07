@@ -16,7 +16,11 @@ import {
   type CalendarPeriod,
 } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import { fetchMyCompanyWeekOffConfig } from '@/lib/weekOff';
+import {
+  DEFAULT_PAYROLL_REPORT_COLUMNS,
+  fetchMyCompanyWeekOffConfig,
+  type PayrollReportColumns,
+} from '@/lib/weekOff';
 import type { Employee } from '@/lib/types';
 
 /** The one place a company's salary structure is set: the three contribution
@@ -59,6 +63,25 @@ export default function SalaryStructurePage() {
   // by the number of days in the selected period's calendar month.
   const [viewMode, setViewMode] = useState<'monthly' | 'perDay'>('monthly');
 
+  // Which optional columns the monthly Payroll report shows
+  // (companies.payroll_report_columns). Set here — the cog menu in the table
+  // header — and only read by the Payroll report. Each toggle persists
+  // immediately (optimistic), company-wide, admin-only.
+  const [reportCols, setReportCols] = useState<PayrollReportColumns>(DEFAULT_PAYROLL_REPORT_COLUMNS);
+  const [savingReportCols, setSavingReportCols] = useState(false);
+  const [reportColsOpen, setReportColsOpen] = useState(false);
+  const reportColsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!reportColsOpen) return;
+    function onDown(e: MouseEvent) {
+      if (reportColsRef.current?.contains(e.target as Node)) return;
+      setReportColsOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [reportColsOpen]);
+
   // Same period model the Payroll page uses — a real calendar month in the
   // active AD/BS system. Resets to "this month" when the AD/BS switch flips.
   const [period, setPeriod] = useState<CalendarPeriod>(() => {
@@ -82,13 +105,14 @@ export default function SalaryStructurePage() {
       setIsAdmin(profile?.role === 'admin');
     });
 
-    fetchMyCompanyWeekOffConfig().then(({ companyId, pfRate, ssfRate, tdsRate, overtimeRate }) => {
+    fetchMyCompanyWeekOffConfig().then(({ companyId, pfRate, ssfRate, tdsRate, overtimeRate, payrollReportColumns }) => {
       setCompanyId(companyId);
       setSavedRates({ pf: pfRate, ssf: ssfRate, tds: tdsRate, overtime: overtimeRate });
       setPfDraft(String(pfRate));
       setSsfDraft(String(ssfRate));
       setTdsDraft(String(tdsRate));
       setOvertimeDraft(String(overtimeRate));
+      setReportCols(payrollReportColumns);
     });
 
     supabase
@@ -180,6 +204,22 @@ export default function SalaryStructurePage() {
       return;
     }
     setSavedRates({ pf, ssf, tds, overtime });
+  }
+
+  // Each column toggle saves on its own, right away — no dirty state. The
+  // whole map is written every time (jsonb column), so a half-written value
+  // can't happen. Reverts the optimistic flip if the write fails.
+  async function toggleReportCol(key: keyof PayrollReportColumns) {
+    if (!companyId || savingReportCols) return;
+    const next = { ...reportCols, [key]: !reportCols[key] };
+    setReportCols(next);
+    setSavingReportCols(true);
+    const { error } = await supabase.from('companies').update({ payroll_report_columns: next }).eq('id', companyId);
+    setSavingReportCols(false);
+    if (error) {
+      setReportCols(reportCols);
+      alert(`Could not save: ${error.message}`);
+    }
   }
 
   function cancelRates() {
@@ -320,6 +360,65 @@ export default function SalaryStructurePage() {
     </div>
   );
 
+  const REPORT_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
+    ['workedDays', 'Worked Days'],
+    ['totalHours', 'Total Hours'],
+    ['overtime', 'Overtime'],
+    ['lateEarly', 'Late / Early Days'],
+    ['deductions', 'Allowance / PF / SSF / Net Payable'],
+  ];
+
+  // The cog menu that used to live in the Payroll report header — it now
+  // sets a company-wide choice here, and the Payroll report simply reads it.
+  // Admin-only, same as the contribution rates above it.
+  const reportColumnsSettings = isAdmin ? (
+    <div className="relative print:hidden" ref={reportColsRef}>
+      <button
+        type="button"
+        onClick={() => setReportColsOpen(v => !v)}
+        title="Payroll report columns"
+        className="flex h-[30px] w-[30px] items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
+      >
+        <CogIcon className="h-[18px] w-[18px]" />
+      </button>
+      {reportColsOpen && (
+        <div className="absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+          <div className="flex items-center gap-2 border-b border-slate-100 bg-gradient-to-br from-accent/10 via-accent/5 to-transparent px-4 py-3">
+            <CogIcon className="h-4 w-4 text-accent" />
+            <span className="text-sm font-semibold text-ink">Payroll Report Columns</span>
+          </div>
+          <p className="px-4 pb-1 pt-2 text-[11px] leading-snug text-slate-400">
+            Show or hide these columns in the monthly Payroll report and its printed / PDF copy — a company-wide
+            choice. Hiding Overtime also drops overtime pay from that report&apos;s totals.
+          </p>
+          <div className="p-1.5">
+            {REPORT_COLUMN_OPTIONS.map(([key, label]) => {
+              const on = reportCols[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={savingReportCols}
+                  onClick={() => toggleReportCol(key)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm text-ink hover:bg-slate-50 disabled:opacity-60"
+                >
+                  {label}
+                  <span className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-good' : 'bg-slate-300'}`}>
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        on ? 'translate-x-[18px]' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   const detailQuery = `?start=${start}&end=${end}&view=${viewMode}`;
   const modeLine = perDay
     ? `Per-day amounts — one day of ${period.label} (${daysInMonth} days)`
@@ -421,7 +520,7 @@ export default function SalaryStructurePage() {
                 className="w-48 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-ink shadow-sm placeholder:text-slate-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
               />
             </div>
-            <TableExportBar onExportCsv={exportCsv} />
+            <TableExportBar onExportCsv={exportCsv} leading={reportColumnsSettings} />
           </div>
         </div>
 
@@ -523,6 +622,7 @@ export default function SalaryStructurePage() {
         Overtime are all company-wide rates. Per-day figures divide the monthly amount by the number of days in {period.label}. The monthly
         Payroll report reads these figures and is not edited there. The Overtime line is a flat allowance (% of Basic), not
         the real attendance-based overtime pay the Payroll report calculates from actual hours worked.
+        {isAdmin && ' The cog above the table picks which optional columns that Payroll report shows.'}
       </p>
     </AppShell>
   );
@@ -559,6 +659,15 @@ function EditIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function CogIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
