@@ -1194,6 +1194,10 @@ function EmployeesView() {
         </div>
       </div>
 
+      {/* Breathing room so the floating ‹ › scroll pill (fixed, bottom-right)
+          never sits on top of the Prev / Next pagination buttons. */}
+      <div aria-hidden className="h-20" />
+
       {showForm && (
         <div
           className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4"
