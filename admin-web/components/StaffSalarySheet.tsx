@@ -274,10 +274,17 @@ export default function StaffSalarySheet() {
   const allRows = useMemo(() => groups.flatMap(g => g.list), [groups]);
 
   // Flat render list: a group header row, then its employee rows.
+  //
+  // The branch header is skipped when the company has only one group, where
+  // it added a full-width band repeating what the whole sheet already is —
+  // most companies here have a single branch, so it was pure noise for them.
+  // Companies that really are split across branches (and the "Unassigned"
+  // bucket alongside a real branch) still get their headers.
   const renderItems = useMemo(() => {
     const items: ({ kind: 'group'; branch: string } | { kind: 'row'; row: SheetRow & { branch: string } })[] = [];
+    const showGroupHeaders = groups.length > 1;
     for (const g of groups) {
-      items.push({ kind: 'group', branch: g.branch });
+      if (showGroupHeaders) items.push({ kind: 'group', branch: g.branch });
       for (const r of g.list) {
         items.push({ kind: 'row', row: r });
       }
@@ -373,8 +380,13 @@ export default function StaffSalarySheet() {
   // No text-align in the base class — Tailwind emits `text-right` after
   // `text-center`/`text-left` in the sheet, so a shared `text-right` here
   // would beat a per-column override. Each th/td sets its own alignment.
-  const th = 'whitespace-nowrap px-2.5 py-2 align-bottom text-[11px] font-semibold uppercase leading-tight tracking-wide text-slate-500';
-  const thNum = `${th} text-right`;
+  // Headers sit left, heavier than the body, while the figures under them
+  // stay right-aligned on their decimal. Ranging the two-line headings off a
+  // common left edge makes them scannable as labels; right-aligning them
+  // pushed each heading to a different start point, so the row read as a
+  // ragged wall of text above a tidy column of numbers.
+  const th = 'whitespace-nowrap px-2.5 py-2 align-bottom text-[11px] font-extrabold uppercase leading-tight tracking-wide text-slate-500';
+  const thNum = `${th} text-left`;
   const td = 'whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700';
 
   const colCount = 10 + visibleAttCols.length;
@@ -512,7 +524,7 @@ export default function StaffSalarySheet() {
           <table className="ssheet w-full text-right text-[12.5px]">
             <thead>
               <tr className="border-y border-slate-200 bg-slate-50">
-                <th className={`${th} sticky left-0 z-10 w-16 bg-slate-50 text-center shadow-none`}>Enroll ID</th>
+                <th className={`${th} sticky left-0 z-10 w-16 bg-slate-50 text-left shadow-none`}>ID</th>
                 <th className={`${th} sticky left-16 z-10 min-w-[10rem] bg-slate-50 text-left shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none`}>
                   Employee Name
                 </th>
@@ -530,11 +542,9 @@ export default function StaffSalarySheet() {
                 )}
                 {visibleCols.overtime && <th className={thNum}>Overtime</th>}
                 <th className={thNum}>
-                  Basic Salary<br />
-                  83/84
+                  Basic Salary
                 </th>
                 <th className={thNum}>
-                  Dearness<br />
                   Allowance
                 </th>
                 <th className={thNum}>
@@ -543,7 +553,7 @@ export default function StaffSalarySheet() {
                 </th>
                 <th className={thNum}>
                   Monthly Gross<br />
-                  Salary (MGS)
+                  Salary
                 </th>
                 <th className={thNum}>
                   SSF by Employer<br />
@@ -551,7 +561,7 @@ export default function StaffSalarySheet() {
                 </th>
                 <th className={thNum}>
                   SSF by Employee<br />
-                  {ssfEmployeeRate}% — Deduction
+                  {ssfEmployeeRate}% of Basic
                 </th>
                 <th className={thNum}>
                   Total SSF<br />
