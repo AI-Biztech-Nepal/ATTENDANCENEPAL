@@ -392,6 +392,12 @@ export default function StaffSalarySheet() {
   // ragged wall of text above a tidy column of numbers.
   const th = 'whitespace-nowrap px-2.5 py-2 align-bottom text-[11px] font-extrabold uppercase leading-tight tracking-wide text-slate-500';
   const thNum = `${th} text-left`;
+  // Worked Days / Total Hours / Overtime hold one- or two-digit figures, so
+  // nothing but their own two-line headings sets their width — "Worked" over
+  // "Days" at 11px, which left the heading wedged against its neighbours with
+  // only the cell padding either side. A floor gives them room without
+  // touching the money columns, whose long headings already set their own.
+  const thAtt = `${thNum} min-w-[5rem]`;
   const td = 'whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700';
 
   const colCount = 10 + visibleAttCols.length;
@@ -486,18 +492,18 @@ export default function StaffSalarySheet() {
                   Employee Name
                 </th>
                 {visibleCols.workedDays && (
-                  <th className={thNum}>
+                  <th className={thAtt}>
                     Worked<br />
                     Days
                   </th>
                 )}
                 {visibleCols.totalHours && (
-                  <th className={thNum}>
+                  <th className={thAtt}>
                     Total<br />
                     Hours
                   </th>
                 )}
-                {visibleCols.overtime && <th className={thNum}>Overtime</th>}
+                {visibleCols.overtime && <th className={thAtt}>Overtime</th>}
                 <th className={thNum}>
                   Basic Salary
                 </th>
