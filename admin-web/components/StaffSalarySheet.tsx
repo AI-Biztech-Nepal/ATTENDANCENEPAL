@@ -392,20 +392,24 @@ export default function StaffSalarySheet() {
   // ragged wall of text above a tidy column of numbers.
   const th = 'whitespace-nowrap px-2.5 py-2 align-bottom text-[11px] font-extrabold uppercase leading-tight tracking-wide text-slate-500';
   const thNum = `${th} text-left`;
-  // Worked Days / Total Hours / Overtime hold one- or two-digit figures, so
-  // nothing but their own two-line headings sets their width — "Worked" over
-  // "Days" at 11px, which left the heading wedged against its neighbours with
-  // only the cell padding either side. A floor gives them room without
-  // touching the money columns, whose long headings already set their own.
-  const thAtt = `${thNum} min-w-[5rem]`;
 
   // ID and Employee Name stay frozen while the other eleven columns scroll
-  // past them, so those columns really do pass underneath — that is what
-  // freezing means. The frozen edge therefore carries a visible border and a
-  // deeper shadow: without them a heading half-covered by the Employee Name
-  // column read as chopped text (WORKED showing as RKED) rather than as a
-  // column sliding under a fixed edge. Headings range left, so they meet that
-  // edge sooner than the right-aligned figures below them do.
+  // past them, so those columns genuinely pass underneath — that is what
+  // freezing means. The frozen edge carries a visible border and a deeper
+  // shadow so a partly-covered column reads as sliding under a fixed edge
+  // rather than as broken text.
+  //
+  // Worked Days / Total Hours / Overtime are the three columns that sit
+  // immediately after that edge, and they hold one- or two-digit figures, so
+  // nothing but their own two-line headings sets their width. Left-ranged,
+  // those headings began at the exact strip the frozen Employee Name column
+  // covers first, so "WORKED" read as "RKED" after a few pixels of scroll
+  // while the figures below it — right-aligned, at the far side of the same
+  // column — stayed perfectly legible. Ranging these three headings right
+  // puts them where their own numbers already are, clear of the frozen edge.
+  // The wide money columns keep the left-ranged heading, since their long
+  // labels set their own width and never come near it.
+  const thAtt = `${th} text-right min-w-[5rem]`;
   const td = 'whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700';
 
   const colCount = 10 + visibleAttCols.length;
