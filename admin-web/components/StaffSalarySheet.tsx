@@ -11,6 +11,13 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildEmployeeDayRows } from '@/lib/payrollDetail';
 import { buildWeeklyPatternByEmployee, formatHoursMinutes, nepalTodayIso, type DailyShiftByDate } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
+import {
+  DEFAULT_PAYROLL_REPORT_COLUMNS,
+  loadPayrollReportColumns,
+  normalizePayrollReportColumns,
+  PAYROLL_REPORT_COLUMNS_KEY,
+  type PayrollReportColumns,
+} from '@/lib/payrollReportColumns';
 import type { AttendanceLog, Branch, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
@@ -23,16 +30,15 @@ function fmtHrs(hours: number) {
   return formatHoursMinutes(Math.round(hours * 60));
 }
 
-// Optional attendance columns the admin can hide from the sheet (the cog
-// menu in the report header) — dropped from the table AND the printed / PDF
-// / Excel copy when off, exactly like the standard Payroll report's own
-// column toggles. On by default.
+// Optional attendance columns — dropped from the table AND the printed / PDF
+// / Excel copy when off. The on/off switches live on the Salary Structure
+// page (the cog above its table, shared with the standard Payroll report via
+// lib/payrollReportColumns); this sheet only reads the saved choice.
 const ATTENDANCE_COLUMNS = [
   ['workedDays', 'Worked Days'],
   ['totalHours', 'Total Hours'],
   ['overtime', 'Overtime'],
 ] as const;
-type AttendanceColKey = (typeof ATTENDANCE_COLUMNS)[number][0];
 
 type AttendanceAgg = { days: number; hours: number; overtime: number; paidOffDays: number };
 
@@ -91,26 +97,25 @@ export default function StaffSalarySheet() {
   const [ssfEmployerRate, setSsfEmployerRate] = useState(11);
   const [ssfEmployeeRate, setSsfEmployeeRate] = useState(0);
 
-  // The cog menu — toggles the three attendance columns on/off for the
-  // screen, print and Excel copies alike. On by default.
-  const [visibleCols, setVisibleCols] = useState<Record<AttendanceColKey, boolean>>({
-    workedDays: true,
-    totalHours: true,
-    overtime: true,
-  });
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsRef = useRef<HTMLDivElement>(null);
+  // Which attendance columns show — the switches live on the Salary Structure
+  // page now (shared localStorage, lib/payrollReportColumns); this sheet just
+  // reads the saved value and stays in sync via the `storage` event.
+  const [visibleCols, setVisibleCols] = useState<PayrollReportColumns>(DEFAULT_PAYROLL_REPORT_COLUMNS);
   const tableScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!settingsOpen) return;
-    function onDown(e: MouseEvent) {
-      if (settingsRef.current?.contains(e.target as Node)) return;
-      setSettingsOpen(false);
+    setVisibleCols(loadPayrollReportColumns());
+    function onStorage(e: StorageEvent) {
+      if (e.key !== PAYROLL_REPORT_COLUMNS_KEY) return;
+      try {
+        setVisibleCols(e.newValue ? normalizePayrollReportColumns(JSON.parse(e.newValue)) : DEFAULT_PAYROLL_REPORT_COLUMNS);
+      } catch {
+        setVisibleCols(DEFAULT_PAYROLL_REPORT_COLUMNS);
+      }
     }
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [settingsOpen]);
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -391,54 +396,6 @@ export default function StaffSalarySheet() {
 
   const colCount = 10 + visibleAttCols.length;
 
-  const columnSettings = (
-    <div className="relative print:hidden" ref={settingsRef}>
-      <button
-        type="button"
-        onClick={() => setSettingsOpen(v => !v)}
-        title="Report settings"
-        className="flex h-[30px] w-[30px] items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
-      >
-        <CogIcon className="h-[18px] w-[18px]" />
-      </button>
-      {settingsOpen && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-          <div className="flex items-center gap-2 border-b border-slate-100 bg-gradient-to-br from-accent/10 via-accent/5 to-transparent px-4 py-3">
-            <CogIcon className="h-4 w-4 text-accent" />
-            <span className="text-sm font-semibold text-ink">Settings</span>
-          </div>
-          <p className="px-4 pb-1 pt-2 text-[11px] leading-snug text-slate-400">
-            Show or hide these attendance columns in the sheet and its printed / PDF / Excel copy.
-          </p>
-          <div className="p-1.5">
-            {ATTENDANCE_COLUMNS.map(([key, label]) => {
-              const on = visibleCols[key];
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setVisibleCols(c => ({ ...c, [key]: !c[key] }))}
-                  className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm text-ink hover:bg-slate-50"
-                >
-                  {label}
-                  <span
-                    className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-good' : 'bg-slate-300'}`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                        on ? 'translate-x-[18px]' : 'translate-x-0.5'
-                      }`}
-                    />
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
   return (
     <AppShell title="Payroll Report">
       {/* 10–13 columns need landscape — scoped here so it only affects THIS
@@ -508,7 +465,7 @@ export default function StaffSalarySheet() {
             </select>
           </div>
 
-          <TableExportBar onExportCsv={exportCsv} leading={columnSettings} />
+          <TableExportBar onExportCsv={exportCsv} />
         </div>
 
         {/* print-only masthead */}
@@ -659,15 +616,6 @@ function SheetIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
       <path d="M14 3v5h5M9 13h6M9 17h6M9 9h2" />
-    </svg>
-  );
-}
-
-function CogIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
