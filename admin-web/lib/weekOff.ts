@@ -103,7 +103,7 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
   if (!companyId) return DEFAULT_CONFIG;
   const { data: company } = await supabase
     .from('companies')
-    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate, overtime_rate, payroll_report_columns')
+    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate, overtime_rate')
     .eq('id', companyId)
     .single();
   return {
@@ -116,8 +116,27 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
     ssfRate: company?.ssf_rate ?? DEFAULT_CONFIG.ssfRate,
     tdsRate: company?.tds_rate ?? DEFAULT_CONFIG.tdsRate,
     overtimeRate: company?.overtime_rate ?? DEFAULT_CONFIG.overtimeRate,
-    payrollReportColumns: normalizePayrollReportColumns(company?.payroll_report_columns),
+    payrollReportColumns: await fetchPayrollReportColumns(companyId),
   };
+}
+
+/** The Payroll report's column choice (companies.payroll_report_columns).
+ * Its own query, and its own try/catch, so that if the column is missing
+ * (migration 20260907130000 not yet run) the far more important contribution
+ * rates above still load instead of the whole select erroring out and every
+ * rate snapping back to its default. */
+async function fetchPayrollReportColumns(companyId: string): Promise<PayrollReportColumns> {
+  try {
+    const { data, error } = await supabase
+      .from('companies')
+      .select('payroll_report_columns')
+      .eq('id', companyId)
+      .single();
+    if (error) return DEFAULT_PAYROLL_REPORT_COLUMNS;
+    return normalizePayrollReportColumns((data as { payroll_report_columns?: unknown } | null)?.payroll_report_columns);
+  } catch {
+    return DEFAULT_PAYROLL_REPORT_COLUMNS;
+  }
 }
 
 type HolidayLike = Pick<CompanyHoliday, 'holiday_date'> & { applies_to?: HolidayScope | null };
