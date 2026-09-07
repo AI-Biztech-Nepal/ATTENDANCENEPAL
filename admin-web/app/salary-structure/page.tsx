@@ -149,6 +149,15 @@ export default function SalaryStructurePage() {
   const perDay = viewMode === 'perDay';
   const factor = perDay ? 1 / daysInMonth : 1;
 
+  // The Payroll report's column cog also governs this table's matching
+  // columns. Only the `deductions` group has an equivalent here — Allowance,
+  // PF, SSF by Employer, SSF by Employee, Overtime allowance and Net Payable
+  // (the report's `overtime` group is its hours-based overtime pay, which
+  // this structure table has no column for). Off ⇒ this table shows just
+  // ID / Employee / Basic / Gross.
+  const showDeductions = reportCols.deductions;
+  const structureColCount = showDeductions ? 10 : 4;
+
   /** Monthly figure -> the number shown, scaled to the active view. */
   function shown(n: number | null | undefined): string {
     if (n == null) return '—';
@@ -314,26 +323,26 @@ export default function SalaryStructurePage() {
       'ID',
       'Employee',
       `Basic${suffix}`,
-      `Allowance${suffix}`,
+      ...(showDeductions ? [`Allowance${suffix}`] : []),
       `Gross${suffix}`,
-      `PF (${pf}%)${suffix}`,
-      `SSF by Employer (${ssf}%)${suffix}`,
-      `SSF by Employee (${tds}%)${suffix}`,
-      `Overtime (${overtime}%)${suffix}`,
-      `Net Payable${suffix}`,
+      ...(showDeductions
+        ? [
+            `PF (${pf}%)${suffix}`,
+            `SSF by Employer (${ssf}%)${suffix}`,
+            `SSF by Employee (${tds}%)${suffix}`,
+            `Overtime (${overtime}%)${suffix}`,
+            `Net Payable${suffix}`,
+          ]
+        : []),
     ];
     const cell = (n: number | null) => (n == null ? '' : Number((n * factor).toFixed(perDay ? 2 : 0)));
     const lines = rows.map(r => [
       r.e.fingerprint_id || '',
       r.e.name,
       cell(r.basic),
-      r.allowance ? cell(r.allowance) : '',
+      ...(showDeductions ? [r.allowance ? cell(r.allowance) : ''] : []),
       cell(r.gross),
-      cell(r.pfAmt),
-      cell(r.ssfAmt),
-      cell(r.tdsAmt),
-      cell(r.overtimeAmt),
-      cell(r.net),
+      ...(showDeductions ? [cell(r.pfAmt), cell(r.ssfAmt), cell(r.tdsAmt), cell(r.overtimeAmt), cell(r.net)] : []),
     ]);
     downloadExcel(`salary_structure_${start}_to_${end}${perDay ? '_per_day' : ''}.csv`, header, lines);
   }
@@ -389,7 +398,9 @@ export default function SalaryStructurePage() {
           </div>
           <p className="px-4 pb-1 pt-2 text-[11px] leading-snug text-slate-400">
             Show or hide these columns in the monthly Payroll report and its printed / PDF copy — a company-wide
-            choice. Hiding Overtime also drops overtime pay from that report&apos;s totals.
+            choice. Hiding Overtime also drops overtime pay from that report&apos;s totals. Turning off
+            &ldquo;Allowance / PF / SSF / Net Payable&rdquo; also trims this Salary Structure table down to
+            ID / Employee / Basic / Gross.
           </p>
           <div className="p-1.5">
             {REPORT_COLUMN_OPTIONS.map(([key, label]) => {
@@ -426,24 +437,31 @@ export default function SalaryStructurePage() {
 
   return (
     <AppShell title="Salary Structure">
-      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3 print:hidden">
+      <div className={`mb-5 grid grid-cols-1 gap-3 print:hidden ${showDeductions ? 'sm:grid-cols-3' : 'sm:grid-cols-1'}`}>
         <div className="rounded-xl bg-info-bg p-3 shadow-sm ring-1 ring-inset ring-info/10">
           <span className="text-xs font-medium text-info-text/80">Total Gross Payroll{perDay && ' / day'}</span>
           <div className="mt-1 text-base font-bold text-info-text">{shown(totals.gross)}</div>
-          <div className="mt-0.5 text-[11px] text-info-text/70">Basic {shown(totals.basic)} · Allowance {shown(totals.allowance)}</div>
-        </div>
-        <div className="rounded-xl bg-critical-bg p-3 shadow-sm ring-1 ring-inset ring-critical/10">
-          <span className="text-xs font-medium text-critical-text/80">Total Deductions{perDay && ' / day'}</span>
-          <div className="mt-1 text-base font-bold text-critical-text">{shown(totals.deductions)}</div>
-          <div className="mt-0.5 text-[11px] text-critical-text/70">
-            PF {shown(totals.pfAmt)} · SSF by Employer {shown(totals.ssfAmt)} · SSF by Employee {shown(totals.tdsAmt)}
+          <div className="mt-0.5 text-[11px] text-info-text/70">
+            Basic {shown(totals.basic)}
+            {showDeductions && <> · Allowance {shown(totals.allowance)}</>}
           </div>
         </div>
-        <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
-          <span className="text-xs font-medium text-good-text/80">Total Net Payable{perDay && ' / day'}</span>
-          <div className="mt-1 text-base font-bold text-good-text">{shown(totals.net)}</div>
-          <div className="mt-0.5 text-[11px] text-good-text/70">Across {totals.counted} staff on a salary</div>
-        </div>
+        {showDeductions && (
+          <>
+            <div className="rounded-xl bg-critical-bg p-3 shadow-sm ring-1 ring-inset ring-critical/10">
+              <span className="text-xs font-medium text-critical-text/80">Total Deductions{perDay && ' / day'}</span>
+              <div className="mt-1 text-base font-bold text-critical-text">{shown(totals.deductions)}</div>
+              <div className="mt-0.5 text-[11px] text-critical-text/70">
+                PF {shown(totals.pfAmt)} · SSF by Employer {shown(totals.ssfAmt)} · SSF by Employee {shown(totals.tdsAmt)}
+              </div>
+            </div>
+            <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
+              <span className="text-xs font-medium text-good-text/80">Total Net Payable{perDay && ' / day'}</span>
+              <div className="mt-1 text-base font-bold text-good-text">{shown(totals.net)}</div>
+              <div className="mt-0.5 text-[11px] text-good-text/70">Across {totals.counted} staff on a salary</div>
+            </div>
+          </>
+        )}
       </div>
 
       {dirty && isAdmin && (
@@ -532,7 +550,8 @@ export default function SalaryStructurePage() {
         <div className="hidden px-4 pt-4 sm:px-6 print:block">
           <h1 className="text-lg font-bold text-ink">Monthly Salary Structure — {period.label}</h1>
           <p className="text-xs text-slate-500">
-            {modeLine} · PF {pf}% · SSF by Employer {ssf}% · SSF by Employee {tds}% · Overtime {overtime}% of Basic
+            {modeLine}
+            {showDeductions && <> · PF {pf}% · SSF by Employer {ssf}% · SSF by Employee {tds}% · Overtime {overtime}% of Basic</>}
           </p>
         </div>
 
@@ -546,21 +565,25 @@ export default function SalaryStructurePage() {
                   Employee
                 </th>
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Basic</th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Allowance</th>
+                {showDeductions && <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Allowance</th>}
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Gross</th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
-                  {rateHeader('PF', pfDraft, setPfDraft)}
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
-                  {rateHeader('SSF by Employer', ssfDraft, setSsfDraft)}
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
-                  {rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-good-text">
-                  {rateHeader('Overtime', overtimeDraft, setOvertimeDraft)}
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Net Payable</th>
+                {showDeductions && (
+                  <>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
+                      {rateHeader('PF', pfDraft, setPfDraft)}
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
+                      {rateHeader('SSF by Employer', ssfDraft, setSsfDraft)}
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
+                      {rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-good-text">
+                      {rateHeader('Overtime', overtimeDraft, setOvertimeDraft)}
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Net Payable</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -574,18 +597,22 @@ export default function SalaryStructurePage() {
                     </Link>
                   </td>
                   {amountCell(e.id, 'salary', basic)}
-                  {amountCell(e.id, 'allowance', allowance)}
+                  {showDeductions && amountCell(e.id, 'allowance', allowance)}
                   <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums text-ink">{shown(gross)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(pfAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(ssfAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(tdsAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(overtimeAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right font-bold tabular-nums text-good-text">{shown(net)}</td>
+                  {showDeductions && (
+                    <>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(pfAmt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(ssfAmt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(tdsAmt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(overtimeAmt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right font-bold tabular-nums text-good-text">{shown(net)}</td>
+                    </>
+                  )}
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={structureColCount} className="px-4 py-8 text-center text-slate-400">
                     {loading ? 'Loading…' : 'No active employees.'}
                   </td>
                 </tr>
@@ -601,13 +628,17 @@ export default function SalaryStructurePage() {
                     Total{perDay && ' / day'} · {totals.counted} staff
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.basic)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.allowance)}</td>
+                  {showDeductions && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.allowance)}</td>}
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.gross)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.pfAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.ssfAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.tdsAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.overtimeAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.net)}</td>
+                  {showDeductions && (
+                    <>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.pfAmt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.ssfAmt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.tdsAmt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.overtimeAmt)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.net)}</td>
+                    </>
+                  )}
                 </tr>
               </tfoot>
             )}
@@ -616,13 +647,13 @@ export default function SalaryStructurePage() {
       </div>
 
       <p className="mt-3 text-xs text-slate-400">
-        Net Payable = Basic + Allowance − PF − SSF by Employer − SSF by Employee + Overtime. Click a Basic or Allowance figure
-        to edit it for that employee, or click a name to open that employee&apos;s full salary breakdown. PF / SSF by
-        Employer / SSF by Employee /
-        Overtime are all company-wide rates. Per-day figures divide the monthly amount by the number of days in {period.label}. The monthly
-        Payroll report reads these figures and is not edited there. The Overtime line is a flat allowance (% of Basic), not
-        the real attendance-based overtime pay the Payroll report calculates from actual hours worked.
-        {isAdmin && ' The cog above the table picks which optional columns that Payroll report shows.'}
+        {showDeductions
+          ? 'Net Payable = Basic + Allowance − PF − SSF by Employer − SSF by Employee + Overtime. Click a Basic or Allowance figure to edit it for that employee, or click a name to open that employee’s full salary breakdown. PF / SSF by Employer / SSF by Employee / Overtime are all company-wide rates.'
+          : 'Click a Basic figure to edit it for that employee, or click a name to open that employee’s full salary breakdown — which always shows the complete PF / SSF / Overtime deduction lines.'}{' '}
+        Per-day figures divide the monthly amount by the number of days in {period.label}. The monthly
+        Payroll report reads these figures and is not edited there.
+        {showDeductions && ' The Overtime line is a flat allowance (% of Basic), not the real attendance-based overtime pay the Payroll report calculates from actual hours worked.'}
+        {isAdmin && ' The cog above the table picks which optional columns show here and on that Payroll report.'}
       </p>
     </AppShell>
   );
