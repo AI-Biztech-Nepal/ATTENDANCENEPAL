@@ -15,19 +15,15 @@ import {
   type CalendarPeriod,
 } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
+import { fetchMyCompanyWeekOffConfig } from '@/lib/weekOff';
 import { fetchCompanyPayrollFormat } from '@/lib/payrollFormat';
-import { buildEmployeeDayRows } from '@/lib/payrollDetail';
-import { buildWeeklyPatternByEmployee, formatHoursMinutes, type DailyShiftByDate } from '@/lib/shift';
-import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
-import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
+import type { Employee } from '@/lib/types';
 
 // One customer (companies.payroll_format = 'staff_salary_sheet') wants the
-// SSF gross-up + attendance figures shown here too, so their Salary Structure
-// lines up column-for-column with their Payroll report. The employer SSF %
-// (companies.ssf_employer_rate) and employee SSF % (companies.ssf_rate) are
-// both editable in the header. Every other company sees exactly the standard
-// columns below and runs none of the extra queries.
+// SSF gross-up columns shown here too, so their Salary Structure lines up
+// with their Payroll report. The employer SSF % (companies.ssf_employer_rate)
+// and employee SSF % (companies.ssf_rate) are both editable in the header.
+// Every other company sees exactly the standard columns below.
 
 /** The one place a company's salary structure is set: the three contribution
  * rates (companies.pf_rate/ssf_rate/tds_rate — one company-wide percentage of
@@ -66,19 +62,6 @@ export default function SalaryStructurePage() {
       setSsfEmpDraft(String(r));
     });
   }, []);
-
-  // Attendance + roster data for the extra "Staff Salary Sheet" columns —
-  // loaded ONLY when sheetFormat is on. Mirrors the Staff Salary Sheet's own
-  // fetch so the Worked Days / Total Hours / Overtime figures match.
-  const [summaries, setSummaries] = useState<PayrollSummary[]>([]);
-  const [logs, setLogs] = useState<AttendanceLog[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [dailyShiftRows, setDailyShiftRows] = useState<{ employee_id: string; work_date: string; shift_id: string | null }[]>([]);
-  const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
-  const [weeklyOffDay, setWeeklyOffDay] = useState<number | null>(null);
-  const [rosterMode, setRosterMode] = useState<'weekly' | 'monthly'>('monthly');
-  const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
 
   // Saved rates (what's in the DB) vs the draft strings the header inputs
   // edit. The table previews with the draft so editing recalculates live;
@@ -124,14 +107,12 @@ export default function SalaryStructurePage() {
       setIsAdmin(profile?.role === 'admin');
     });
 
-    fetchMyCompanyWeekOffConfig().then(({ companyId, pfRate, ssfRate, tdsRate, weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ companyId, pfRate, ssfRate, tdsRate }) => {
       setCompanyId(companyId);
       setSavedRates(prev => ({ ...prev, pf: pfRate, ssf: ssfRate, tds: tdsRate }));
       setPfDraft(String(pfRate));
       setSsfDraft(String(ssfRate));
       setTdsDraft(String(tdsRate));
-      setWeeklyOffDay(weeklyOffDay);
-      setRosterMode(rosterMode);
     });
 
     supabase
@@ -151,30 +132,6 @@ export default function SalaryStructurePage() {
         setLoading(false);
       });
   }, []);
-
-  // Extra data for the Staff Salary Sheet columns — skipped entirely unless
-  // that format is on, so a normal company never runs these queries.
-  useEffect(() => {
-    if (!sheetFormat) return;
-    if (rosterMode === 'weekly') {
-      supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id').then(({ data }) => setWeeklyPatternRows(data ?? []));
-    }
-    Promise.all([
-      supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', start).lte('work_date', end),
-      supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).gte('punch_time', `${start}T00:00:00Z`).lte('punch_time', `${end}T23:59:59Z`),
-      supabase.from('shifts').select('*'),
-      supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end),
-      supabase.from('company_holidays').select('*').gte('holiday_date', start).lte('holiday_date', end),
-      supabase.from('leave_requests').select('*').eq('status', 'approved').lte('start_date', end).gte('end_date', start),
-    ]).then(([sm, lg, sh, ro, ho, le]) => {
-      setSummaries(sm.data ?? []);
-      setLogs(lg.data ?? []);
-      setShifts(sh.data ?? []);
-      setDailyShiftRows(ro.data ?? []);
-      setHolidays(ho.data ?? []);
-      setLeaveRequests(le.data ?? []);
-    });
-  }, [sheetFormat, rosterMode, start, end]);
 
   const pf = Number(pfDraft) || 0;
   const ssf = Number(ssfDraft) || 0;
@@ -209,50 +166,26 @@ export default function SalaryStructurePage() {
       .map(e => ({ e, ...computeSalaryFigures(e.salary, e.allowance, pf, ssf, tds) }));
   }, [employees, search, pf, ssf, tds]);
 
-  const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
-    const map: DailyShiftByDate = new Map();
-    for (const r of dailyShiftRows) {
-      let perDate = map.get(r.employee_id);
-      if (!perDate) map.set(r.employee_id, (perDate = new Map()));
-      perDate.set(r.work_date, r.shift_id);
-    }
-    return map;
-  }, [dailyShiftRows]);
-
-  // employee_id -> { worked days / hours / overtime } + the SSF gross-up
-  // figures (SSF 20% of Basic, Monthly Gross MGS, employer/employee SSF,
-  // Total SSF, Net Monthly). Only built when sheetFormat is on.
+  // employee_id -> the SSF gross-up figures for the extra columns: SSF X% of
+  // Basic, Monthly Gross (MGS), employer/employee SSF, Total SSF, Net Monthly.
+  // Pure Basic + Allowance math — no attendance. Only built when sheetFormat.
   const sheetByEmployee = useMemo(() => {
     const map = new Map<
       string,
-      { days: number; hours: number; overtime: number; ssfBasis: number; mgs: number; ssfEmployer: number; ssfEmployee: number; totalSsf: number; netMonthly: number }
+      { ssfBasis: number; mgs: number; ssfEmployer: number; ssfEmployee: number; totalSsf: number; netMonthly: number }
     >();
     if (!sheetFormat) return map;
-    const weekOffDatesFor = weekOffDatesByGender(start, end, weeklyOffDay, holidays);
-    const leaveByEmployee = leaveDatesByEmployee(leaveRequests);
-    const weeklyPattern = buildWeeklyPatternByEmployee(weeklyPatternRows);
     for (const e of employees) {
-      const dayRows = buildEmployeeDayRows(e, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDatesFor(e.gender), leaveByEmployee.get(e.id), weeklyPattern);
-      let days = 0,
-        hours = 0,
-        overtime = 0;
-      for (const d of dayRows) {
-        if (d.status === 'Present' || d.status === 'Late') days += 1;
-        hours += d.hours;
-        overtime += d.overtime;
-      }
       const basic = e.salary ?? 0;
       const dearness = Number(e.allowance ?? 0) || 0;
       const ssfEmployer = basic * (ssfEmp / 100);
       const ssfEmployee = basic * (ssf / 100);
       const mgs = basic + dearness + ssfEmployer;
       const totalSsf = ssfEmployer + ssfEmployee;
-      map.set(e.id, { days, hours, overtime, ssfBasis: ssfEmployer, mgs, ssfEmployer, ssfEmployee, totalSsf, netMonthly: mgs - totalSsf });
+      map.set(e.id, { ssfBasis: ssfEmployer, mgs, ssfEmployer, ssfEmployee, totalSsf, netMonthly: mgs - totalSsf });
     }
     return map;
-  }, [sheetFormat, employees, shifts, summaries, logs, dailyShiftByDate, holidays, leaveRequests, weeklyOffDay, weeklyPatternRows, start, end, ssf, ssfEmp]);
-
-  const fmtHrs = (h: number) => formatHoursMinutes(Math.round(h * 60));
+  }, [sheetFormat, employees, ssf, ssfEmp]);
 
   const totals = useMemo(() => {
     let basic = 0,
@@ -278,10 +211,7 @@ export default function SalaryStructurePage() {
   }, [rows]);
 
   const sheetTotals = useMemo(() => {
-    let days = 0,
-      hours = 0,
-      overtime = 0,
-      ssfBasis = 0,
+    let ssfBasis = 0,
       mgs = 0,
       ssfEmployer = 0,
       ssfEmployee = 0,
@@ -289,11 +219,7 @@ export default function SalaryStructurePage() {
       netMonthly = 0;
     for (const r of rows) {
       const s = sheetByEmployee.get(r.e.id);
-      if (!s) continue;
-      days += s.days;
-      hours += s.hours;
-      overtime += s.overtime;
-      if (r.basic == null) continue;
+      if (!s || r.basic == null) continue;
       ssfBasis += s.ssfBasis;
       mgs += s.mgs;
       ssfEmployer += s.ssfEmployer;
@@ -301,7 +227,7 @@ export default function SalaryStructurePage() {
       totalSsf += s.totalSsf;
       netMonthly += s.netMonthly;
     }
-    return { days, hours, overtime, ssfBasis, mgs, ssfEmployer, ssfEmployee, totalSsf, netMonthly };
+    return { ssfBasis, mgs, ssfEmployer, ssfEmployee, totalSsf, netMonthly };
   }, [rows, sheetByEmployee]);
 
   async function saveRates() {
@@ -409,7 +335,7 @@ export default function SalaryStructurePage() {
     const suffix = perDay ? ' /day' : '';
     const header = ['ID', 'Employee', `Basic${suffix}`, `Allowance${suffix}`, `Gross${suffix}`, `PF (${pf}%)${suffix}`, `SSF (${ssf}%)${suffix}`, `TDS (${tds}%)${suffix}`, `Net Payable${suffix}`];
     if (sheetFormat) {
-      header.push('Worked Days', 'Total Hours', 'Overtime', `SSF ${ssfEmp}% of Basic${suffix}`, `Monthly Gross (MGS)${suffix}`, `SSF by Employer ${ssfEmp}%${suffix}`, `SSF by Employee ${ssf}%${suffix}`, `Total SSF Payable${suffix}`, `Net Monthly${suffix}`);
+      header.push(`SSF ${ssfEmp}% of Basic${suffix}`, `Monthly Gross (MGS)${suffix}`, `SSF by Employer ${ssfEmp}%${suffix}`, `SSF by Employee ${ssf}%${suffix}`, `Total SSF Payable${suffix}`, `Net Monthly${suffix}`);
     }
     const cell = (n: number | null) => (n == null ? '' : Number((n * factor).toFixed(perDay ? 2 : 0)));
     const lines = rows.map(r => {
@@ -427,9 +353,6 @@ export default function SalaryStructurePage() {
       if (sheetFormat) {
         const s = sheetByEmployee.get(r.e.id);
         base.push(
-          s?.days ?? '',
-          s ? fmtHrs(s.hours) : '',
-          s ? fmtHrs(s.overtime) : '',
           r.basic == null ? '' : cell(s?.ssfBasis ?? null),
           r.basic == null ? '' : cell(s?.mgs ?? null),
           r.basic == null ? '' : cell(s?.ssfEmployer ?? null),
@@ -574,7 +497,7 @@ export default function SalaryStructurePage() {
           {modeLine} · click an employee for their full breakdown
           {!isAdmin && <> · the PF / SSF / TDS rates are read-only for your role — an admin sets them here.</>}
           {sheetFormat && (
-            <> · SSF gross-up columns + Worked Days / Total Hours / Overtime match the Payroll report. Net Monthly here is the full monthly structure — the Payroll report prorates it by attendance.</>
+            <> · SSF gross-up columns match the Payroll report. Net Monthly here is the full monthly structure — the Payroll report prorates it by attendance.</>
           )}
         </div>
 
@@ -606,10 +529,7 @@ export default function SalaryStructurePage() {
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Net Payable</th>
                 {sheetFormat && (
                   <>
-                    <th className="whitespace-nowrap border-l border-slate-200 px-3 py-2 text-right font-medium">Worked Days</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Total Hours</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Overtime</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium">SSF {ssfEmp}% of Basic</th>
+                    <th className="whitespace-nowrap border-l border-slate-200 px-3 py-2 text-right font-medium">SSF {ssfEmp}% of Basic</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Monthly Gross (MGS)</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">{rateHeader('SSF Emp.', ssfEmpDraft, setSsfEmpDraft)}</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">SSF Emp&rsquo;ee {ssf}%</th>
@@ -641,10 +561,7 @@ export default function SalaryStructurePage() {
                       const s = sheetByEmployee.get(e.id);
                       return (
                         <>
-                          <td className="whitespace-nowrap border-l border-slate-100 px-3 py-2 text-right tabular-nums text-slate-600">{s ? s.days : '—'}</td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-600">{s ? fmtHrs(s.hours) : '—'}</td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-600">{s ? fmtHrs(s.overtime) : '—'}</td>
-                          <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-600">{shown(basic == null ? null : s?.ssfBasis ?? null)}</td>
+                          <td className="whitespace-nowrap border-l border-slate-200 px-3 py-2 text-right tabular-nums text-slate-600">{shown(basic == null ? null : s?.ssfBasis ?? null)}</td>
                           <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums text-ink">{shown(basic == null ? null : s?.mgs ?? null)}</td>
                           <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(basic == null ? null : s?.ssfEmployer ?? null)}</td>
                           <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(basic == null ? null : s?.ssfEmployee ?? null)}</td>
@@ -657,7 +574,7 @@ export default function SalaryStructurePage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={sheetFormat ? 18 : 9} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={sheetFormat ? 15 : 9} className="px-4 py-8 text-center text-slate-400">
                     {loading ? 'Loading…' : 'No active employees.'}
                   </td>
                 </tr>
@@ -678,10 +595,7 @@ export default function SalaryStructurePage() {
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.net)}</td>
                   {sheetFormat && (
                     <>
-                      <td className="whitespace-nowrap border-l border-slate-200 px-3 py-2 text-right tabular-nums">{sheetTotals.days}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmtHrs(sheetTotals.hours)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{fmtHrs(sheetTotals.overtime)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(sheetTotals.ssfBasis)}</td>
+                      <td className="whitespace-nowrap border-l border-slate-200 px-3 py-2 text-right tabular-nums">{shown(sheetTotals.ssfBasis)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(sheetTotals.mgs)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(sheetTotals.ssfEmployer)}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(sheetTotals.ssfEmployee)}</td>
