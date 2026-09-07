@@ -6,7 +6,7 @@ import Badge from '@/components/Badge';
 import DateRangePicker from '@/components/DateRangePicker';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
-import { formatAdDate } from '@/lib/calendar';
+import { formatDdMmYyyy } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   applyOvernightShiftCorrection,
@@ -30,7 +30,15 @@ type Row = {
   enrollId: string;
   employeeName: string;
   device: string;
+  /** "Name (HH:MM–HH:MM)" — one string, still what the CSV export writes. */
   shiftLabel: string;
+  /** The same shift split in two so the column can stack them on separate
+   * lines instead of one long nowrap run — the single biggest thing making
+   * this table wider than the screen. Split here rather than re-parsed from
+   * shiftLabel at render time so a change to the label format can't quietly
+   * break the display. `shiftTime` is null for Week Off (no hours to show). */
+  shiftName: string;
+  shiftTime: string | null;
   checkIn: string | null;
   checkOut: string | null;
   hours: number;
@@ -57,53 +65,83 @@ function fmtPunch(iso: string | null) {
   return iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '–:–';
 }
 
-/** The Check-In cell — the punch time in its own column, coloured by how
- * it landed vs the shift (amber if late, teal if early), with the amount
- * late/early spelled out on a second line. Plain slate when on time, or
- * when there's no punch. Prints black. Mirrors the employee's Payroll
- * detail page so the two reports read the same way. */
-function CheckInCell({ row }: { row: Row }) {
-  const late = row.lateMinutes > 0;
-  const early = row.earlyArrivalMinutes > 0;
-  const timeClass = late
-    ? 'font-medium text-warning-text print:text-ink'
-    : early
-      ? 'font-medium text-good-text print:text-ink'
-      : 'text-slate-600 print:text-ink';
-  return (
-    <span className="flex flex-col leading-tight">
-      <span className={timeClass}>{fmtPunch(row.checkIn)}</span>
-      {late && (
-        <span className="text-[10px] font-medium text-warning-text print:text-ink">Late {formatHoursMinutes(row.lateMinutes)}</span>
-      )}
-      {early && (
-        <span className="text-[10px] font-medium text-good-text print:text-ink">Early {formatHoursMinutes(row.earlyArrivalMinutes)}</span>
-      )}
-    </span>
-  );
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+/** 'YYYY-MM-DD' (always the AD key, whatever calendar is being displayed)
+ * -> 'Sun'..'Sat'. The weekday is the same real day either way, so this
+ * deliberately doesn't go through NepaliDate — a BS date and its AD
+ * equivalent fall on the same weekday. Parsed as local parts rather than
+ * new Date(adKey), which would read the string as UTC midnight and land on
+ * the previous day for anyone west of Greenwich. */
+function weekdayShort(adKey: string): string {
+  const [y, m, d] = adKey.split('-').map(Number);
+  return WEEKDAYS[new Date(y, m - 1, d).getDay()];
 }
 
-/** The Check-Out cell — the punch time in its own column, coloured by how
- * it landed vs the shift (red if left early, blue if left late), with the
- * amount early/late spelled out on a second line. Plain slate when on
+/* The punch time and how far off the shift it landed used to share one
+ * cell, stacked on two lines. They're now three columns — Check-In,
+ * Check-Out, Late/Early — so a row is one line tall and the variance can be
+ * read down its own column instead of hunting for a second line inside
+ * every cell. The time cells keep their colour (it's the quickest signal of
+ * a problem row); the variance column carries the wording. */
+
+/** The Check-In cell — just the punch time, coloured by how it landed vs
+ * the shift (amber if late, teal if early). Plain slate when on time, or
+ * when there's no punch. Prints black. */
+function CheckInCell({ row }: { row: Row }) {
+  const timeClass =
+    row.lateMinutes > 0
+      ? 'font-medium text-warning-text print:text-ink'
+      : row.earlyArrivalMinutes > 0
+        ? 'font-medium text-good-text print:text-ink'
+        : 'text-slate-600 print:text-ink';
+  return <span className={timeClass}>{fmtPunch(row.checkIn)}</span>;
+}
+
+/** The Check-Out cell — just the punch time, coloured by how it landed vs
+ * the shift (red if left early, blue if left late). Plain slate when on
  * time, or when there's no punch. Prints black. */
 function CheckOutCell({ row }: { row: Row }) {
-  const earlyOut = row.earlyMinutes > 0;
-  const lateOut = row.lateDepartureMinutes > 0;
-  const timeClass = earlyOut
-    ? 'font-medium text-critical-text print:text-ink'
-    : lateOut
-      ? 'font-medium text-info-text print:text-ink'
-      : 'text-slate-600 print:text-ink';
+  const timeClass =
+    row.earlyMinutes > 0
+      ? 'font-medium text-critical-text print:text-ink'
+      : row.lateDepartureMinutes > 0
+        ? 'font-medium text-info-text print:text-ink'
+        : 'text-slate-600 print:text-ink';
+  return <span className={timeClass}>{fmtPunch(row.checkOut)}</span>;
+}
+
+/** Both ends of the day's punctuality in one column, on one line: how far
+ * the arrival missed the shift start and how far the departure missed the
+ * shift end, joined by a middot when a day was off at both ends. Each half
+ * keeps its own colour — amber arrived late, teal arrived early, red left
+ * early, blue stayed late — so which end is off still reads at a glance
+ * without a second column to scan. Early arrival and late departure are
+ * carried here rather than dropped: they're the same measurements signed
+ * the other way, and a day that started early is not the same as one that
+ * started on time. An em dash when both ends landed exactly on the shift,
+ * or there are no punches to compare. */
+function LateEarlyCell({ row }: { row: Row }) {
+  const parts: { key: string; text: string; tone: string }[] = [];
+  if (row.lateMinutes > 0) {
+    parts.push({ key: 'in', text: `Late ${formatHoursMinutes(row.lateMinutes)}`, tone: 'text-warning-text' });
+  } else if (row.earlyArrivalMinutes > 0) {
+    parts.push({ key: 'in', text: `Early ${formatHoursMinutes(row.earlyArrivalMinutes)}`, tone: 'text-good-text' });
+  }
+  if (row.earlyMinutes > 0) {
+    parts.push({ key: 'out', text: `Early ${formatHoursMinutes(row.earlyMinutes)}`, tone: 'text-critical-text' });
+  } else if (row.lateDepartureMinutes > 0) {
+    parts.push({ key: 'out', text: `Late ${formatHoursMinutes(row.lateDepartureMinutes)}`, tone: 'text-info-text' });
+  }
+  if (parts.length === 0) return <span className="text-slate-300 print:text-ink">—</span>;
   return (
-    <span className="flex flex-col leading-tight">
-      <span className={timeClass}>{fmtPunch(row.checkOut)}</span>
-      {earlyOut && (
-        <span className="text-[10px] font-medium text-critical-text print:text-ink">Early {formatHoursMinutes(row.earlyMinutes)}</span>
-      )}
-      {lateOut && (
-        <span className="text-[10px] font-medium text-info-text print:text-ink">Late {formatHoursMinutes(row.lateDepartureMinutes)}</span>
-      )}
+    <span className="whitespace-nowrap">
+      {parts.map((p, i) => (
+        <span key={p.key}>
+          {i > 0 && <span className="text-slate-300 print:text-ink"> · </span>}
+          <span className={`font-medium ${p.tone} print:text-ink`}>{p.text}</span>
+        </span>
+      ))}
     </span>
   );
 }
@@ -246,9 +284,11 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         const summary = day === today ? undefined : summaries.find(s => s.employee_id === emp.id && s.work_date === day);
         const dayLogs = (logsByEmployeeDay.get(emp.id)?.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
         const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
-        const shiftLabel = isWeekOff(resolved)
-          ? 'Week Off'
-          : `${resolved.name} (${resolved.start_time.slice(0, 5)}–${resolved.end_time.slice(0, 5)})`;
+        const shiftName = isWeekOff(resolved) ? 'Week Off' : resolved.name;
+        const shiftTime = isWeekOff(resolved)
+          ? null
+          : `${resolved.start_time.slice(0, 5)}–${resolved.end_time.slice(0, 5)}`;
+        const shiftLabel = shiftTime ? `${shiftName} (${shiftTime})` : shiftName;
 
         // Early-arrival / late-departure aren't stored on the summary row —
         // derive them live from check_in/check_out against the shift.
@@ -265,6 +305,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             employeeName: emp.name,
             device: deviceName(dayLogs[0]?.device_id ?? null),
             shiftLabel,
+            shiftName,
+            shiftTime,
             checkIn: summary.check_in,
             checkOut: summary.check_out,
             hours: summary.total_hours,
@@ -289,6 +331,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             employeeName: emp.name,
             device: deviceName(dayLogs[0].device_id ?? null),
             shiftLabel,
+            shiftName,
+            shiftTime,
             checkIn: live.checkIn.punch_time,
             checkOut: live.checkOut?.punch_time ?? null,
             hours: live.totalMinutes / 60,
@@ -323,6 +367,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             employeeName: emp.name,
             device: 'N/A',
             shiftLabel,
+            shiftName,
+            shiftTime,
             checkIn: null,
             checkOut: null,
             hours: 0,
@@ -370,13 +416,16 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   function exportCsv() {
     const header = [
       'Date',
+      'Day',
       'ID',
       'Employee',
       'Shift',
       'Check-In',
       'Check-Out',
-      'Late By (min)',
+      'Late In (min)',
+      'Early In (min)',
       'Early Out (min)',
+      'Late Out (min)',
       'Total Work Hours',
       'Overtime',
       'Status',
@@ -384,13 +433,16 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     ];
     const lines = rows.map(r => [
       r.date,
+      weekdayShort(r.date),
       r.enrollId,
       r.employeeName,
       r.shiftLabel,
       r.checkIn ? new Date(r.checkIn).toLocaleTimeString([], { hour12: false }) : '',
       r.checkOut ? new Date(r.checkOut).toLocaleTimeString([], { hour12: false }) : '',
       r.lateMinutes || '',
+      r.earlyArrivalMinutes || '',
       r.earlyMinutes || '',
+      r.lateDepartureMinutes || '',
       r.hours.toFixed(1),
       r.overtime.toFixed(1),
       r.status,
@@ -457,7 +509,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
           <div>
             <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">Date Range</label>
-            <div className="w-48">
+            {/* Wide enough for two spelled-out BS dates ("22 Shrawan 2083 –
+                22 Shrawan 2083"); at the old w-48 the picker's own `truncate`
+                cut the second one off to "22 Bhadra 2083 – 22 …". */}
+            <div className="w-[21rem]">
               <DateRangePicker from={from} to={to} onChange={(f, t) => {
                 setFrom(f);
                 setTo(t);
@@ -488,31 +543,47 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             `separate`, not `collapse`. */}
         <table className="w-full text-left text-xs">
           <thead>
-            <tr className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500 print:static print:text-ink">
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Date</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">ID</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Employee</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Shift</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Check-In</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Check-Out</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Work Hours</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Overtime</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:w-16 print:border print:border-slate-400 print:px-1 print:py-1">Status</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-medium print:border print:border-slate-400 print:px-1 print:py-1">Device</th>
+            <tr className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 print:static print:text-ink">
+              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Date</th>
+              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Day</th>
+              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">ID</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Employee</th>
+              <th className="w-px px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Shift</th>
+              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Check-In</th>
+              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Check-Out</th>
+              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Late/Early</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Work Hours</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Overtime</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:w-16 print:border print:border-slate-400 print:px-1 print:py-1">Status</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Device</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(r => (
               <tr key={r.key} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent">
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{formatAdDate(r.date, system)}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
+                {/* Numeric date (22/05/2083) rather than the spelled-out
+                    "22 Bhadra 2083" — the month name is the same on every
+                    row and the range is already named in the header, so the
+                    words only cost width. The Day column beside it is what
+                    makes a date scannable in practice. */}
+                <td className="w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{formatDdMmYyyy(r.date, system)}</td>
+                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
+                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
                 <td className="whitespace-nowrap px-2 py-1 font-medium text-ink print:border print:border-slate-400 print:px-2 print:py-1">{r.employeeName}</td>
-                <td className="px-2 py-1 whitespace-nowrap text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.shiftLabel}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                <td className="w-px px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                  <span className="flex flex-col leading-tight">
+                    <span className="whitespace-nowrap">{r.shiftName}</span>
+                    {r.shiftTime && <span className="whitespace-nowrap text-[10px] text-slate-400 print:text-ink">{r.shiftTime}</span>}
+                  </span>
+                </td>
+                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   <CheckInCell row={r} />
                 </td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   <CheckOutCell row={r} />
+                </td>
+                <td className="w-px whitespace-nowrap px-1.5 py-1 text-[10px] print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                  <LateEarlyCell row={r} />
                 </td>
                 <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.hours)}
@@ -531,7 +602,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={12} className="px-4 py-6 text-center text-slate-400">
                   {loading ? 'Loading…' : 'No records in this range.'}
                 </td>
               </tr>
@@ -540,9 +611,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           {rows.length > 0 && (
             <tfoot>
               <tr className="sticky bottom-0 border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-ink print:static print:bg-white print:text-[10px]">
-                <td colSpan={4} className="whitespace-nowrap px-2 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 print:border print:border-slate-400 print:px-2 print:text-[10px] print:text-ink">
+                <td colSpan={5} className="whitespace-nowrap px-2 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 print:border print:border-slate-400 print:px-2 print:text-[10px] print:text-ink">
                   Total
                 </td>
+                <td className="print:border print:border-slate-400" />
                 <td className="print:border print:border-slate-400" />
                 <td className="print:border print:border-slate-400" />
                 <td className="whitespace-nowrap px-2 py-1.5 print:border print:border-slate-400 print:px-2">{fmtHrs(totals.workHours)}</td>
