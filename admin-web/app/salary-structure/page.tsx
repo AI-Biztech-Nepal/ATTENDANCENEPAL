@@ -529,10 +529,16 @@ export default function SalaryStructurePage() {
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Net Payable</th>
                 {sheetFormat && (
                   <>
-                    <th className="whitespace-nowrap border-l border-slate-200 px-3 py-2 text-right font-medium">SSF {ssfEmp}% of Basic</th>
+                    <th className="whitespace-nowrap border-l border-slate-200 px-3 py-2 text-right font-medium">
+                      {rateHeader('SSF of Basic', ssfEmpDraft, setSsfEmpDraft)}
+                    </th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Monthly Gross (MGS)</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">{rateHeader('SSF Emp.', ssfEmpDraft, setSsfEmpDraft)}</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">SSF Emp&rsquo;ee {ssf}%</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
+                      {rateHeader('SSF Employer', ssfEmpDraft, setSsfEmpDraft)}
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
+                      {rateHeader('SSF Employee', ssfDraft, setSsfDraft)}
+                    </th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">Total SSF Payable</th>
                     <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Net Monthly</th>
                   </>
