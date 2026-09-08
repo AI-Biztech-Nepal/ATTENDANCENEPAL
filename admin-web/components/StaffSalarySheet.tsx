@@ -538,11 +538,15 @@ export default function StaffSalarySheet() {
       {/* 10–13 columns need landscape — scoped here so it only affects THIS
           report's print, leaving every other page's orientation toggle
           alone. The global @media-print table rules are otherwise tuned
-          for portrait and far too tight for this sheet, so relax them. */}
+          for portrait and far too tight for this sheet, so relax them.
+          `@page{margin:0}` drops the browser's own date / page-title header
+          and footer; the paper margin is re-applied as padding on <main>
+          (this route renders nothing else into it). */}
       <style
         dangerouslySetInnerHTML={{
           __html:
-            '@media print{@page{size:A4 landscape;margin:9mm}' +
+            '@media print{@page{size:A4 landscape;margin:0}' +
+            'main{padding:9mm !important}' +
             '.ssheet{font-size:9px !important}' +
             '.ssheet th,.ssheet td{padding:4px 7px !important}}',
         }}
