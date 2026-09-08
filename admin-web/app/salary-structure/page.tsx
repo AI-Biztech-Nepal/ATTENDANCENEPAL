@@ -491,14 +491,24 @@ export default function SalaryStructurePage() {
       )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm print:border-0 print:shadow-none">
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-accent/10 via-accent/5 to-transparent px-4 py-4 sm:px-6 print:hidden">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
-              <StructureIcon className="h-5 w-5" />
-            </span>
-            <h2 className="text-lg font-bold text-ink">Monthly Salary Structure</h2>
+        {/* Two deliberate lines rather than one wrapping row. The title and the
+            actions that apply to the whole sheet (settings, Print, Export) share
+            the top line; the controls that decide what the sheet shows sit
+            below, with the search box pushed right so it lands directly under
+            those actions. As one row the actions were the last items in the
+            group, so at most widths they wrapped onto a line of their own
+            underneath the search box. */}
+        <div className="bg-gradient-to-r from-accent/10 via-accent/5 to-transparent px-4 py-4 sm:px-6 print:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
+                <StructureIcon className="h-5 w-5" />
+              </span>
+              <h2 className="text-lg font-bold text-ink">Monthly Salary Structure</h2>
+            </div>
+            <TableExportBar onExportCsv={exportCsv} leading={reportColumnsSettings} />
           </div>
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="mt-3 flex flex-wrap items-center gap-2.5">
             <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs font-semibold shadow-sm">
               <button
                 onClick={() => setViewMode('monthly')}
@@ -532,7 +542,7 @@ export default function SalaryStructurePage() {
               {formatDdMmYyyy(start, system)} to {formatDdMmYyyy(end, system)}
               <span className="text-slate-400">({daysInMonth}d)</span>
             </div>
-            <div className="relative">
+            <div className="relative sm:ml-auto">
               <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
@@ -542,7 +552,6 @@ export default function SalaryStructurePage() {
                 className="w-48 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-ink shadow-sm placeholder:text-slate-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
               />
             </div>
-            <TableExportBar onExportCsv={exportCsv} leading={reportColumnsSettings} />
           </div>
         </div>
 
