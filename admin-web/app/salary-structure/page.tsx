@@ -526,10 +526,19 @@ export default function SalaryStructurePage() {
           </p>
         </div>
 
+        {/* Every employee at once: the table used to sit in a 65vh box with
+            its own vertical scrollbar, so a longer roster was read a screenful
+            at a time inside the page rather than as one list. It now grows to
+            its full height and the page scrolls. Horizontal scrolling stays on
+            this container — the table is wider than the card and the floating
+            ‹ › pill drives it. */}
         <HorizontalScrollButtons targetRef={tableScrollRef} />
-        <div ref={tableScrollRef} className="max-h-[65vh] overflow-auto print:max-h-none print:overflow-visible">
+        <div ref={tableScrollRef} className="overflow-x-auto print:overflow-visible">
           <table className="w-full text-left text-sm">
             <thead>
+              {/* Sticks to the page now that this container no longer scrolls
+                  vertically; `top-0` keeps the column names in view while the
+                  page moves under them. */}
               <tr className="sticky top-0 z-10 border-y border-slate-200 bg-slate-50 align-bottom text-xs uppercase tracking-wide text-slate-500">
                 <th className="sticky left-0 z-20 w-16 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium">ID</th>
                 <th className="sticky left-16 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none">
