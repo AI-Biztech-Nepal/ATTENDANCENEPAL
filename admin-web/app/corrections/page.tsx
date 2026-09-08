@@ -95,11 +95,14 @@ export default function CorrectionsPage() {
   }, [logs]);
 
   // Days this month where someone has a check-in but no check-out (or the
-  // reverse) — the entries an admin most often needs to fix.
+  // reverse) — the entries an admin most often needs to fix. Today is left
+  // out: the day isn't over, so a missing check-out isn't a real gap yet.
   const incompleteDays = useMemo<EmptyDay[]>(() => {
+    const today = nepalTodayIso();
     const out: EmptyDay[] = [];
     for (const [key, dayLogs] of punchesByEmpDay) {
       const [employeeId, date] = key.split('|');
+      if (date >= today) continue;
       const { checkIn, checkOut } = selectDayPunches(dayLogs);
       if (checkIn && !checkOut) {
         out.push({
