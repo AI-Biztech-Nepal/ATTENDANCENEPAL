@@ -158,8 +158,14 @@ export default function SalaryStructurePage() {
   // is hidden here AND left out of Net Payable, matching the report's
   // "not shown means not counted" rule for overtime.
   const showOvertime = reportCols.overtime;
+  // PF / SSF hiding is display-only — Net Payable still deducts them, unlike
+  // Overtime, whose switch also takes the allowance out of the maths.
+  const showPf = reportCols.pf;
+  const showSsfEmployer = reportCols.ssfEmployer;
+  const showSsfEmployee = reportCols.ssfEmployee;
   const effectiveOvertime = showOvertime ? overtime : 0;
-  const structureColCount = showOvertime ? 10 : 9;
+  const structureColCount =
+    6 + (showPf ? 1 : 0) + (showSsfEmployer ? 1 : 0) + (showSsfEmployee ? 1 : 0) + (showOvertime ? 1 : 0);
 
   /** Monthly figure -> the number shown, scaled to the active view. */
   function shown(n: number | null | undefined): string {
@@ -337,9 +343,9 @@ export default function SalaryStructurePage() {
       `Basic${suffix}`,
       `Allowance${suffix}`,
       `Gross${suffix}`,
-      `PF (${pf}%)${suffix}`,
-      `SSF by Employer (${ssf}%)${suffix}`,
-      `SSF by Employee (${tds}%)${suffix}`,
+      ...(showPf ? [`PF (${pf}%)${suffix}`] : []),
+      ...(showSsfEmployer ? [`SSF by Employer (${ssf}%)${suffix}`] : []),
+      ...(showSsfEmployee ? [`SSF by Employee (${tds}%)${suffix}`] : []),
       ...(showOvertime ? [`Overtime (${overtime}%)${suffix}`] : []),
       `Net Payable${suffix}`,
     ];
@@ -350,9 +356,9 @@ export default function SalaryStructurePage() {
       cell(r.basic),
       r.allowance ? cell(r.allowance) : '',
       cell(r.gross),
-      cell(r.pfAmt),
-      cell(r.ssfAmt),
-      cell(r.tdsAmt),
+      ...(showPf ? [cell(r.pfAmt)] : []),
+      ...(showSsfEmployer ? [cell(r.ssfAmt)] : []),
+      ...(showSsfEmployee ? [cell(r.tdsAmt)] : []),
       ...(showOvertime ? [cell(r.overtimeAmt)] : []),
       cell(r.net),
     ]);
@@ -381,61 +387,82 @@ export default function SalaryStructurePage() {
     </div>
   );
 
-  // 'deductions' is deliberately omitted — that group is always shown on both
-  // the Payroll report and the Salary Structure table.
+  // Two groups, because the cog sits above the Salary Structure table but was
+  // only offering the Payroll report's attendance columns — nothing that
+  // changed the table you were looking at. This table's own contribution
+  // columns come first for that reason.
+  //
+  // 'deductions' is deliberately omitted — that group is always shown on the
+  // Payroll report.
+  const STRUCTURE_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
+    ['pf', 'PF'],
+    ['ssfEmployer', 'SSF by Employer'],
+    ['ssfEmployee', 'SSF by Employee'],
+    ['overtime', 'Overtime'],
+  ];
   const REPORT_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
     ['workedDays', 'Worked Days'],
     ['totalHours', 'Total Hours'],
-    ['overtime', 'Overtime'],
     ['lateEarly', 'Late / Early Days'],
   ];
 
-  // The cog menu that used to live in the Payroll report header — it now
-  // sets a company-wide choice here, and the Payroll report simply reads it.
-  // Admin-only, same as the contribution rates above it.
+  const columnToggle = ([key, label]: [keyof PayrollReportColumns, string]) => {
+    const on = reportCols[key];
+    return (
+      <button
+        key={key}
+        type="button"
+        onClick={() => toggleReportCol(key)}
+        className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm text-ink hover:bg-slate-50"
+      >
+        {label}
+        <span className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-good' : 'bg-slate-300'}`}>
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+              on ? 'translate-x-[18px]' : 'translate-x-0.5'
+            }`}
+          />
+        </span>
+      </button>
+    );
+  };
+
+  // Company-wide column choices for every payroll surface, set here and only
+  // read elsewhere. Admin-only, same as the contribution rates above it.
   const reportColumnsSettings = isAdmin ? (
     <div className="relative print:hidden" ref={reportColsRef}>
       <button
         type="button"
         onClick={() => setReportColsOpen(v => !v)}
-        title="Payroll report columns"
+        title="Column settings"
         className="flex h-[30px] w-[30px] items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
       >
         <CogIcon className="h-[18px] w-[18px]" />
       </button>
       {reportColsOpen && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
           <div className="flex items-center gap-2 border-b border-slate-100 bg-gradient-to-br from-accent/10 via-accent/5 to-transparent px-4 py-3">
             <CogIcon className="h-4 w-4 text-accent" />
-            <span className="text-sm font-semibold text-ink">Payroll Report Columns</span>
+            <span className="text-sm font-semibold text-ink">Columns</span>
           </div>
-          <p className="px-4 pb-1 pt-2 text-[11px] leading-snug text-slate-400">
-            Show or hide these columns in the monthly Payroll report and its printed / PDF copy — a company-wide
-            choice. Hiding Overtime also drops overtime pay from that report&apos;s totals, and hides the Overtime
-            allowance column here (and out of Net Payable).
+
+          <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            This table
+          </div>
+          <p className="px-4 pb-1 pt-1 text-[11px] leading-snug text-slate-400">
+            Hides the column here and in the printed / Excel copy. Net Payable still deducts PF and SSF either way —
+            hide them when a rate is 0 and the column is a row of zeroes.
           </p>
-          <div className="p-1.5">
-            {REPORT_COLUMN_OPTIONS.map(([key, label]) => {
-              const on = reportCols[key];
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => toggleReportCol(key)}
-                  className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm text-ink hover:bg-slate-50"
-                >
-                  {label}
-                  <span className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-good' : 'bg-slate-300'}`}>
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                        on ? 'translate-x-[18px]' : 'translate-x-0.5'
-                      }`}
-                    />
-                  </span>
-                </button>
-              );
-            })}
+          <div className="p-1.5">{STRUCTURE_COLUMN_OPTIONS.map(columnToggle)}</div>
+
+          <div className="border-t border-slate-100 px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Payroll report
           </div>
+          <p className="px-4 pb-1 pt-1 text-[11px] leading-snug text-slate-400">
+            Attendance columns on the monthly Payroll report and the Staff Salary Sheet. Overtime is above, since it
+            governs both — hiding it also drops overtime pay from that report&apos;s totals and from Net Payable here.
+          </p>
+          <div className="p-1.5">{REPORT_COLUMN_OPTIONS.map(columnToggle)}</div>
         </div>
       )}
     </div>
@@ -580,15 +607,21 @@ export default function SalaryStructurePage() {
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Basic</th>
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Allowance</th>
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Gross</th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
-                  {rateHeader('PF', pfDraft, setPfDraft)}
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
-                  {rateHeader('SSF by Employer', ssfDraft, setSsfDraft)}
-                </th>
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
-                  {rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}
-                </th>
+                {showPf && (
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
+                    {rateHeader('PF', pfDraft, setPfDraft)}
+                  </th>
+                )}
+                {showSsfEmployer && (
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
+                    {rateHeader('SSF by Employer', ssfDraft, setSsfDraft)}
+                  </th>
+                )}
+                {showSsfEmployee && (
+                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-critical-text">
+                    {rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}
+                  </th>
+                )}
                 {showOvertime && (
                   <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-good-text">
                     {rateHeader('Overtime', overtimeDraft, setOvertimeDraft)}
@@ -610,9 +643,9 @@ export default function SalaryStructurePage() {
                   {amountCell(e.id, 'salary', basic)}
                   {amountCell(e.id, 'allowance', allowance)}
                   <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums text-ink">{shown(gross)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(pfAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(ssfAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(tdsAmt)}</td>
+                  {showPf && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(pfAmt)}</td>}
+                  {showSsfEmployer && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(ssfAmt)}</td>}
+                  {showSsfEmployee && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-critical-text">{shown(tdsAmt)}</td>}
                   {showOvertime && (
                     <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(overtimeAmt)}</td>
                   )}
@@ -639,9 +672,9 @@ export default function SalaryStructurePage() {
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.basic)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.allowance)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.gross)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.pfAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.ssfAmt)}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.tdsAmt)}</td>
+                  {showPf && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.pfAmt)}</td>}
+                  {showSsfEmployer && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.ssfAmt)}</td>}
+                  {showSsfEmployee && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.tdsAmt)}</td>}
                   {showOvertime && (
                     <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.overtimeAmt)}</td>
                   )}
