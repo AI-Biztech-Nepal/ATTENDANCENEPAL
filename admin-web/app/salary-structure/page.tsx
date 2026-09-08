@@ -7,6 +7,7 @@ import AppShell from '@/components/AppShell';
 import Avatar from '@/components/Avatar';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
+import PayrollColumnsMenu from '@/components/PayrollColumnsMenu';
 import { computeSalaryFigures } from '@/components/SalaryBreakdown';
 import {
   buildPeriodOptions,
@@ -70,22 +71,10 @@ export default function SalaryStructurePage() {
   // localStorage (lib/payrollReportColumns), so it takes effect immediately
   // and needs no migration; loaded in an effect so SSR and first render agree.
   const [reportCols, setReportCols] = useState<PayrollReportColumns>(DEFAULT_PAYROLL_REPORT_COLUMNS);
-  const [reportColsOpen, setReportColsOpen] = useState(false);
-  const reportColsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setReportCols(loadPayrollReportColumns());
   }, []);
-
-  useEffect(() => {
-    if (!reportColsOpen) return;
-    function onDown(e: MouseEvent) {
-      if (reportColsRef.current?.contains(e.target as Node)) return;
-      setReportColsOpen(false);
-    }
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [reportColsOpen]);
 
   // Same period model the Payroll page uses — a real calendar month in the
   // active AD/BS system. Resets to "this month" when the AD/BS switch flips.
@@ -387,85 +376,27 @@ export default function SalaryStructurePage() {
     </div>
   );
 
-  // Two groups, because the cog sits above the Salary Structure table but was
-  // only offering the Payroll report's attendance columns — nothing that
-  // changed the table you were looking at. This table's own contribution
-  // columns come first for that reason.
-  //
-  // 'deductions' is deliberately omitted — that group is always shown on the
-  // Payroll report.
+  // Only this table's own columns. The Payroll report's attendance switches
+  // used to sit here too, which meant a menu above this table was mostly
+  // controlling a different page; they now live on that report's own cog.
+  // Overtime stays here because it governs this table's Overtime column and
+  // its Net Payable, not just what the report displays.
   const STRUCTURE_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
     ['pf', 'PF'],
     ['ssfEmployer', 'SSF by Employer'],
     ['ssfEmployee', 'SSF by Employee'],
     ['overtime', 'Overtime'],
   ];
-  const REPORT_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
-    ['workedDays', 'Worked Days'],
-    ['totalHours', 'Total Hours'],
-    ['lateEarly', 'Late / Early Days'],
-  ];
 
-  const columnToggle = ([key, label]: [keyof PayrollReportColumns, string]) => {
-    const on = reportCols[key];
-    return (
-      <button
-        key={key}
-        type="button"
-        onClick={() => toggleReportCol(key)}
-        className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2.5 text-sm text-ink hover:bg-slate-50"
-      >
-        {label}
-        <span className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${on ? 'bg-good' : 'bg-slate-300'}`}>
-          <span
-            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-              on ? 'translate-x-[18px]' : 'translate-x-0.5'
-            }`}
-          />
-        </span>
-      </button>
-    );
-  };
-
-  // Company-wide column choices for every payroll surface, set here and only
-  // read elsewhere. Admin-only, same as the contribution rates above it.
+  // Admin-only, same as the contribution rates above it.
   const reportColumnsSettings = isAdmin ? (
-    <div className="relative print:hidden" ref={reportColsRef}>
-      <button
-        type="button"
-        onClick={() => setReportColsOpen(v => !v)}
-        title="Column settings"
-        className="flex h-[30px] w-[30px] items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100"
-      >
-        <CogIcon className="h-[18px] w-[18px]" />
-      </button>
-      {reportColsOpen && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-          <div className="flex items-center gap-2 border-b border-slate-100 bg-gradient-to-br from-accent/10 via-accent/5 to-transparent px-4 py-3">
-            <CogIcon className="h-4 w-4 text-accent" />
-            <span className="text-sm font-semibold text-ink">Columns</span>
-          </div>
-
-          <div className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            This table
-          </div>
-          <p className="px-4 pb-1 pt-1 text-[11px] leading-snug text-slate-400">
-            Hides the column here and in the printed / Excel copy. Net Payable still deducts PF and SSF either way —
-            hide them when a rate is 0 and the column is a row of zeroes.
-          </p>
-          <div className="p-1.5">{STRUCTURE_COLUMN_OPTIONS.map(columnToggle)}</div>
-
-          <div className="border-t border-slate-100 px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Payroll report
-          </div>
-          <p className="px-4 pb-1 pt-1 text-[11px] leading-snug text-slate-400">
-            Attendance columns on the monthly Payroll report and the Staff Salary Sheet. Overtime is above, since it
-            governs both — hiding it also drops overtime pay from that report&apos;s totals and from Net Payable here.
-          </p>
-          <div className="p-1.5">{REPORT_COLUMN_OPTIONS.map(columnToggle)}</div>
-        </div>
-      )}
-    </div>
+    <PayrollColumnsMenu
+      cols={reportCols}
+      onToggle={toggleReportCol}
+      options={STRUCTURE_COLUMN_OPTIONS}
+      title="Salary Structure columns"
+      description="Hides the column here and in the printed / Excel copy. Net Payable still deducts PF and SSF either way — hide them when a rate is 0 and the column is a row of zeroes. Hiding Overtime does take the allowance out of Net Payable, and out of the Payroll report."
+    />
   ) : null;
 
   const detailQuery = `?start=${start}&end=${end}&view=${viewMode}`;
@@ -737,11 +668,3 @@ function EditIcon({ className }: { className?: string }) {
   );
 }
 
-function CogIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}

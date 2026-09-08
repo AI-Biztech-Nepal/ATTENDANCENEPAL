@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
+import PayrollColumnsMenu from '@/components/PayrollColumnsMenu';
 import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPeriod, type CalendarPeriod } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildEmployeeDayRows } from '@/lib/payrollDetail';
@@ -15,6 +16,7 @@ import {
   DEFAULT_PAYROLL_REPORT_COLUMNS,
   loadPayrollReportColumns,
   normalizePayrollReportColumns,
+  savePayrollReportColumns,
   PAYROLL_REPORT_COLUMNS_KEY,
   type PayrollReportColumns,
 } from '@/lib/payrollReportColumns';
@@ -102,6 +104,22 @@ export default function StaffSalarySheet() {
   // reads the saved value and stays in sync via the `storage` event.
   const [visibleCols, setVisibleCols] = useState<PayrollReportColumns>(DEFAULT_PAYROLL_REPORT_COLUMNS);
   const tableScrollRef = useRef<HTMLDivElement>(null);
+
+  // Same switches as the standard Payroll report — this sheet is what the
+  // Payroll Report page renders for a staff_salary_sheet company, so it needs
+  // the same cog. Unlike the old one it had, this writes the shared value
+  // rather than private state, so it cannot drift from Salary Structure.
+  const ATTENDANCE_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
+    ['workedDays', 'Worked Days'],
+    ['totalHours', 'Total Hours'],
+  ];
+  function toggleVisibleCol(key: keyof PayrollReportColumns) {
+    setVisibleCols(c => {
+      const next = { ...c, [key]: !c[key] };
+      savePayrollReportColumns(next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     setVisibleCols(loadPayrollReportColumns());
@@ -483,7 +501,18 @@ export default function StaffSalarySheet() {
             </select>
           </div>
 
-          <TableExportBar onExportCsv={exportCsv} />
+          <TableExportBar
+            onExportCsv={exportCsv}
+            leading={
+              <PayrollColumnsMenu
+                cols={visibleCols}
+                onToggle={toggleVisibleCol}
+                options={ATTENDANCE_COLUMN_OPTIONS}
+                title="Payroll report columns"
+                description="Hides the column from this sheet and its printed / PDF / Excel copy. Overtime is set on the Salary Structure page, since hiding it also takes overtime pay out of the totals there."
+              />
+            }
+          />
         </div>
 
         {/* print-only masthead */}
