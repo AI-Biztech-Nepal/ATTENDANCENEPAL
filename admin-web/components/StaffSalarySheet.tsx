@@ -519,6 +519,16 @@ export default function StaffSalarySheet() {
   // The wide money columns keep the left-ranged heading, since their long
   // labels set their own width and never come near it.
   const thAtt = `${th} text-right min-w-[5rem]`;
+
+  // ID and Employee Name are NOT frozen. They were, and the cost was that
+  // every other column passed underneath them on a sideways scroll — Worked
+  // Days, sitting immediately after, was routinely swallowed and its heading
+  // read as "ORKED / DAYS". That overlap is what position:sticky does; it
+  // cannot be styled away, and a min-width, a right-ranged heading and a
+  // heavy boundary each only made it easier to recognise. The columns now
+  // scroll together, so every heading and figure is always fully readable.
+  // The trade is that the name scrolls off once you reach the far-right money
+  // columns; the row order is stable, so it is still followable.
   const td = 'whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700';
 
   const colCount = 10 + visibleAttCols.length;
@@ -619,8 +629,8 @@ export default function StaffSalarySheet() {
           <table className="ssheet w-full text-right text-[12.5px]">
             <thead>
               <tr className="border-y border-slate-200 bg-slate-50">
-                <th className={`${th} sticky left-0 z-10 w-16 bg-slate-50 text-left shadow-none`}>ID</th>
-                <th className={`${th} sticky left-16 z-10 min-w-[10rem] bg-slate-50 text-left border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none`}>
+                <th className={`${th} w-16 bg-slate-50 text-left`}>ID</th>
+                <th className={`${th} min-w-[10rem] bg-slate-50 text-left`}>
                   Employee Name
                 </th>
                 {visibleCols.workedDays && (
@@ -676,10 +686,10 @@ export default function StaffSalarySheet() {
                   </tr>
                 ) : (
                   <tr key={item.row.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                    <td className="sticky left-0 z-[1] whitespace-nowrap bg-white px-2.5 py-1.5 text-center tabular-nums text-slate-400">
+                    <td className="whitespace-nowrap bg-white px-2.5 py-1.5 text-center tabular-nums text-slate-400">
                       {item.row.enrollId}
                     </td>
-                    <td className="sticky left-16 z-[1] whitespace-nowrap bg-white px-2.5 py-1.5 text-left font-medium text-ink border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none">
+                    <td className="whitespace-nowrap bg-white px-2.5 py-1.5 text-left font-medium text-ink">
                       <Link href={detailHref(item.row.id)} className="hover:text-accent hover:underline print:no-underline print:text-ink">
                         {item.row.name}
                       </Link>
@@ -718,7 +728,7 @@ export default function StaffSalarySheet() {
                 <tr className="border-t-2 border-slate-300 bg-slate-50 text-[12.5px] font-bold text-ink">
                   <td
                     colSpan={2}
-                    className="sticky left-0 z-[1] bg-slate-50 px-2.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none"
+                    className="bg-slate-50 px-2.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
                   >
                     Total
                   </td>
