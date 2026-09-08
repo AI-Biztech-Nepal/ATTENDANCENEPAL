@@ -541,7 +541,7 @@ export default function SalaryStructurePage() {
                   page moves under them. */}
               <tr className="sticky top-0 z-10 border-y border-slate-200 bg-slate-50 align-bottom text-xs uppercase tracking-wide text-slate-500">
                 <th className="sticky left-0 z-20 w-16 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium">ID</th>
-                <th className="sticky left-16 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none">
+                <th className="sticky left-16 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none">
                   Employee
                 </th>
                 <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Basic</th>
@@ -574,7 +574,7 @@ export default function SalaryStructurePage() {
               {rows.map(({ e, basic, allowance, gross, pfAmt, ssfAmt, tdsAmt, overtimeAmt, net }) => (
                 <tr key={e.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                   <td className="sticky left-0 z-[1] whitespace-nowrap bg-white px-3 py-2 tabular-nums text-slate-500">{e.fingerprint_id || '—'}</td>
-                  <td className="sticky left-16 z-[1] whitespace-nowrap bg-white px-3 py-2 font-medium text-ink shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none">
+                  <td className="sticky left-16 z-[1] whitespace-nowrap bg-white px-3 py-2 font-medium text-ink border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none">
                     <Link href={`/salary-structure/${e.id}${detailQuery}`} className="flex items-center gap-2.5 hover:text-accent hover:underline">
                       <Avatar name={e.name} photoUrl={e.profile_photo_url} />
                       <span>{e.name}</span>
@@ -605,7 +605,7 @@ export default function SalaryStructurePage() {
                 <tr className="sticky bottom-0 border-t-2 border-slate-200 bg-slate-50 text-sm font-bold text-ink">
                   <td
                     colSpan={2}
-                    className="sticky left-0 z-[1] whitespace-nowrap bg-slate-50 px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none"
+                    className="sticky left-0 z-[1] whitespace-nowrap bg-slate-50 px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none"
                   >
                     Total{perDay && ' / day'} · {totals.counted} staff
                   </td>
