@@ -10,7 +10,14 @@ import PayrollColumnsMenu from '@/components/PayrollColumnsMenu';
 import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPeriod, type CalendarPeriod } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildEmployeeDayRows } from '@/lib/payrollDetail';
-import { buildWeeklyPatternByEmployee, formatHoursMinutes, nepalTodayIso, type DailyShiftByDate } from '@/lib/shift';
+import {
+  buildWeeklyPatternByEmployee,
+  formatHoursMinutes,
+  isWeekOff,
+  nepalTodayIso,
+  resolveShiftForDate,
+  type DailyShiftByDate,
+} from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import {
   DEFAULT_PAYROLL_REPORT_COLUMNS,
@@ -42,7 +49,14 @@ const ATTENDANCE_COLUMNS = [
   ['overtime', 'Overtime'],
 ] as const;
 
-type AttendanceAgg = { days: number; hours: number; overtime: number; paidOffDays: number };
+type AttendanceAgg = {
+  days: number;
+  hours: number;
+  overtime: number;
+  paidOffDays: number;
+  paidLeaveDays: number;
+  workingDays: number;
+};
 
 type SheetRow = {
   id: string;
@@ -98,6 +112,13 @@ export default function StaffSalarySheet() {
   // read-only here.
   const [ssfEmployerRate, setSsfEmployerRate] = useState(11);
   const [ssfEmployeeRate, setSsfEmployeeRate] = useState(0);
+  const [otHoursPerDay, setOtHoursPerDay] = useState(8);
+
+  // How Basic becomes this period's pay. 'flat' is the default and is what
+  // this sheet has always done — the full stored Basic every month, attendance
+  // ignored — so the numbers do not move unless someone deliberately picks
+  // another basis. A per-view choice, not persisted.
+  const [salaryMode, setSalaryMode] = useState<'hourly' | 'daily' | 'flat'>('flat');
 
   // Which attendance columns show — the switches live on the Salary Structure
   // page now (shared localStorage, lib/payrollReportColumns); this sheet just
@@ -147,8 +168,9 @@ export default function StaffSalarySheet() {
   }, []);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, ssfRate, tdsRate }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, ssfRate, tdsRate, otHoursPerDay }) => {
       setWeeklyOffDay(weeklyOffDay);
+      setOtHoursPerDay(otHoursPerDay);
       setSsfEmployerRate(ssfRate);
       setSsfEmployeeRate(tdsRate);
       if (rosterMode === 'weekly') {
@@ -226,8 +248,11 @@ export default function StaffSalarySheet() {
     const weekOffDatesFor = weekOffDatesByGender(start, end, weeklyOffDay, holidays);
     const leaveByEmployee = leaveDatesByEmployee(leaveRequests);
     const weeklyPattern = buildWeeklyPatternByEmployee(weeklyPatternRows);
+    const daysInRange = Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1;
     const map = new Map<string, AttendanceAgg>();
     for (const emp of employees) {
+      const weekOffDates = weekOffDatesFor(emp.gender);
+      const leaveDates = leaveByEmployee.get(emp.id);
       const rows = buildEmployeeDayRows(
         emp,
         shifts,
@@ -236,30 +261,80 @@ export default function StaffSalarySheet() {
         start,
         end,
         dailyShiftByDate,
-        weekOffDatesFor(emp.gender),
-        leaveByEmployee.get(emp.id),
+        weekOffDates,
+        leaveDates,
         weeklyPattern
       );
       let days = 0;
       let hours = 0;
       let overtime = 0;
       let paidOffDays = 0;
+      // Leave taken on an actual working day is the only paid day off that
+      // earns pay on top of days present — a week-off is already covered by
+      // dividing Basic over working days rather than calendar days, so
+      // counting it here would pay for it twice. buildEmployeeDayRows labels
+      // a date that is both Leave and Week Off as 'Leave', so the week-off
+      // has to be re-checked rather than inferred from the status. Same rule
+      // the standard Payroll report uses.
+      let paidLeaveDays = 0;
+      // Calendar days minus company week-offs, so a full month of attendance
+      // earns exactly the full Basic. Matches the standard report's divisor.
+      const workingDays = Math.max(1, daysInRange - weekOffDates.size);
       for (const d of rows) {
         if (d.status === 'Present' || d.status === 'Late') days += 1;
         if (d.paidOff) paidOffDays += 1;
+        if (
+          d.status === 'Leave' &&
+          !isWeekOff(resolveShiftForDate(emp, shifts, d.date, dailyShiftByDate, weekOffDates, weeklyPattern))
+        ) {
+          paidLeaveDays += 1;
+        }
         hours += d.hours;
         overtime += d.overtime;
       }
-      map.set(emp.id, { days, hours, overtime, paidOffDays });
+      map.set(emp.id, { days, hours, overtime, paidOffDays, paidLeaveDays, workingDays });
     }
     return map;
   }, [employees, shifts, summaries, logs, dailyShiftByDate, holidays, leaveRequests, weeklyOffDay, weeklyPatternRows, period]);
+
+  /** Stored monthly Basic -> what this period actually earned, per the basis
+   * picked above. The divisor is the employee's WORKING days (calendar days
+   * minus company week-offs), so a full month of attendance earns exactly the
+   * full Basic and nobody is quietly short-paid by a month's length.
+   *
+   *  flat:   the stored Basic, attendance ignored. What this sheet has always
+   *          done, and still the default.
+   *  daily:  Basic / workingDays x (days present + paid Leave days). A partial
+   *          day still counts as a whole day.
+   *  hourly: Basic / (workingDays x hours-per-day) x hours actually worked,
+   *          plus one standard day per paid Leave day.
+   *
+   * Week-offs are deliberately absent from both numerators: they are already
+   * priced in by dividing over working days rather than calendar days, so
+   * adding them again would pay for them twice.
+   *
+   * Everything downstream — SSF employer/employee, MGS, Total SSF, Net — is
+   * derived from this figure, so a prorated month grosses up and deducts on
+   * what was actually earned rather than on the full stored salary. */
+  const earnedBasic = useMemo(() => {
+    return (employeeId: string, storedBasic: number): number => {
+      if (salaryMode === 'flat') return storedBasic;
+      const a = attendanceByEmployee.get(employeeId);
+      if (!a) return storedBasic;
+      const divisorDays = Math.max(1, a.workingDays);
+      if (salaryMode === 'daily') {
+        return (storedBasic / divisorDays) * (a.days + a.paidLeaveDays);
+      }
+      const hourlyRate = storedBasic / (divisorDays * Math.max(1, otHoursPerDay));
+      return hourlyRate * a.hours + hourlyRate * otHoursPerDay * a.paidLeaveDays;
+    };
+  }, [salaryMode, attendanceByEmployee, otHoursPerDay]);
 
   const groups = useMemo(() => {
     const rows: (SheetRow & { branch: string })[] = employees
       .filter(e => e.salary != null)
       .map(e => {
-        const basic = e.salary!;
+        const basic = earnedBasic(e.id, e.salary!);
         const dearness = Number(e.allowance ?? 0) || 0;
         const ssfEmployer = (basic * ssfEmployerRate) / 100;
         const ssfEmployee = (basic * ssfEmployeeRate) / 100;
@@ -292,7 +367,7 @@ export default function StaffSalarySheet() {
         branch,
         list: list.sort((a, b) => a.enrollId.localeCompare(b.enrollId, undefined, { numeric: true, sensitivity: 'base' })),
       }));
-  }, [employees, branchName, ssfEmployerRate, ssfEmployeeRate]);
+  }, [employees, branchName, ssfEmployerRate, ssfEmployeeRate, earnedBasic]);
 
   const allRows = useMemo(() => groups.flatMap(g => g.list), [groups]);
 
@@ -329,7 +404,8 @@ export default function StaffSalarySheet() {
     };
   }, [allRows]);
 
-  const att = (id: string): AttendanceAgg => attendanceByEmployee.get(id) ?? { days: 0, hours: 0, overtime: 0, paidOffDays: 0 };
+  const att = (id: string): AttendanceAgg =>
+    attendanceByEmployee.get(id) ?? { days: 0, hours: 0, overtime: 0, paidOffDays: 0, paidLeaveDays: 0, workingDays: 1 };
 
   // Column footer for the attendance columns — mirrors the standard Payroll
   // report: Worked Days shows "{present}P / {absent}A", the other two a
@@ -485,6 +561,32 @@ export default function StaffSalarySheet() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Same three-way basis the standard Payroll report offers, so the
+                two reports answer "how does Basic become this month's pay?"
+                the same way. Flat Monthly is selected by default and is this
+                sheet's long-standing behaviour. */}
+            <div
+              title="How Basic becomes this period's pay: per hour worked, per day present, or the full stored Basic regardless of attendance. The per-hour / per-day rate divides Basic by the month's working days (calendar days minus weekly-offs)."
+            >
+              <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs font-semibold shadow-sm">
+                {(
+                  [
+                    ['hourly', 'Per Hour'],
+                    ['daily', 'Per Day'],
+                    ['flat', 'Flat Monthly'],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setSalaryMode(mode)}
+                    className={`px-3 py-2 ${salaryMode === mode ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <select
               value={period.key}
               onChange={e => {
