@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
-import Avatar from '@/components/Avatar';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import PayrollColumnsMenu from '@/components/PayrollColumnsMenu';
@@ -24,7 +23,7 @@ import {
   savePayrollReportColumns,
   type PayrollReportColumns,
 } from '@/lib/payrollReportColumns';
-import type { Employee } from '@/lib/types';
+import type { Branch, Employee } from '@/lib/types';
 
 /** The one place a company's salary structure is set: the three contribution
  * rates (companies.pf_rate/ssf_rate/tds_rate — one company-wide percentage of
@@ -39,6 +38,7 @@ import type { Employee } from '@/lib/types';
 export default function SalaryStructurePage() {
   const { system } = useCalendarSystem();
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -108,6 +108,8 @@ export default function SalaryStructurePage() {
       setOvertimeDraft(String(overtimeRate));
     });
 
+    supabase.from('branches').select('*').then(({ data }) => setBranches(data ?? []));
+
     supabase
       .from('employees')
       .select('*')
@@ -172,6 +174,38 @@ export default function SalaryStructurePage() {
       )
       .map(e => ({ e, ...computeSalaryFigures(e.salary, e.allowance, pf, ssf, tds, effectiveOvertime) }));
   }, [employees, search, pf, ssf, tds, effectiveOvertime]);
+
+  type StructureRow = (typeof rows)[number];
+
+  const branchName = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const b of branches) m.set(b.id, b.name);
+    return m;
+  }, [branches]);
+
+  // Group rows by branch — same as the Payroll report's Staff Salary Sheet.
+  // Rows keep their enroll-ID order within each branch; the branch band only
+  // shows when the company actually spans more than one branch (a single
+  // "Unassigned" bucket would just repeat what the whole table already is).
+  const groups = useMemo(() => {
+    const byBranch = new Map<string, StructureRow[]>();
+    for (const r of rows) {
+      const b = r.e.branch_id ? branchName.get(r.e.branch_id) ?? 'Unassigned' : 'Unassigned';
+      if (!byBranch.has(b)) byBranch.set(b, []);
+      byBranch.get(b)!.push(r);
+    }
+    return [...byBranch.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([branch, list]) => ({ branch, list }));
+  }, [rows, branchName]);
+
+  const renderItems = useMemo(() => {
+    const items: ({ kind: 'group'; branch: string } | { kind: 'row'; row: StructureRow })[] = [];
+    const showGroupHeaders = groups.length > 1;
+    for (const g of groups) {
+      if (showGroupHeaders) items.push({ kind: 'group', branch: g.branch });
+      for (const r of g.list) items.push({ kind: 'row', row: r });
+    }
+    return items;
+  }, [groups]);
 
   const totals = useMemo(() => {
     let basic = 0,
@@ -281,7 +315,7 @@ export default function SalaryStructurePage() {
   const amountCell = (id: string, field: 'salary' | 'allowance', value: number | null) => {
     if (!perDay && editingCell?.id === id && editingCell.field === field) {
       return (
-        <td className="whitespace-nowrap px-3 py-2 text-right align-top">
+        <td className="whitespace-nowrap px-2.5 py-1.5 text-right align-top">
           <input
             autoFocus
             type="number"
@@ -307,7 +341,7 @@ export default function SalaryStructurePage() {
       );
     }
     return (
-      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-slate-600">
+      <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700">
         <span className="inline-flex items-center gap-1.5">
           <span className={value == null ? 'text-slate-300' : undefined}>{shown(value)}</span>
           {!perDay && (
@@ -358,7 +392,7 @@ export default function SalaryStructurePage() {
   // component type would get a fresh identity each render and remount its
   // input, dropping focus mid-type.
   const rateHeader = (label: string, value: string, onChange: (v: string) => void) => (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-start gap-1">
       <span>{label}</span>
       <span className="flex items-center gap-1 normal-case tracking-normal print:hidden">
         <input
@@ -406,28 +440,28 @@ export default function SalaryStructurePage() {
 
   return (
     <AppShell title="Salary Structure">
-      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3 print:hidden">
-        <div className="rounded-xl bg-info-bg p-3 shadow-sm ring-1 ring-inset ring-info/10">
-          <span className="text-xs font-medium text-info-text/80">Total Gross Payroll{perDay && ' / day'}</span>
-          <div className="mt-1 text-base font-bold text-info-text">{shown(totals.gross)}</div>
-          <div className="mt-0.5 text-[11px] text-info-text/70">Basic {shown(totals.basic)} · Allowance {shown(totals.allowance)}</div>
+      <div className="mb-5 flex flex-col divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:flex-row sm:divide-x sm:divide-y-0 print:hidden">
+        <div className="flex-1 px-5 py-3.5">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Total Gross Payroll{perDay && ' / day'}</span>
+          <div className="mt-1 text-lg font-semibold tabular-nums text-ink">{shown(totals.gross)}</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">Basic {shown(totals.basic)} · Allowance {shown(totals.allowance)}</div>
         </div>
-        <div className="rounded-xl bg-critical-bg p-3 shadow-sm ring-1 ring-inset ring-critical/10">
-          <span className="text-xs font-medium text-critical-text/80">Total Deductions{perDay && ' / day'}</span>
-          <div className="mt-1 text-base font-bold text-critical-text">{shown(totals.deductions)}</div>
-          <div className="mt-0.5 text-[11px] text-critical-text/70">
+        <div className="flex-1 px-5 py-3.5">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Total Deductions{perDay && ' / day'}</span>
+          <div className="mt-1 text-lg font-semibold tabular-nums text-ink">{shown(totals.deductions)}</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">
             PF {shown(totals.pfAmt)} · SSF by Employer {shown(totals.ssfAmt)} · SSF by Employee {shown(totals.tdsAmt)}
           </div>
         </div>
-        <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
-          <span className="text-xs font-medium text-good-text/80">Total Net Payable{perDay && ' / day'}</span>
-          <div className="mt-1 text-base font-bold text-good-text">{shown(totals.net)}</div>
-          <div className="mt-0.5 text-[11px] text-good-text/70">Across {totals.counted} staff on a salary</div>
+        <div className="flex-1 px-5 py-3.5">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Total Net Payable{perDay && ' / day'}</span>
+          <div className="mt-1 text-lg font-bold tabular-nums text-ink">{shown(totals.net)}</div>
+          <div className="mt-0.5 text-[11px] text-slate-400">Across {totals.counted} staff on a salary</div>
         </div>
       </div>
 
       {dirty && isAdmin && (
-        <div className="mb-3 flex items-center justify-between rounded-xl border border-accent/30 bg-accent/5 px-4 py-2.5 print:hidden">
+        <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 print:hidden">
           <span className="text-sm font-medium text-ink">Unsaved contribution-rate changes</span>
           <div className="flex gap-2">
             <button
@@ -449,6 +483,7 @@ export default function SalaryStructurePage() {
       )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm print:border-0 print:shadow-none">
+<<<<<<< Updated upstream
         {/* Two deliberate lines rather than one wrapping row. The title and the
             actions that apply to the whole sheet (settings, Print, Export) share
             the top line; the controls that decide what the sheet shows sit
@@ -467,16 +502,21 @@ export default function SalaryStructurePage() {
             <TableExportBar onExportCsv={exportCsv} leading={reportColumnsSettings} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2.5">
+=======
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-6 print:hidden">
+          <h2 className="text-base font-semibold text-ink">Monthly Salary Structure</h2>
+          <div className="flex flex-wrap items-center gap-2.5">
+>>>>>>> Stashed changes
             <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs font-semibold shadow-sm">
               <button
                 onClick={() => setViewMode('monthly')}
-                className={`px-3 py-2 ${viewMode === 'monthly' ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                className={`px-3 py-2 ${viewMode === 'monthly' ? 'bg-ink text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
               >
                 Monthly
               </button>
               <button
                 onClick={() => setViewMode('perDay')}
-                className={`px-3 py-2 ${viewMode === 'perDay' ? 'bg-accent text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                className={`px-3 py-2 ${viewMode === 'perDay' ? 'bg-ink text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
               >
                 Per day
               </button>
@@ -487,7 +527,7 @@ export default function SalaryStructurePage() {
                 const found = periodOptions.find(o => o.key === e.target.value);
                 if (found) setPeriod(found);
               }}
-              className="rounded-lg border border-accent/30 bg-white px-3 py-2 text-sm font-bold text-ink shadow-sm"
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink shadow-sm"
             >
               {periodOptions.map(o => (
                 <option key={o.key} value={o.key}>
@@ -496,7 +536,7 @@ export default function SalaryStructurePage() {
               ))}
             </select>
             <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-400 shadow-sm">
-              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-accent" />
+              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
               {formatDdMmYyyy(start, system)} to {formatDdMmYyyy(end, system)}
               <span className="text-slate-400">({daysInMonth}d)</span>
             </div>
@@ -533,6 +573,7 @@ export default function SalaryStructurePage() {
             this container — the table is wider than the card and the floating
             ‹ › pill drives it. */}
         <HorizontalScrollButtons targetRef={tableScrollRef} />
+<<<<<<< Updated upstream
         <div ref={tableScrollRef} className="overflow-x-auto print:overflow-visible">
           <table className="w-full text-left text-sm">
             <thead>
@@ -562,15 +603,38 @@ export default function SalaryStructurePage() {
                     {rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}
                   </th>
                 )}
+=======
+        <div ref={tableScrollRef} className="max-h-[65vh] overflow-auto print:max-h-none print:overflow-visible">
+          <table className="w-full text-right text-[12.5px] tabular-nums">
+            <thead>
+              <tr className="sticky top-0 z-10 border-y border-slate-200 bg-slate-50 align-bottom text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                <th className="sticky left-0 z-20 w-16 whitespace-nowrap bg-slate-50 px-2.5 py-2 text-left">ID</th>
+                <th className="sticky left-16 z-20 whitespace-nowrap border-r border-slate-300 bg-slate-50 px-2.5 py-2 text-left shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none">
+                  Employee
+                </th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-left">Basic</th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-left">Allowance</th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-left">Gross</th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-left">
+                  {rateHeader('PF', pfDraft, setPfDraft)}
+                </th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-left">
+                  {rateHeader('SSF by Employer', ssfDraft, setSsfDraft)}
+                </th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-left">
+                  {rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}
+                </th>
+>>>>>>> Stashed changes
                 {showOvertime && (
-                  <th className="whitespace-nowrap px-3 py-2 text-right font-medium text-good-text">
+                  <th className="whitespace-nowrap px-2.5 py-2 text-left">
                     {rateHeader('Overtime', overtimeDraft, setOvertimeDraft)}
                   </th>
                 )}
-                <th className="whitespace-nowrap px-3 py-2 text-right font-medium">Net Payable</th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-left">Net Payable</th>
               </tr>
             </thead>
             <tbody>
+<<<<<<< Updated upstream
               {rows.map(({ e, basic, allowance, gross, pfAmt, ssfAmt, tdsAmt, overtimeAmt, net }) => (
                 <tr key={e.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                   <td className="sticky left-0 z-[1] whitespace-nowrap bg-white px-3 py-2 tabular-nums text-slate-500">{e.fingerprint_id || '—'}</td>
@@ -592,6 +656,40 @@ export default function SalaryStructurePage() {
                   <td className="whitespace-nowrap px-3 py-2 text-right font-bold tabular-nums text-good-text">{shown(net)}</td>
                 </tr>
               ))}
+=======
+              {renderItems.map(item => {
+                if (item.kind === 'group') {
+                  return (
+                    <tr key={`g-${item.branch}`} className="bg-slate-100">
+                      <td colSpan={structureColCount} className="px-2.5 py-1.5 text-left text-xs font-bold uppercase tracking-wide text-ink">
+                        {item.branch}
+                      </td>
+                    </tr>
+                  );
+                }
+                const { e, basic, allowance, gross, pfAmt, ssfAmt, tdsAmt, overtimeAmt, net } = item.row;
+                return (
+                  <tr key={e.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                    <td className="sticky left-0 z-[1] whitespace-nowrap bg-white px-2.5 py-1.5 text-center tabular-nums text-slate-400">{e.fingerprint_id || '—'}</td>
+                    <td className="sticky left-16 z-[1] whitespace-nowrap border-r border-slate-300 bg-white px-2.5 py-1.5 text-left font-medium text-ink shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none">
+                      <Link href={`/salary-structure/${e.id}${detailQuery}`} className="hover:text-accent hover:underline">
+                        {e.name}
+                      </Link>
+                    </td>
+                    {amountCell(e.id, 'salary', basic)}
+                    {amountCell(e.id, 'allowance', allowance)}
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-medium tabular-nums text-ink">{shown(gross)}</td>
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700">{shown(pfAmt)}</td>
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700">{shown(ssfAmt)}</td>
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-critical-text">{shown(tdsAmt)}</td>
+                    {showOvertime && (
+                      <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-good-text">{shown(overtimeAmt)}</td>
+                    )}
+                    <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-bold tabular-nums text-good-text">{shown(net)}</td>
+                  </tr>
+                );
+              })}
+>>>>>>> Stashed changes
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={structureColCount} className="px-4 py-8 text-center text-slate-400">
@@ -602,9 +700,10 @@ export default function SalaryStructurePage() {
             </tbody>
             {totals.counted > 0 && (
               <tfoot>
-                <tr className="sticky bottom-0 border-t-2 border-slate-200 bg-slate-50 text-sm font-bold text-ink">
+                <tr className="sticky bottom-0 border-t-2 border-slate-300 bg-slate-50 text-[12.5px] font-bold text-ink">
                   <td
                     colSpan={2}
+<<<<<<< Updated upstream
                     className="sticky left-0 z-[1] whitespace-nowrap bg-slate-50 px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500 border-r border-slate-300 shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none"
                   >
                     Total{perDay && ' / day'} · {totals.counted} staff
@@ -615,10 +714,22 @@ export default function SalaryStructurePage() {
                   {showPf && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.pfAmt)}</td>}
                   {showSsfEmployer && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.ssfAmt)}</td>}
                   {showSsfEmployee && <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{shown(totals.tdsAmt)}</td>}
+=======
+                    className="sticky left-0 z-[1] whitespace-nowrap border-r border-slate-300 bg-slate-50 px-2.5 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 shadow-[6px_0_6px_-4px_rgba(0,0,0,0.08)] print:shadow-none"
+                  >
+                    Total{perDay && ' / day'} · {totals.counted} staff
+                  </td>
+                  <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.basic)}</td>
+                  <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.allowance)}</td>
+                  <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.gross)}</td>
+                  <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.pfAmt)}</td>
+                  <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.ssfAmt)}</td>
+                  <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums text-critical-text">{shown(totals.tdsAmt)}</td>
+>>>>>>> Stashed changes
                   {showOvertime && (
-                    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.overtimeAmt)}</td>
+                    <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums text-good-text">{shown(totals.overtimeAmt)}</td>
                   )}
-                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-good-text">{shown(totals.net)}</td>
+                  <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums text-good-text">{shown(totals.net)}</td>
                 </tr>
               </tfoot>
             )}
@@ -639,15 +750,6 @@ export default function SalaryStructurePage() {
         {isAdmin && ' The cog above the table picks which optional columns the Payroll report shows.'}
       </p>
     </AppShell>
-  );
-}
-
-function StructureIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 9h18M9 9v11" />
-    </svg>
   );
 }
 
