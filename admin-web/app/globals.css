@@ -125,26 +125,43 @@ html, body {
         the stray blank column and the smeared "Employee" header seen in
         the PDF. Pinning them back to static removes both. */
   /* The payroll report's landscape @page is injected by /payroll itself.
-     These rules just let the 16-column table use the room it gains: full
-     width, 9px, no sticky columns (which double across page breaks). */
+     These rules give its 16-column table the same calm, roomy look the
+     Staff Salary Sheet prints with: wider cell padding, data on one line,
+     and headers that wrap only at spaces (never mid-word, so no more
+     "CALCULATE / D SALARY" / "NET PAYABL / E"). */
   .print-report-fit,
   .print-report-fit table {
     width: 100% !important;
     max-width: 100% !important;
   }
   .print-report-fit table {
-    /* Landscape gives the 16-column report room to breathe — 9px reads far
-       better than the 7px an upright page needed. */
-    font-size: 9px !important;
+    font-size: 8.5px !important;
     table-layout: auto !important;
   }
   .print-report-fit th,
-  .print-report-fit td,
-  .print-report-fit th *,
-  .print-report-fit td * {
+  .print-report-fit td {
+    padding: 3px 6px !important;
+  }
+  /* Headers: wrap between words, never inside one. */
+  .print-report-fit th {
     white-space: normal !important;
-    word-break: normal;
-    overflow-wrap: anywhere;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    hyphens: none !important;
+  }
+  /* Data cells: keep every figure on a single line, like the Sheet. */
+  .print-report-fit td {
+    white-space: nowrap !important;
+  }
+  /* Keep the status colours the Sheet keeps (deductions red, pay green)
+     rather than flattening every figure to near-black. */
+  .print-report-fit .text-critical-text,
+  .print-report-fit .text-critical-text * {
+    color: #b91c1c !important;
+  }
+  .print-report-fit .text-good-text,
+  .print-report-fit .text-good-text * {
+    color: #0f766e !important;
   }
   .print-report-fit .sticky,
   .print-report-fit thead tr,
