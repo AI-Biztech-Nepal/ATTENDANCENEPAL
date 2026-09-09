@@ -101,4 +101,40 @@ html, body {
     background: #f1f5f9 !important;
     font-weight: 700 !important;
   }
+
+  /* ── Payroll Salary Report — fit-to-page ────────────────────────────
+     Every tenant except one legacy customer (Ashadeep Foundation, which
+     keeps the plain `.print-report` rules above). Two fixes over that
+     baseline:
+
+     1. The report can carry up to ~16 columns (all deduction columns on).
+        The baseline's forced `white-space: nowrap` then pushes the last
+        few columns (SSF / Overtime Allowance / Net Payable) off the right
+        edge of the page. Here every cell is allowed to wrap and the type
+        drops to 7px so `table-layout: auto` can squeeze the whole width
+        onto one A4 Portrait page.
+
+     2. The ID / Employee / Net Payable columns are `position: sticky` for
+        the on-screen horizontal scroll. In paged print (where the scroll
+        container is `overflow: visible`) a sticky column re-anchors to the
+        page box and paints shifted / doubled across page breaks — which is
+        the stray blank column and the smeared "Employee" header seen in
+        the PDF. Pinning them back to static removes both. */
+  .print-report-fit table {
+    font-size: 7px !important;
+  }
+  .print-report-fit th,
+  .print-report-fit td,
+  .print-report-fit th *,
+  .print-report-fit td * {
+    white-space: normal !important;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  .print-report-fit .sticky,
+  .print-report-fit thead tr,
+  .print-report-fit tfoot tr {
+    position: static !important;
+    box-shadow: none !important;
+  }
 }

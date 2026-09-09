@@ -9,7 +9,7 @@ import StaffSalarySheet from '@/components/StaffSalarySheet';
 import PayrollColumnsMenu from '@/components/PayrollColumnsMenu';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
-import { fetchCompanyPayrollFormat, type PayrollFormat } from '@/lib/payrollFormat';
+import { fetchCompanyPayrollFormat, fetchCompanyName, isLegacyPayrollPrintTenant, type PayrollFormat } from '@/lib/payrollFormat';
 import {
   buildPeriodOptions,
   currentSystemYearMonth,
@@ -89,6 +89,12 @@ export default function PayrollPage() {
   // Null until resolved. One customer runs a completely different
   // fixed-salary report (StaffSalarySheet) instead of this one.
   const [payrollFormat, setPayrollFormat] = useState<PayrollFormat | null>(null);
+  // Null until resolved. Drives one thing only: whether the printed / PDF
+  // copy uses the fit-to-page table layout (default, every tenant) or the
+  // older wider layout that Ashadeep Foundation asked to stay on. "Unknown"
+  // (still null, no company) counts as "not the exception" → gets the fix.
+  const [companyName, setCompanyName] = useState<string | null>(null);
+  const legacyPayrollPrint = isLegacyPayrollPrintTenant(companyName);
   // Optional columns hidden from the report. The switches live on the Salary
   // Structure page (the cog above its table); this page only reads the saved
   // choice (localStorage, see lib/payrollReportColumns). A hidden column is
@@ -176,6 +182,7 @@ export default function PayrollPage() {
   // on its own so nothing shared changes for everybody else.
   useEffect(() => {
     fetchCompanyPayrollFormat().then(setPayrollFormat);
+    fetchCompanyName().then(setCompanyName);
   }, []);
 
   // The oldest/newest punch on record — bounds the period dropdown to
@@ -1004,7 +1011,12 @@ export default function PayrollPage() {
         </div>
 
         <HorizontalScrollButtons targetRef={tableScrollRef} />
-        <div ref={tableScrollRef} className="print-report mt-4 hidden max-h-[65vh] overflow-auto md:block print:!block print:max-h-none print:overflow-visible">
+        <div
+          ref={tableScrollRef}
+          className={`print-report mt-4 hidden max-h-[65vh] overflow-auto md:block print:!block print:max-h-none print:overflow-visible ${
+            legacyPayrollPrint ? '' : 'print-report-fit'
+          }`}
+        >
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="sticky top-0 z-10 border-y border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">

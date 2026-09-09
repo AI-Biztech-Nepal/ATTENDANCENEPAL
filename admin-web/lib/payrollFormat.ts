@@ -23,6 +23,28 @@ export async function fetchCompanyPayrollFormat(): Promise<PayrollFormat> {
 }
 
 /**
+ * The current company's display name. Used only to keep one legacy customer
+ * (Ashadeep Foundation) on the old payroll-print layout while every other
+ * tenant — present and future — gets the fit-to-page print fix. Returns ''
+ * when there's no company or the row can't be read, so the caller treats
+ * "unknown" as "not the exception" and applies the fix.
+ */
+export async function fetchCompanyName(): Promise<string> {
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return '';
+  const { data: profile } = await supabase.from('profiles').select('company_id').eq('id', auth.user.id).single();
+  if (!profile?.company_id) return '';
+  const { data } = await supabase.from('companies').select('name').eq('id', profile.company_id).single();
+  return (data?.name as string | null)?.trim() ?? '';
+}
+
+/** True for the single legacy tenant that must keep the pre-fit payroll
+ * print layout. Everyone else (and any new tenant) gets the fixed one. */
+export function isLegacyPayrollPrintTenant(companyName: string | null | undefined): boolean {
+  return (companyName ?? '').trim().toLowerCase() === 'ashadeep foundation';
+}
+
+/**
  * Config the Staff Salary Sheet needs beyond the standard company config —
  * the editable SSF employer / employee rates and the overtime policy. Its own
  * fetch (not folded into the shared lib/weekOff.ts one) so a not-yet-applied
