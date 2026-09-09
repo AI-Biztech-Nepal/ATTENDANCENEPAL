@@ -192,7 +192,7 @@ export default function HistoryScreen() {
         const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, undefined, weeklyPattern);
         const shiftLabel = isWeekOff(resolved) ? 'Week Off' : `${resolved.name} (${resolved.start_time.slice(0, 5)}–${resolved.end_time.slice(0, 5)})`;
 
-        if (summary) {
+        if (summary && summary.check_in) {
           out.push({
             key: `${emp.id}-${day}`,
             date: day,

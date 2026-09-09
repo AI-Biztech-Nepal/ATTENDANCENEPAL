@@ -60,7 +60,10 @@ export function buildEmployeeDayRows(
   const today = nepalTodayIso();
   return days.map(day => {
     const summary = day === today ? undefined : summaries.find(s => s.employee_id === employee.id && s.work_date === day);
-    if (summary) {
+    // A summary row with no check_in isn't a "Present" day — the nightly job
+    // swept in a Week Off / Absent day, or the only punch was claimed by an
+    // overnight shift the day before. Fall through to the punchless branch.
+    if (summary && summary.check_in) {
       return {
         date: day,
         checkIn: summary.check_in,

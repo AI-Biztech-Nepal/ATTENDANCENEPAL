@@ -408,7 +408,11 @@ export default function PayrollPage() {
         // always compute today live rather than trusting a possibly-stale
         // summary. Past days' summaries are already final.
         const summary = day === today ? undefined : summaries.find(s => s.employee_id === emp.id && s.work_date === day);
-        if (summary) {
+        // A summary row with no check_in is not a worked day — the nightly
+        // job swept in a Week Off / Absent day, or the only punch was claimed
+        // by an overnight shift the day before. Fall through so it's scored
+        // as a paid day off / absence, not counted toward worked days or pay.
+        if (summary && summary.check_in) {
           row.days += 1;
           row.daysToYesterday += 1; // a summary row only exists for a past day
           row.hours += Number(summary.total_hours);

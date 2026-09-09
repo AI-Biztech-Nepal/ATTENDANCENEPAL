@@ -219,7 +219,11 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
 
     for (const date of visibleDates) {
       if (leaveDates.has(date) || weekOffDates.has(date) || companyWeekOffDates.has(date)) continue;
-      const summary = date !== todayKey ? summaryByDate.get(date) : undefined;
+      // A summary row with no check_in isn't a worked day (nightly job swept
+      // in a Week Off / Absent day, or the punch was claimed by the previous
+      // day's overnight shift) — ignore it here.
+      const rawSummary = date !== todayKey ? summaryByDate.get(date) : undefined;
+      const summary = rawSummary && rawSummary.check_in ? rawSummary : undefined;
       const status = dayStatus.get(date);
       if (summary || status) {
         present.push({ date, minutes: 0 });
@@ -267,7 +271,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
           return { date, onLeave: true, checkIn: null, checkOut: null, hours: 0, overtime: 0, lateMinutes: 0, earlyMinutes: 0, present: false, absent: false };
         }
         const summary = date !== todayKey ? summaryByDate.get(date) : undefined;
-        if (summary) {
+        if (summary && summary.check_in) {
           return {
             date,
             onLeave: false,

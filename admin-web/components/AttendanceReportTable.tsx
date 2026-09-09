@@ -310,7 +310,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             ? { earlyArrivalMinutes: 0, lateDepartureMinutes: 0 }
             : edgePunctuality(summary?.check_in ?? null, summary?.check_out ?? null, resolved);
 
-        if (summary) {
+        if (summary && summary.check_in) {
           out.push({
             key: `${emp.id}-${day}`,
             date: day,

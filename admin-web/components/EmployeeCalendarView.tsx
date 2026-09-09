@@ -237,7 +237,11 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
       // perfectly valid summary row but no matching live log loaded (a
       // fetch-window edge, logs pruned after the summary was computed,
       // etc.) silently dropped its whole day, hours and overtime included.
-      const summary = date !== todayKey ? summaryByDate.get(date) : undefined;
+      // A summary row with no check_in isn't a worked day — the nightly job
+      // swept in a Week Off / Absent day, or the only punch was claimed by an
+      // overnight shift the day before. Ignore it here.
+      const rawSummary = date !== todayKey ? summaryByDate.get(date) : undefined;
+      const summary = rawSummary && rawSummary.check_in ? rawSummary : undefined;
       const status = dayStatus.get(date);
       if (summary || status) {
         present.push({ date, minutes: 0 });
@@ -302,7 +306,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
         // Same fix as monthSummary above: check the summary row first,
         // independent of whether dayStatus has a matching live entry.
         const summary = date !== todayKey ? summaryByDate.get(date) : undefined;
-        if (summary) {
+        if (summary && summary.check_in) {
           return {
             date,
             onLeave: false,

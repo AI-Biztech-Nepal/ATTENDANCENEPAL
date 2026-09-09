@@ -84,7 +84,12 @@ export function buildEmployeeDayRows(
     // computed (not re-run until tomorrow's nightly job), so always compute
     // today live instead of trusting a possibly-stale summary.
     const summary = day === today ? undefined : summaries.find(s => s.employee_id === employee.id && s.work_date === day);
-    if (summary) {
+    // A summary row can exist with NO check_in — the nightly job ran for a
+    // day whose only punch was then claimed by an overnight shift on the day
+    // before, or a Week Off / Absent day it swept in anyway. That is not a
+    // "Present" day; fall through to the punchless classification below so it
+    // reads as Week Off / Leave / Absent like it should.
+    if (summary && summary.check_in) {
       // Early-arrival / late-departure aren't stored on the summary row, so
       // derive them live from its check_in/check_out against the shift.
       const resolvedForEdges = resolveShiftForDate(employee, shifts, day, dailyShiftByDate, weekOffDates, weeklyPattern);
