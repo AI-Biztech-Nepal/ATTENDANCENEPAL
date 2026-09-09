@@ -811,7 +811,7 @@ export default function PayrollPage() {
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:border-0 print:shadow-none">
+      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:overflow-visible print:border-0 print:shadow-none">
         <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-accent/10 via-accent/5 to-transparent px-4 py-4 sm:px-6 print:hidden">
           <div className="flex items-center gap-2.5">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
@@ -902,13 +902,15 @@ export default function PayrollPage() {
             prints for every tenant (Ashadeep Foundation included — only the
             fit-to-page table layout is carved out for them). */}
         <div className="hidden px-4 pt-2 print:block sm:px-6">
-          {companyName ? <div className="text-xl font-bold text-black">{companyName}</div> : null}
-          <h1 className="text-lg font-bold text-black">{period.label} Salary Report</h1>
-          <p className="mt-1 text-[11px] text-black">
+          {companyName ? (
+            <div className="break-words text-lg font-bold leading-tight text-black sm:text-xl">{companyName}</div>
+          ) : null}
+          <h1 className="break-words text-base font-bold leading-tight text-black sm:text-lg">{period.label} Salary Report</h1>
+          <p className="mt-1 break-words text-[11px] text-black">
             Pay period: {formatDdMmYyyy(start, system)} – {formatDdMmYyyy(end, system)} ({daysInRange} days) · {byEmployee.length} employee
             {byEmployee.length === 1 ? '' : 's'}
           </p>
-          <p className="text-[11px] text-black">Generated: {formatDdMmYyyy(nepalTodayIso(), system)}</p>
+          <p className="break-words text-[11px] text-black">Generated: {formatDdMmYyyy(nepalTodayIso(), system)}</p>
         </div>
 
         {/* Phones get one card per employee — the 10-column table below

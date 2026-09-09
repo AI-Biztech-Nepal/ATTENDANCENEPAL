@@ -120,8 +120,14 @@ html, body {
         page box and paints shifted / doubled across page breaks — which is
         the stray blank column and the smeared "Employee" header seen in
         the PDF. Pinning them back to static removes both. */
+  .print-report-fit,
+  .print-report-fit table {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
   .print-report-fit table {
     font-size: 7px !important;
+    table-layout: auto !important;
   }
   .print-report-fit th,
   .print-report-fit td,
