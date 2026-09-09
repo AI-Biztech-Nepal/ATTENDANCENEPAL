@@ -223,9 +223,8 @@ export default function StaffSalarySheet() {
   // Payroll report links to. This sheet carries no overtime settings, so
   // that page falls back to its own 8h/1.5x defaults.
   function detailHref(id: string) {
-    // This sheet pays everyone their full stored Basic — no attendance
-    // proration — so the breakdown page opens in the same 'flat' basis.
-    const params = new URLSearchParams({ start: period.start, end: period.end, mode: 'flat' });
+    // The breakdown page opens on the same per-day basis this sheet counts on.
+    const params = new URLSearchParams({ start: period.start, end: period.end, mode: 'daily' });
     return `/payroll/${id}?${params.toString()}`;
   }
 

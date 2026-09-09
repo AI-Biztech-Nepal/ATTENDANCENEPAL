@@ -340,6 +340,10 @@ export default function PayrollPage() {
         salary: number | null;
         allowance: number;
         days: number;
+        /** Days present that are already FINISHED (before today) — an
+         * in-progress day isn't earned pay yet in per-day mode. `days`
+         * itself still counts today for the Worked Days column. */
+        daysToYesterday: number;
         hours: number;
         overtime: number;
         lateDays: number;
@@ -366,6 +370,7 @@ export default function PayrollPage() {
         salary: emp.salary,
         allowance: emp.allowance ?? 0,
         days: 0,
+        daysToYesterday: 0,
         hours: 0,
         overtime: 0,
         lateDays: 0,
@@ -405,6 +410,7 @@ export default function PayrollPage() {
         const summary = day === today ? undefined : summaries.find(s => s.employee_id === emp.id && s.work_date === day);
         if (summary) {
           row.days += 1;
+          row.daysToYesterday += 1; // a summary row only exists for a past day
           row.hours += Number(summary.total_hours);
           row.overtime += Number(summary.overtime_hours);
           if (summary.is_late) row.lateDays += 1;
@@ -427,8 +433,9 @@ export default function PayrollPage() {
             row.paidOffDays += 1;
             // Leave on an actual working day is the only paid-off day that
             // earns pay on top of days present — a week-off is already covered
-            // by dividing Basic over working days, not calendar days.
-            if (onLeave && !offDay) row.paidLeaveDays += 1;
+            // by dividing Basic over working days, not calendar days. Only
+            // finished days are earned (see daysToYesterday).
+            if (onLeave && !offDay && day < today) row.paidLeaveDays += 1;
           }
           continue;
         }
@@ -437,6 +444,7 @@ export default function PayrollPage() {
         const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
         const live = computeDayStatusForResolvedShift(dayLogs, resolved);
         row.days += 1;
+        if (day < today) row.daysToYesterday += 1;
         row.hours += live.totalMinutes / 60;
         row.overtime += live.overtimeMinutes / 60;
         if (live.isLate && !emp.attendance_exempt) row.lateDays += 1;
@@ -497,16 +505,15 @@ export default function PayrollPage() {
   //          back out and paid separately below at the multiplier. Each paid
   //          Leave day on a working day adds one clean standard day = rate ×
   //          hours/day (week-offs are already priced into the divisor).
-  //  daily:  rate = Basic / workingDays; pay = rate × (days present + paid
-  //          Leave days). A partial day still counts as one whole day.
-  //  flat:   the full stored Basic, attendance ignored.
+  //  daily / flat: rate = Basic / workingDays; pay = rate × (days present +
+  //          paid Leave days). A partial day still counts as one whole day; an
+  //          absent working day earns nothing.
   function calculatedSalary(row: PayRow): number | null {
     if (row.salary == null) return null;
-    if (salaryMode === 'flat') return row.salary;
     const divisorDays = Math.max(1, row.workingDays);
-    if (salaryMode === 'daily') {
+    if (salaryMode === 'daily' || salaryMode === 'flat') {
       const dayRate = row.salary / divisorDays;
-      return Math.round(dayRate * (row.days + row.paidLeaveDays));
+      return Math.round(dayRate * (row.daysToYesterday + row.paidLeaveDays));
     }
     const hourlyRate = row.salary / (divisorDays * otHoursPerDay);
     const regularHours = Math.max(0, row.hours - row.overtime);
@@ -517,7 +524,6 @@ export default function PayrollPage() {
   // hours, not extra days — at the working-days hourly rate × the multiplier.
   function overtimeSalary(row: PayRow): number | null {
     if (row.salary == null) return null;
-    if (salaryMode === 'flat') return 0;
     if (row.overtime <= 0) return 0;
     const hourlyRate = row.salary / (Math.max(1, row.workingDays) * otHoursPerDay);
     return Math.round(hourlyRate * otMultiplier * row.overtime);
@@ -833,14 +839,13 @@ export default function PayrollPage() {
 
           <div
             className="flex items-center gap-1.5"
-            title="How Basic becomes this period's pay: per hour worked, per day present, or the full stored Basic regardless of attendance. The per-hour / per-day rate divides Basic by the month's working days (calendar days minus weekly-offs and holidays)."
+            title="How Basic becomes this period's pay: per hour actually worked, or a whole day for every day present. Either way Basic is divided by the month's working days (calendar days minus weekly-offs and holidays), and an absent working day earns nothing."
           >
             <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs font-semibold shadow-sm">
               {(
                 [
                   ['hourly', 'Per Hour'],
                   ['daily', 'Per Day'],
-                  ['flat', 'Flat Monthly'],
                 ] as const
               ).map(([mode, label]) => (
                 <button

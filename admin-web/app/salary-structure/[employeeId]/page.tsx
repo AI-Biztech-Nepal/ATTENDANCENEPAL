@@ -191,6 +191,7 @@ function SalaryStructureEmployeeView() {
         otOn: true,
         mode: 'hourly',
         isCompanyOffDay: off,
+        today: nepalTodayIso(),
       });
       if (earn) overtime += earn.overtime;
       if (off) continue; // a week-off / holiday isn't a working day

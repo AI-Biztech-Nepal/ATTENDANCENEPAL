@@ -12,7 +12,7 @@ import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import StatusText from '@/components/StatusText';
 import { buildMonth, formatAdDate, formatDdMmYyyy, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import { formatHoursMinutes, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
+import { formatHoursMinutes, nepalTodayIso, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
 import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail, type SalaryMode } from '@/lib/payrollDetail';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
 import { fetchCompanyPayrollFormat } from '@/lib/payrollFormat';
@@ -80,13 +80,16 @@ function PayrollEmployeeDetailView() {
   const [otOn, setOtOn] = useState(searchParams.get('otOn') !== 'false');
   // Which pay basis this page shows — carried on the link from the Payroll
   // report so the two always agree. Falls back to the company's own default
-  // (flat for the fixed-salary Staff Salary Sheet customer, per-hour for
-  // everyone else) when opened without it.
+  // (per-day for the Staff Salary Sheet customer, per-hour for everyone else)
+  // when opened without it.
   const modeParam = searchParams.get('mode');
   const linkedMode: SalaryMode | null =
     modeParam === 'hourly' || modeParam === 'daily' || modeParam === 'flat' ? modeParam : null;
   const [defaultMode, setDefaultMode] = useState<SalaryMode>('hourly');
   const salaryMode: SalaryMode = linkedMode ?? defaultMode;
+  // The fixed-salary customer's Net has no PF and never nets out the employer
+  // SSF — keyed off the company, not the pay-basis mode.
+  const [isStaffSheet, setIsStaffSheet] = useState(false);
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -107,7 +110,11 @@ function PayrollEmployeeDetailView() {
   const [overtimeAllowanceRate, setOvertimeAllowanceRate] = useState(0);
 
   useEffect(() => {
-    fetchCompanyPayrollFormat().then(f => setDefaultMode(f === 'staff_salary_sheet' ? 'flat' : 'hourly'));
+    fetchCompanyPayrollFormat().then(f => {
+      const sheet = f === 'staff_salary_sheet';
+      setIsStaffSheet(sheet);
+      setDefaultMode(sheet ? 'daily' : 'hourly');
+    });
     fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, pfRate, ssfRate, tdsRate, overtimeRate }) => {
       setWeeklyOffDay(weeklyOffDay);
       setPfRate(pfRate);
@@ -232,6 +239,7 @@ function PayrollEmployeeDetailView() {
         otOn,
         mode: salaryMode,
         isCompanyOffDay: weekOffDates.has(d.date),
+        today: nepalTodayIso(),
       }),
     [employee, workingDays, otHoursPerDay, otMultiplier, otOn, salaryMode, weekOffDates]
   );
@@ -271,18 +279,17 @@ function PayrollEmployeeDetailView() {
 
   // Net Payable — the final column of whichever payroll report this page was
   // opened from, computed the same way so the two agree.
-  //  · flat (Staff Salary Sheet): Basic + Allowance − employee SSF. The
+  //  · Staff Salary Sheet: earned base + Allowance − employee SSF. The
   //    employer SSF is grossed into MGS and taken straight back out, so it
   //    never touches take-home; there is no PF.
-  //  · hourly / daily (standard report): the attendance-earned base + OT pay,
-  //    a flat Allowance, minus PF and both SSF sides, plus the flat Overtime
-  //    Allowance — each a % of that base.
+  //  · standard report: earned base + OT pay, a flat Allowance, minus PF and
+  //    both SSF sides, plus the flat Overtime Allowance — each a % of base.
   const netPayable = useMemo(() => {
     if (employee?.salary == null) return null;
     const base = Math.round(dayTotals.totalSalary);
     const allowance = employee.allowance ?? 0;
     const ssfEmployee = Math.round((base * ssfEmployeeRate) / 100);
-    if (salaryMode === 'flat') {
+    if (isStaffSheet) {
       return { base, allowance, pf: 0, ssfEmployer: 0, ssfEmployee, otAllowance: 0, net: base + allowance - ssfEmployee };
     }
     const pf = Math.round((base * pfRate) / 100);
@@ -297,7 +304,7 @@ function PayrollEmployeeDetailView() {
       otAllowance,
       net: base + allowance - pf - ssfEmployer - ssfEmployee + otAllowance,
     };
-  }, [employee, dayTotals.totalSalary, salaryMode, pfRate, ssfEmployerRate, ssfEmployeeRate, overtimeAllowanceRate]);
+  }, [employee, dayTotals.totalSalary, isStaffSheet, pfRate, ssfEmployerRate, ssfEmployeeRate, overtimeAllowanceRate]);
 
   // The +Allowance / −PF / −SSF lines between Total Salary and Net Payable —
   // rendered into each per-day table's footer as a short payslip tail.
@@ -418,9 +425,8 @@ function PayrollEmployeeDetailView() {
               <span className="text-xs font-medium text-accent/80">My Salary</span>
               <div className="mt-1 text-base font-bold text-accent">{Math.round(dayTotals.mySalary).toLocaleString()}</div>
               <div className="mt-0.5 text-[11px] text-accent/70">
-                {salaryMode === 'flat'
-                  ? 'Fixed monthly salary'
-                  : `${salaryPerDay != null ? Math.round(salaryPerDay).toLocaleString() + '/day · ' : ''}${workingDays} working days`}
+                {salaryPerDay != null ? `${Math.round(salaryPerDay).toLocaleString()}/day · ` : ''}
+                {workingDays} working days
               </div>
             </div>
             <div className="rounded-xl bg-warning-bg p-3 shadow-sm ring-1 ring-inset ring-warning/10">
@@ -431,7 +437,7 @@ function PayrollEmployeeDetailView() {
             <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
               <span className="text-xs font-medium text-good-text/80">Total Salary</span>
               <div className="mt-1 text-base font-bold text-good-text">{Math.round(dayTotals.totalSalary).toLocaleString()}</div>
-              <div className="mt-0.5 text-[11px] text-good-text/70">{salaryMode === 'flat' ? 'Full monthly salary' : 'Earned this period'}</div>
+              <div className="mt-0.5 text-[11px] text-good-text/70">Earned this period</div>
             </div>
             <div className="rounded-xl bg-purple-50 p-3 shadow-sm ring-1 ring-inset ring-purple-200">
               <span className="text-xs font-medium text-purple-700/80">Overtime</span>

@@ -145,8 +145,10 @@ export function buildEmployeeDayRows(
   });
 }
 
-/** How the monthly Basic becomes this period's pay — the same three modes
- * the Payroll report's header toggle offers. */
+/** How the monthly Basic becomes this period's pay — the modes the Payroll
+ * report's header toggle offers. Attendance always matters: an absent working
+ * day earns nothing in every mode. `'flat'` is kept as an alias of `'daily'`
+ * for links that still pass it. */
 export type SalaryMode = 'hourly' | 'daily' | 'flat';
 
 export type DailyEarningOpts = {
@@ -163,18 +165,23 @@ export type DailyEarningOpts = {
    * Leave that lands on one earns nothing extra — the divisor already
    * covers it — exactly as the Payroll report scores it. */
   isCompanyOffDay: boolean;
+  /** Today, in the Nepal timezone (nepalTodayIso()). A per-day-rate mode
+   * ('daily'/'flat') pays nothing for today and later — an in-progress day
+   * isn't earned yet, matching the Staff Salary Sheet's accrual. Omit to
+   * count every day (a finished past period). */
+  today?: string;
 };
 
 /** One day's slice of the monthly Salary — the per-day form of the Payroll
  * report's calculatedSalary()/overtimeSalary(), so the daily rows here sum
  * to the same period total the report shows.
  *
- *  hourly: rate = Basic / (workingDays × hours/day), paid per hour actually
- *          worked; a paid Leave day on a working day earns one clean day.
- *  daily:  rate = Basic / workingDays, paid per day present (a partial day
- *          still counts as a whole day) or on paid Leave.
- *  flat:   attendance ignored — every working day earns Basic / workingDays,
- *          so the period always totals the full Basic.
+ *  hourly:       rate = Basic / (workingDays × hours/day), paid per hour
+ *                actually worked; a paid Leave day earns one clean day.
+ *  daily / flat: rate = Basic / workingDays, paid per day present (a partial
+ *                day still counts as a whole day) or on paid Leave. A full
+ *                set of working days pays the whole Basic; each absence
+ *                docks one day.
  *
  * `d.hours` already includes any overtime portion (see computeDayStatus), so
  * it's subtracted back out for the regular-hours base and paid separately at
@@ -186,29 +193,48 @@ export function dailySalaryEarning(
   opts: DailyEarningOpts
 ): { base: number; overtime: number; total: number } | null {
   if (salary == null) return null;
-  const { otHoursPerDay, otMultiplier, otOn, mode, isCompanyOffDay } = opts;
+  const { otHoursPerDay, otMultiplier, otOn, mode } = opts;
   const workingDays = Math.max(1, opts.workingDays);
   const hourlyRate = salary / (workingDays * otHoursPerDay);
   const dayRate = salary / workingDays;
 
-  if (mode === 'flat') {
-    // The full monthly Basic regardless of attendance — split evenly over the
-    // working days so the period still totals exactly `salary`.
-    return isCompanyOffDay ? { base: 0, overtime: 0, total: 0 } : { base: dayRate, overtime: 0, total: dayRate };
+  // A week-off / holiday: `buildEmployeeDayRows` may mark it 'Week Off' from a
+  // roster override even when it isn't in the company weekOff set, so trust
+  // the resolved status too. Either way it earns nothing here — the monthly
+  // salary is spread over WORKING days only, so a full set of working days
+  // already pays the whole Basic.
+  const offDay = opts.isCompanyOffDay || d.status === 'Week Off';
+  if (offDay) return { base: 0, overtime: 0, total: 0 };
+
+  // Approved Leave on a working day is paid like a day present.
+  const onPaidLeave = d.paidOff || d.status === 'Leave';
+  // Otherwise the employee must actually have attended (a summary row or live
+  // punches → 'Present' / 'Late'); 'Absent' and 'Upcoming' earn nothing.
+  const attended = d.status === 'Present' || d.status === 'Late';
+
+  if (!attended && !onPaidLeave) return { base: 0, overtime: 0, total: 0 };
+
+  const notFinished = opts.today != null && d.date >= opts.today;
+
+  if (mode === 'flat' || mode === 'daily') {
+    // Nothing for an in-progress day — pay only lands once a day is finished,
+    // like the Staff Salary Sheet's accrual.
+    if (notFinished) return { base: 0, overtime: 0, total: 0 };
+    // One whole day at the flat rate for every day present or on paid leave —
+    // a partial day still counts as a day. Absence is what shrinks the total.
+    return { base: dayRate, overtime: 0, total: dayRate };
   }
 
-  if (d.paidOff) {
-    // Week-off / holiday (or a Leave that fell on one): nothing extra.
-    if (isCompanyOffDay) return { base: 0, overtime: 0, total: 0 };
-    // Approved Leave on a working day — paid like a day present.
-    const base = mode === 'daily' ? dayRate : hourlyRate * otHoursPerDay;
-    return { base, overtime: 0, total: base };
+  // hourly: pay per hour actually worked (a clean standard day for a paid
+  // Leave day, which has no punches to derive hours from — but not for a
+  // Leave day that hasn't happened yet).
+  if (onPaidLeave && !attended) {
+    return notFinished
+      ? { base: 0, overtime: 0, total: 0 }
+      : { base: hourlyRate * otHoursPerDay, overtime: 0, total: hourlyRate * otHoursPerDay };
   }
-
-  // A day the employee actually attended (summary row or live punches).
-  if (d.status !== 'Present' && d.status !== 'Late') return { base: 0, overtime: 0, total: 0 };
   const regularHours = Math.max(0, d.hours - d.overtime);
-  const base = mode === 'daily' ? dayRate : hourlyRate * regularHours;
+  const base = hourlyRate * regularHours;
   const overtime = otOn && d.overtime > 0 ? hourlyRate * otMultiplier * d.overtime : 0;
   return { base, overtime, total: base + overtime };
 }

@@ -266,6 +266,7 @@ export default function MyPayrollPage() {
       otOn: true,
       mode: salaryMode,
       isCompanyOffDay: companyOffDates.has(r.date),
+      today: nepalTodayIso(),
     });
 
   const lifetimeDayRows: DayDetail[] = useMemo(
@@ -313,6 +314,7 @@ export default function MyPayrollPage() {
           otOn: true,
           mode: salaryMode,
           isCompanyOffDay: companyOffDates.has(row.date),
+          today: nepalTodayIso(),
         });
         if (earning) total += earning.total;
       }
