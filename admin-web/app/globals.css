@@ -15,13 +15,21 @@ html, body {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  /* No fixed `size` here on purpose — setting one (e.g. landscape) makes
-     Chrome's print dialog hide its own Portrait/Landscape toggle entirely,
-     since it assumes the page has no reason to offer a choice it would
-     just override. Leaving size unset keeps that dropdown available; the
-     rest of this block shrinks text/padding small enough that either
-     orientation the user picks still fits one page. */
+  /* The default (unnamed) page stays size-less on purpose — setting one
+     (e.g. landscape) makes Chrome's print dialog hide its own Portrait/
+     Landscape toggle entirely for that page. Leaving it unset keeps that
+     dropdown available for every other report; the rest of this block
+     shrinks text/padding small enough that either orientation the user
+     picks still fits one page. */
   @page {
+    margin: 6mm;
+  }
+  /* The payroll Salary Report is the one exception: 16 columns never fit
+     an upright page, so it forces its own landscape page (see
+     .payroll-print-landscape below). Named so ONLY that report flips —
+     every other printout keeps the portrait default above. */
+  @page payrollLandscape {
+    size: landscape;
     margin: 6mm;
   }
   /* Every exported table gets visible gridlines, and shrinks down to
@@ -120,13 +128,22 @@ html, body {
         page box and paints shifted / doubled across page breaks — which is
         the stray blank column and the smeared "Employee" header seen in
         the PDF. Pinning them back to static removes both. */
+  /* Flip the whole payroll report (masthead + table + sign-off) onto a
+     landscape page for every tenant but the one legacy customer (Ashadeep
+     Foundation, which keeps portrait + the plain `.print-report` rules). */
+  .payroll-print-landscape {
+    page: payrollLandscape;
+  }
+
   .print-report-fit,
   .print-report-fit table {
     width: 100% !important;
     max-width: 100% !important;
   }
   .print-report-fit table {
-    font-size: 7px !important;
+    /* Landscape gives the 16-column report room to breathe — 9px reads far
+       better than the 7px an upright page needed. */
+    font-size: 9px !important;
     table-layout: auto !important;
   }
   .print-report-fit th,

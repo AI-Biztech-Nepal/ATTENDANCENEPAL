@@ -811,7 +811,16 @@ export default function PayrollPage() {
         </div>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:overflow-visible print:border-0 print:shadow-none">
+      {/* `payroll-print-landscape` forces the printed / PDF report onto a
+          landscape page (the 16-column sheet never fits upright). Applied
+          for every tenant except Ashadeep Foundation, which keeps portrait.
+          This is the first print-visible block — the summary grid above is
+          `print:hidden` — so page 1 is landscape from the masthead down. */}
+      <div
+        className={`mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:overflow-visible print:border-0 print:shadow-none ${
+          legacyPayrollPrint ? '' : 'payroll-print-landscape'
+        }`}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-accent/10 via-accent/5 to-transparent px-4 py-4 sm:px-6 print:hidden">
           <div className="flex items-center gap-2.5">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
