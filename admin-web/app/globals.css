@@ -91,6 +91,13 @@ html, body {
      no status colours, flat white rows, a slightly smaller type size,
      and none of the screen-only affordances (avatars, edit pencils —
      those carry print:hidden in the markup). */
+  /* The report's on-screen box is a `max-h-[65vh] overflow-auto` scroller.
+     Kill it outright for print — the whole roster must lay out and paginate
+     onto the paper, never sit inside a scrollbar. */
+  .print-report {
+    max-height: none !important;
+    overflow: visible !important;
+  }
   .print-report table {
     font-size: 8px !important;
   }
