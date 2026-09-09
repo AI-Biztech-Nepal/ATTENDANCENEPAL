@@ -132,36 +132,58 @@ html, body {
         the stray blank column and the smeared "Employee" header seen in
         the PDF. Pinning them back to static removes both. */
   /* The payroll report's landscape @page is injected by /payroll itself.
-     These rules give its 16-column table the same calm, roomy look the
-     Staff Salary Sheet prints with: wider cell padding, data on one line,
-     and headers that wrap only at spaces (never mid-word, so no more
-     "CALCULATE / D SALARY" / "NET PAYABL / E"). */
+     These rules make its table print IDENTICALLY to the Staff Salary Sheet:
+     a hairline card, horizontal row rules only (NO vertical grid), a plain
+     grey header, roomy cells, headers that wrap only at spaces, and the same
+     two accents — deductions red, take-home green. */
   .print-report-fit,
   .print-report-fit table {
     width: 100% !important;
     max-width: 100% !important;
   }
+  .print-report-fit {
+    border: 1px solid #e2e8f0 !important;
+    overflow: visible !important;
+    max-height: none !important;
+  }
   .print-report-fit table {
     font-size: 8.5px !important;
     table-layout: auto !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
   }
+  /* No box around every cell — only a rule under each row. */
   .print-report-fit th,
   .print-report-fit td {
-    padding: 3px 6px !important;
+    padding: 4px 7px !important;
+    border: 0 !important;
+    border-bottom: 1px solid #eef2f6 !important;
   }
-  /* Headers: wrap between words, never inside one. */
-  .print-report-fit th {
+  .print-report-fit tbody tr:last-child td {
+    border-bottom: 0 !important;
+  }
+  .print-report-fit thead th {
+    background: #f8fafc !important;
+    color: #64748b !important;
+    font-weight: 700 !important;
+    border-bottom: 1.5px solid #cbd5e1 !important;
+    vertical-align: bottom !important;
+    /* Wrap between words, never inside one. */
     white-space: normal !important;
     word-break: keep-all !important;
     overflow-wrap: normal !important;
     hyphens: none !important;
   }
-  /* Data cells: keep every figure on a single line, like the Sheet. */
-  .print-report-fit td {
+  .print-report-fit tbody td {
     white-space: nowrap !important;
   }
-  /* Keep the status colours the Sheet keeps (deductions red, pay green)
-     rather than flattening every figure to near-black. */
+  .print-report-fit tfoot td {
+    border-top: 2px solid #cbd5e1 !important;
+    border-bottom: 0 !important;
+    font-weight: 700 !important;
+    background: #f8fafc !important;
+  }
+  /* The same two accents the Sheet uses. */
   .print-report-fit .text-critical-text,
   .print-report-fit .text-critical-text * {
     color: #b91c1c !important;
