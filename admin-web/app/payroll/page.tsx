@@ -9,7 +9,7 @@ import StaffSalarySheet from '@/components/StaffSalarySheet';
 import PayrollColumnsMenu from '@/components/PayrollColumnsMenu';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
-import { fetchCompanyPayrollFormat, fetchCompanyName, isLegacyPayrollPrintTenant, type PayrollFormat } from '@/lib/payrollFormat';
+import { fetchCompanyPayrollFormat, fetchCompanyName, type PayrollFormat } from '@/lib/payrollFormat';
 import {
   buildPeriodOptions,
   currentSystemYearMonth,
@@ -89,12 +89,8 @@ export default function PayrollPage() {
   // Null until resolved. One customer runs a completely different
   // fixed-salary report (StaffSalarySheet) instead of this one.
   const [payrollFormat, setPayrollFormat] = useState<PayrollFormat | null>(null);
-  // Null until resolved. Drives one thing only: whether the printed / PDF
-  // copy uses the fit-to-page table layout (default, every tenant) or the
-  // older wider layout that Ashadeep Foundation asked to stay on. "Unknown"
-  // (still null, no company) counts as "not the exception" → gets the fix.
+  // The tenant's own name — printed as the report's document header.
   const [companyName, setCompanyName] = useState<string | null>(null);
-  const legacyPayrollPrint = isLegacyPayrollPrintTenant(companyName);
   // Optional columns hidden from the report. The switches live on the Salary
   // Structure page (the cog above its table); this page only reads the saved
   // choice (localStorage, see lib/payrollReportColumns). A hidden column is
@@ -714,15 +710,14 @@ export default function PayrollPage() {
           table never fits upright. An UNNAMED @page (not `@page name`) is the
           only form Chrome reliably honours for orientation; it also drops the
           browser's own date / title header, so the paper margin is re-applied
-          as padding on <main>. Scoped to this route by living in the render.
-          Ashadeep Foundation keeps the legacy portrait layout. */}
-      {!legacyPayrollPrint && (
-        <style
-          dangerouslySetInnerHTML={{
-            __html: '@media print{@page{size:A4 landscape;margin:0}main{padding:9mm !important}}',
-          }}
-        />
-      )}
+          as padding on <main>. Only the standard report renders here (the
+          fixed-salary customer is swapped to StaffSalarySheet above), so this
+          is unconditional. */}
+      <style
+        dangerouslySetInnerHTML={{
+          __html: '@media print{@page{size:A4 landscape;margin:0}main{padding:9mm !important}}',
+        }}
+      />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 print:hidden">
         <div className="rounded-xl bg-warning-bg p-3 shadow-sm ring-1 ring-inset ring-warning/10">
           <span className="text-xs font-medium text-warning-text/80">Overtime Salary</span>
@@ -1035,9 +1030,7 @@ export default function PayrollPage() {
         <HorizontalScrollButtons targetRef={tableScrollRef} />
         <div
           ref={tableScrollRef}
-          className={`print-report mt-4 hidden max-h-[65vh] overflow-auto md:block print:!block print:max-h-none print:overflow-visible ${
-            legacyPayrollPrint ? '' : 'print-report-fit'
-          }`}
+          className="print-report print-report-fit mt-4 hidden max-h-[65vh] overflow-auto md:block print:!block print:max-h-none print:overflow-visible"
         >
         <table className="w-full text-left text-sm">
           <thead>
