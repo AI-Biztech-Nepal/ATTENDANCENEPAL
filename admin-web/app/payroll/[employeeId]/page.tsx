@@ -299,6 +299,19 @@ function PayrollEmployeeDetailView() {
     };
   }, [employee, dayTotals.totalSalary, salaryMode, pfRate, ssfEmployerRate, ssfEmployeeRate, overtimeAllowanceRate]);
 
+  // The +Allowance / −PF / −SSF lines between Total Salary and Net Payable —
+  // rendered into each per-day table's footer as a short payslip tail.
+  const payslipLines = useMemo(() => {
+    if (!netPayable) return [];
+    return [
+      netPayable.allowance !== 0 && { label: 'Allowance', amount: netPayable.allowance },
+      netPayable.pf !== 0 && { label: `PF (${pfRate}%)`, amount: -netPayable.pf },
+      netPayable.ssfEmployer !== 0 && { label: `SSF by Employer (${ssfEmployerRate}%)`, amount: -netPayable.ssfEmployer },
+      netPayable.ssfEmployee !== 0 && { label: `SSF by Employee (${ssfEmployeeRate}%)`, amount: -netPayable.ssfEmployee },
+      netPayable.otAllowance !== 0 && { label: `Overtime Allowance (${overtimeAllowanceRate}%)`, amount: netPayable.otAllowance },
+    ].filter(Boolean) as { label: string; amount: number }[];
+  }, [netPayable, pfRate, ssfEmployerRate, ssfEmployeeRate, overtimeAllowanceRate]);
+
 
   const periodQuery = `?start=${start}&end=${end}&otHoursPerDay=${otHoursPerDay}&otMultiplier=${otMultiplier}&otOn=${otOn}&mode=${salaryMode}`;
 
@@ -400,7 +413,7 @@ function PayrollEmployeeDetailView() {
             </div>
           </div>
 
-          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 print:hidden">
+          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 print:hidden">
             <div className="rounded-xl bg-accent/10 p-3 shadow-sm ring-1 ring-inset ring-accent/10">
               <span className="text-xs font-medium text-accent/80">My Salary</span>
               <div className="mt-1 text-base font-bold text-accent">{Math.round(dayTotals.mySalary).toLocaleString()}</div>
@@ -415,25 +428,10 @@ function PayrollEmployeeDetailView() {
               <div className="mt-1 text-base font-bold text-warning-text">{Math.round(dayTotals.otSalary).toLocaleString()}</div>
               <div className="mt-0.5 text-[11px] text-warning-text/70">This period</div>
             </div>
-            <div className="rounded-xl bg-good-bg/60 p-3 shadow-sm ring-1 ring-inset ring-good/10">
+            <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
               <span className="text-xs font-medium text-good-text/80">Total Salary</span>
               <div className="mt-1 text-base font-bold text-good-text">{Math.round(dayTotals.totalSalary).toLocaleString()}</div>
-              <div className="mt-0.5 text-[11px] text-good-text/70">
-                {salaryMode === 'flat' ? 'Full monthly salary' : 'Earned this period'} · before deductions
-              </div>
-            </div>
-            <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-2 ring-inset ring-good/30">
-              <span className="text-xs font-medium text-good-text/80">Net Payable</span>
-              <div className="mt-1 text-base font-bold text-good-text">
-                {netPayable != null ? netPayable.net.toLocaleString() : '—'}
-              </div>
-              <div className="mt-0.5 text-[11px] text-good-text/70">
-                {netPayable == null
-                  ? 'This period'
-                  : salaryMode === 'flat'
-                    ? `+ Allowance ${netPayable.allowance.toLocaleString()} − SSF ${netPayable.ssfEmployee.toLocaleString()}`
-                    : `+ Allowance ${netPayable.allowance.toLocaleString()} − PF/SSF ${(netPayable.pf + netPayable.ssfEmployer + netPayable.ssfEmployee - netPayable.otAllowance).toLocaleString()}`}
-              </div>
+              <div className="mt-0.5 text-[11px] text-good-text/70">{salaryMode === 'flat' ? 'Full monthly salary' : 'Earned this period'}</div>
             </div>
             <div className="rounded-xl bg-purple-50 p-3 shadow-sm ring-1 ring-inset ring-purple-200">
               <span className="text-xs font-medium text-purple-700/80">Overtime</span>
@@ -572,6 +570,25 @@ function PayrollEmployeeDetailView() {
                         {Math.round(dayTotals.totalSalary).toLocaleString()}
                       </td>
                     </tr>
+                    {netPayable != null && (
+                      <>
+                        {payslipLines.map(l => (
+                          <tr key={l.label} className="bg-slate-50/70 text-[9px]">
+                            <td colSpan={6} className="px-0.5 py-1 text-right leading-tight text-slate-500">{l.label}</td>
+                            <td
+                              className={`px-0.5 py-1 text-right leading-tight ${l.amount < 0 ? 'text-critical-text' : 'text-slate-600'}`}
+                            >
+                              {l.amount < 0 ? '−' : '+'}
+                              {Math.abs(l.amount).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-slate-300 bg-slate-100 text-[10px] font-bold text-ink">
+                          <td colSpan={6} className="px-0.5 py-1 text-right uppercase tracking-wide text-slate-500">Net Payable</td>
+                          <td className="px-0.5 py-1 text-right leading-tight text-good-text">{netPayable.net.toLocaleString()}</td>
+                        </tr>
+                      </>
+                    )}
                   </tfoot>
                 )}
               </table>
@@ -685,6 +702,31 @@ function PayrollEmployeeDetailView() {
                         {Math.round(dayTotals.totalSalary).toLocaleString()}
                       </td>
                     </tr>
+                    {netPayable != null && (
+                      <>
+                        {payslipLines.map(l => (
+                          <tr key={l.label} className="bg-slate-50/70 text-xs">
+                            <td colSpan={10} className="px-3 py-1 text-right text-slate-500">{l.label}</td>
+                            <td
+                              className={`sticky right-0 z-20 whitespace-nowrap bg-slate-50 px-3 py-1 text-right shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none ${
+                                l.amount < 0 ? 'text-critical-text' : 'text-slate-600'
+                              }`}
+                            >
+                              {l.amount < 0 ? '−' : '+'}
+                              {Math.abs(l.amount).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-slate-300 bg-slate-100 text-sm font-bold text-ink">
+                          <td colSpan={10} className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Net Payable
+                          </td>
+                          <td className="sticky right-0 z-20 whitespace-nowrap bg-slate-100 px-3 py-2 text-good-text shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none">
+                            {netPayable.net.toLocaleString()}
+                          </td>
+                        </tr>
+                      </>
+                    )}
                   </tfoot>
                 )}
               </table>
