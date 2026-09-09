@@ -551,31 +551,10 @@ export default function StaffSalarySheet() {
             '.ssheet th,.ssheet td{padding:4px 7px !important}}',
         }}
       />
-      {/* summary tiles — every figure is a total off the sheet below */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:hidden">
-        <div className="rounded-xl bg-info-bg p-3.5 shadow-sm ring-1 ring-inset ring-info/10">
-          <span className="text-xs font-medium text-info-text/80">Total Basic Salary</span>
-          <div className="mt-1 text-lg font-bold tabular-nums text-info-text">{money(grand.basic)}</div>
-          <div className="mt-0.5 text-[11px] text-info-text/70">{allRows.length} staff · earned to yesterday</div>
-        </div>
-        <div className="rounded-xl bg-accent/10 p-3.5 shadow-sm ring-1 ring-inset ring-accent/10">
-          <span className="text-xs font-medium text-accent/80">Total Dearness Allowance</span>
-          <div className="mt-1 text-lg font-bold tabular-nums text-accent">{money(grand.dearness)}</div>
-          <div className="mt-0.5 text-[11px] text-accent/70">from each employee&rsquo;s Allowance</div>
-        </div>
-        <div className="rounded-xl bg-warning-bg p-3.5 shadow-sm ring-1 ring-inset ring-warning/10">
-          <span className="text-xs font-medium text-warning-text/80">Total SSF Payable</span>
-          <div className="mt-1 text-lg font-bold tabular-nums text-warning-text">{money(grand.totalSsf)}</div>
-          <div className="mt-0.5 text-[11px] text-warning-text/70">Employer {ssfEmployerRate}% + Employee {ssfEmployeeRate}%</div>
-        </div>
-        <div className="rounded-xl bg-good-bg p-3.5 shadow-sm ring-1 ring-inset ring-good/10">
-          <span className="text-xs font-medium text-good-text/80">Net Monthly Payable</span>
-          <div className="mt-1 text-lg font-bold tabular-nums text-good-text">{money(grand.net)}</div>
-          <div className="mt-0.5 text-[11px] text-good-text/70">Gross − Total SSF</div>
-        </div>
-      </div>
+      {/* The period totals live in the table's own footer row — no need for a
+          second copy as a band of cards above it. */}
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:overflow-visible print:border-0 print:shadow-none">
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:overflow-visible print:border-0 print:shadow-none">
         <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-accent/10 via-accent/5 to-transparent px-4 py-4 sm:px-6 print:hidden">
           <div className="flex items-center gap-2.5">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
