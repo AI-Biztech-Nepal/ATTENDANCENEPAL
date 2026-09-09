@@ -180,7 +180,7 @@ export default function HistoryScreen() {
         const dayLogs = empLogs.filter(l => nepalDateKey(l.punch_time) === day);
         if (dayLogs.length > 0) byDate.set(day, dayLogs);
       }
-      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, undefined, weeklyPattern);
+      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, undefined, weeklyPattern, days);
       logsByEmployeeDay.set(emp.id, byDate);
     }
 

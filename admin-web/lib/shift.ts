@@ -340,7 +340,16 @@ export function nepalDateTimeToUtcMs(dateKey: string, time: string): number {
  * that date's bucket from a window starting at the shift's scheduled start
  * and spanning its duration plus a 2-hour overtime allowance, then strip
  * whatever punches that window claimed out of neighboring dates' buckets
- * so nothing gets double-counted. Mutates and returns `byDate`. */
+ * so nothing gets double-counted. Mutates and returns `byDate`.
+ *
+ * `rangeDates` (every calendar date the caller is showing) also lets this
+ * rescue a rostered overnight-shift date that has NO same-date punch at all:
+ * someone doing a 24-hour duty often taps just once — on the way out the
+ * next morning — so the duty date's bucket is empty (reads as Absent) while
+ * the following day, usually their Week Off, gets that tap and wrongly reads
+ * as Present. When the day after is a Week Off (or outside the shown range),
+ * the lone morning tap is pulled back onto the duty date. The guard keeps a
+ * real working day from ever losing its own check-in this way. */
 export function applyOvernightShiftCorrection(
   byDate: Map<string, AttendanceLog[]>,
   allLogs: AttendanceLog[],
@@ -348,16 +357,32 @@ export function applyOvernightShiftCorrection(
   shifts: Shift[],
   dailyShiftByDate?: DailyShiftByDate,
   companyWeekOffDates?: Set<string>,
-  weeklyPattern?: WeeklyPatternByEmployee
+  weeklyPattern?: WeeklyPatternByEmployee,
+  rangeDates?: string[]
 ): Map<string, AttendanceLog[]> {
-  const dates = [...byDate.keys()];
+  const punchedDates = new Set(byDate.keys());
   const claimed = new Set<string>();
   const overnightDates = new Set<string>();
 
-  for (const date of dates) {
-    const resolved = resolveShiftForDate(employee, shifts, date, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
+  const nextDay = (date: string) => {
+    const d = new Date(date + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+  const resolvedFor = (date: string) =>
+    resolveShiftForDate(employee, shifts, date, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
+
+  // Rostered overnight-shift dates with no same-date punch — candidates for
+  // the next-morning-tap-only rescue described above.
+  const zeroPunchOvernight = (rangeDates ?? []).filter(d => {
+    if (punchedDates.has(d)) return false;
+    const r = resolvedFor(d);
+    return !isWeekOff(r) && isOvernightShift(r);
+  });
+
+  for (const date of [...punchedDates, ...zeroPunchOvernight]) {
+    const resolved = resolvedFor(date);
     if (isWeekOff(resolved) || !isOvernightShift(resolved)) continue;
-    overnightDates.add(date);
 
     const startMin = toMinutes(resolved.start_time);
     const endMin = toMinutes(resolved.end_time);
@@ -371,6 +396,18 @@ export function applyOvernightShiftCorrection(
       const t = new Date(l.punch_time).getTime();
       return t >= windowStartMs && t < windowEndMs;
     });
+
+    if (!punchedDates.has(date)) {
+      // A zero-punch duty date: only rescue when the window actually caught a
+      // tap AND the day after is a Week Off / out of range, so we can never
+      // steal a following working day's own check-in.
+      const next = nextDay(date);
+      const nextIsWeekOff = isWeekOff(resolvedFor(next)) || (companyWeekOffDates?.has(next) ?? false);
+      const nextInRange = rangeDates?.includes(next) ?? false;
+      if (dayLogs.length === 0 || (nextInRange && !nextIsWeekOff)) continue;
+    }
+
+    overnightDates.add(date);
     for (const l of dayLogs) claimed.add(l.id);
     byDate.set(date, dayLogs);
   }

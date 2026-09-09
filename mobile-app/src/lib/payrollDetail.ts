@@ -55,7 +55,7 @@ export function buildEmployeeDayRows(
     const dayLogs = employeeLogs.filter(l => nepalDateKey(l.punch_time) === day);
     if (dayLogs.length > 0) byDate.set(day, dayLogs);
   }
-  applyOvernightShiftCorrection(byDate, employeeLogs, employee, shifts, dailyShiftByDate, paidOffDates, weeklyPattern);
+  applyOvernightShiftCorrection(byDate, employeeLogs, employee, shifts, dailyShiftByDate, paidOffDates, weeklyPattern, days);
 
   const today = nepalTodayIso();
   return days.map(day => {
