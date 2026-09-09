@@ -710,6 +710,19 @@ export default function PayrollPage() {
 
   return (
     <AppShell title="Attendance-based Payroll Controller">
+      {/* Force the printed / PDF report onto a landscape page — the 16-column
+          table never fits upright. An UNNAMED @page (not `@page name`) is the
+          only form Chrome reliably honours for orientation; it also drops the
+          browser's own date / title header, so the paper margin is re-applied
+          as padding on <main>. Scoped to this route by living in the render.
+          Ashadeep Foundation keeps the legacy portrait layout. */}
+      {!legacyPayrollPrint && (
+        <style
+          dangerouslySetInnerHTML={{
+            __html: '@media print{@page{size:A4 landscape;margin:0}main{padding:9mm !important}}',
+          }}
+        />
+      )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 print:hidden">
         <div className="rounded-xl bg-warning-bg p-3 shadow-sm ring-1 ring-inset ring-warning/10">
           <span className="text-xs font-medium text-warning-text/80">Overtime Salary</span>
@@ -811,16 +824,10 @@ export default function PayrollPage() {
         </div>
       </div>
 
-      {/* `payroll-print-landscape` forces the printed / PDF report onto a
-          landscape page (the 16-column sheet never fits upright). Applied
-          for every tenant except Ashadeep Foundation, which keeps portrait.
-          This is the first print-visible block — the summary grid above is
-          `print:hidden` — so page 1 is landscape from the masthead down. */}
-      <div
-        className={`mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:overflow-visible print:border-0 print:shadow-none ${
-          legacyPayrollPrint ? '' : 'payroll-print-landscape'
-        }`}
-      >
+      {/* First print-visible block — the summary grid above is `print:hidden`
+          — so the page opens on the masthead. Landscape is set by the @page
+          rule injected above (for every tenant but Ashadeep Foundation). */}
+      <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:overflow-visible print:border-0 print:shadow-none">
         <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-accent/10 via-accent/5 to-transparent px-4 py-4 sm:px-6 print:hidden">
           <div className="flex items-center gap-2.5">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">

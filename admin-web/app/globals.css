@@ -24,14 +24,10 @@ html, body {
   @page {
     margin: 6mm;
   }
-  /* The payroll Salary Report is the one exception: 16 columns never fit
-     an upright page, so it forces its own landscape page (see
-     .payroll-print-landscape below). Named so ONLY that report flips —
-     every other printout keeps the portrait default above. */
-  @page payrollLandscape {
-    size: landscape;
-    margin: 6mm;
-  }
+  /* The payroll Salary Report is the one exception: its 16 columns never fit
+     upright, so /payroll injects its own `@page { size: A4 landscape }` at
+     render time (an UNNAMED @page — the only form Chrome honours for
+     orientation; a named `@page payrollLandscape` is silently ignored). */
   /* Every exported table gets visible gridlines, and shrinks down to
      something that actually fits a page even in Portrait — much easier to
      read as a printed/PDF report than the screen's whitespace-only row
@@ -128,13 +124,9 @@ html, body {
         page box and paints shifted / doubled across page breaks — which is
         the stray blank column and the smeared "Employee" header seen in
         the PDF. Pinning them back to static removes both. */
-  /* Flip the whole payroll report (masthead + table + sign-off) onto a
-     landscape page for every tenant but the one legacy customer (Ashadeep
-     Foundation, which keeps portrait + the plain `.print-report` rules). */
-  .payroll-print-landscape {
-    page: payrollLandscape;
-  }
-
+  /* The payroll report's landscape @page is injected by /payroll itself.
+     These rules just let the 16-column table use the room it gains: full
+     width, 9px, no sticky columns (which double across page breaks). */
   .print-report-fit,
   .print-report-fit table {
     width: 100% !important;
