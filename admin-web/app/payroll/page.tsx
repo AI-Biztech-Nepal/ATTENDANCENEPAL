@@ -896,9 +896,13 @@ export default function PayrollPage() {
           />
         </div>
         {/* Print-only masthead — gives the report a proper document header
-            (title, the period it covers, headcount, when it was run)
-            instead of opening straight into a bare table. */}
+            (company name, title, the period it covers, headcount, when it
+            was run) instead of opening straight into a bare table. The
+            company name is pulled live from the tenant's own record and
+            prints for every tenant (Ashadeep Foundation included — only the
+            fit-to-page table layout is carved out for them). */}
         <div className="hidden px-4 pt-2 print:block sm:px-6">
+          {companyName ? <div className="text-xl font-bold text-black">{companyName}</div> : null}
           <h1 className="text-lg font-bold text-black">{period.label} Salary Report</h1>
           <p className="mt-1 text-[11px] text-black">
             Pay period: {formatDdMmYyyy(start, system)} – {formatDdMmYyyy(end, system)} ({daysInRange} days) · {byEmployee.length} employee
