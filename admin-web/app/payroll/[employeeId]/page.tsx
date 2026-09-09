@@ -98,11 +98,22 @@ function PayrollEmployeeDetailView() {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ weekday: number; shift_id: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
+  // Company-wide contribution rates from the Salary Structure page — the same
+  // ones the Payroll report deducts, so this page's Net Payable matches the
+  // report's Net Payable column for the same period.
+  const [pfRate, setPfRate] = useState(0);
+  const [ssfEmployerRate, setSsfEmployerRate] = useState(0);
+  const [ssfEmployeeRate, setSsfEmployeeRate] = useState(0);
+  const [overtimeAllowanceRate, setOvertimeAllowanceRate] = useState(0);
 
   useEffect(() => {
     fetchCompanyPayrollFormat().then(f => setDefaultMode(f === 'staff_salary_sheet' ? 'flat' : 'hourly'));
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, pfRate, ssfRate, tdsRate, overtimeRate }) => {
       setWeeklyOffDay(weeklyOffDay);
+      setPfRate(pfRate);
+      setSsfEmployerRate(ssfRate);
+      setSsfEmployeeRate(tdsRate);
+      setOvertimeAllowanceRate(overtimeRate);
       // Not date-scoped (a pattern applies to every week), and only ever
       // relevant in 'weekly' roster_mode — see resolveShiftForDate().
       if (rosterMode === 'weekly') {
@@ -258,6 +269,36 @@ function PayrollEmployeeDetailView() {
     return { hours, overtime, lateMinutes, earlyArrivalMinutes, earlyMinutes, lateDepartureMinutes, mySalary, otSalary, totalSalary, presentDays, absentDays, paidOffDays };
   }, [dayRows, earningOf]);
 
+  // Net Payable — the final column of whichever payroll report this page was
+  // opened from, computed the same way so the two agree.
+  //  · flat (Staff Salary Sheet): Basic + Allowance − employee SSF. The
+  //    employer SSF is grossed into MGS and taken straight back out, so it
+  //    never touches take-home; there is no PF.
+  //  · hourly / daily (standard report): the attendance-earned base + OT pay,
+  //    a flat Allowance, minus PF and both SSF sides, plus the flat Overtime
+  //    Allowance — each a % of that base.
+  const netPayable = useMemo(() => {
+    if (employee?.salary == null) return null;
+    const base = Math.round(dayTotals.totalSalary);
+    const allowance = employee.allowance ?? 0;
+    const ssfEmployee = Math.round((base * ssfEmployeeRate) / 100);
+    if (salaryMode === 'flat') {
+      return { base, allowance, pf: 0, ssfEmployer: 0, ssfEmployee, otAllowance: 0, net: base + allowance - ssfEmployee };
+    }
+    const pf = Math.round((base * pfRate) / 100);
+    const ssfEmployer = Math.round((base * ssfEmployerRate) / 100);
+    const otAllowance = Math.round((base * overtimeAllowanceRate) / 100);
+    return {
+      base,
+      allowance,
+      pf,
+      ssfEmployer,
+      ssfEmployee,
+      otAllowance,
+      net: base + allowance - pf - ssfEmployer - ssfEmployee + otAllowance,
+    };
+  }, [employee, dayTotals.totalSalary, salaryMode, pfRate, ssfEmployerRate, ssfEmployeeRate, overtimeAllowanceRate]);
+
 
   const periodQuery = `?start=${start}&end=${end}&otHoursPerDay=${otHoursPerDay}&otMultiplier=${otMultiplier}&otOn=${otOn}&mode=${salaryMode}`;
 
@@ -283,6 +324,16 @@ function PayrollEmployeeDetailView() {
         earning ? Math.round(earning.total) : '',
       ];
     });
+    if (netPayable) {
+      lines.push([]);
+      lines.push(['Total Salary (earned)', '', '', '', '', '', '', '', '', '', '', '', '', netPayable.base]);
+      lines.push(['Allowance', '', '', '', '', '', '', '', '', '', '', '', '', netPayable.allowance]);
+      if (netPayable.pf) lines.push(['PF', '', '', '', '', '', '', '', '', '', '', '', '', -netPayable.pf]);
+      if (netPayable.ssfEmployer) lines.push(['SSF by Employer', '', '', '', '', '', '', '', '', '', '', '', '', -netPayable.ssfEmployer]);
+      if (netPayable.ssfEmployee) lines.push(['SSF by Employee', '', '', '', '', '', '', '', '', '', '', '', '', -netPayable.ssfEmployee]);
+      if (netPayable.otAllowance) lines.push(['Overtime Allowance', '', '', '', '', '', '', '', '', '', '', '', '', netPayable.otAllowance]);
+      lines.push(['NET PAYABLE', '', '', '', '', '', '', '', '', '', '', '', '', netPayable.net]);
+    }
     downloadExcel(`payroll_${employee.name.replace(/\s+/g, '_')}_${start}_to_${end}.csv`, header, lines);
   }
 
@@ -349,7 +400,7 @@ function PayrollEmployeeDetailView() {
             </div>
           </div>
 
-          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6 print:hidden">
+          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 print:hidden">
             <div className="rounded-xl bg-accent/10 p-3 shadow-sm ring-1 ring-inset ring-accent/10">
               <span className="text-xs font-medium text-accent/80">My Salary</span>
               <div className="mt-1 text-base font-bold text-accent">{Math.round(dayTotals.mySalary).toLocaleString()}</div>
@@ -364,10 +415,25 @@ function PayrollEmployeeDetailView() {
               <div className="mt-1 text-base font-bold text-warning-text">{Math.round(dayTotals.otSalary).toLocaleString()}</div>
               <div className="mt-0.5 text-[11px] text-warning-text/70">This period</div>
             </div>
-            <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
+            <div className="rounded-xl bg-good-bg/60 p-3 shadow-sm ring-1 ring-inset ring-good/10">
               <span className="text-xs font-medium text-good-text/80">Total Salary</span>
               <div className="mt-1 text-base font-bold text-good-text">{Math.round(dayTotals.totalSalary).toLocaleString()}</div>
-              <div className="mt-0.5 text-[11px] text-good-text/70">{salaryMode === 'flat' ? 'Full monthly salary' : 'Earned this period'}</div>
+              <div className="mt-0.5 text-[11px] text-good-text/70">
+                {salaryMode === 'flat' ? 'Full monthly salary' : 'Earned this period'} · before deductions
+              </div>
+            </div>
+            <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-2 ring-inset ring-good/30">
+              <span className="text-xs font-medium text-good-text/80">Net Payable</span>
+              <div className="mt-1 text-base font-bold text-good-text">
+                {netPayable != null ? netPayable.net.toLocaleString() : '—'}
+              </div>
+              <div className="mt-0.5 text-[11px] text-good-text/70">
+                {netPayable == null
+                  ? 'This period'
+                  : salaryMode === 'flat'
+                    ? `+ Allowance ${netPayable.allowance.toLocaleString()} − SSF ${netPayable.ssfEmployee.toLocaleString()}`
+                    : `+ Allowance ${netPayable.allowance.toLocaleString()} − PF/SSF ${(netPayable.pf + netPayable.ssfEmployer + netPayable.ssfEmployee - netPayable.otAllowance).toLocaleString()}`}
+              </div>
             </div>
             <div className="rounded-xl bg-purple-50 p-3 shadow-sm ring-1 ring-inset ring-purple-200">
               <span className="text-xs font-medium text-purple-700/80">Overtime</span>
