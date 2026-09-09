@@ -19,6 +19,7 @@ import {
   type DailyShiftByDate,
 } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
+import { fetchCompanyName } from '@/lib/payrollFormat';
 import {
   DEFAULT_PAYROLL_REPORT_COLUMNS,
   loadPayrollReportColumns,
@@ -99,6 +100,9 @@ export default function StaffSalarySheet() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  // The tenant's own name — printed as this sheet's document header, the
+  // same live company title the standard Payroll report prints.
+  const [companyName, setCompanyName] = useState<string | null>(null);
 
   // Attendance for the Worked Days / Total Hours / Overtime columns — the
   // same payroll_summaries-or-live-from-punches data the standard Payroll
@@ -140,6 +144,10 @@ export default function StaffSalarySheet() {
       return next;
     });
   }
+
+  useEffect(() => {
+    fetchCompanyName().then(setCompanyName);
+  }, []);
 
   useEffect(() => {
     setVisibleCols(loadPayrollReportColumns());
@@ -601,12 +609,19 @@ export default function StaffSalarySheet() {
           />
         </div>
 
-        {/* print-only masthead */}
+        {/* Print-only masthead — the tenant's own name as the document
+            header, then the report title, the month it covers, headcount and
+            when it was run. Mirrors the standard Payroll report. */}
         <div className="hidden px-4 pt-2 print:block sm:px-6">
-          <h1 className="text-lg font-bold text-black">Staff Salary Sheet</h1>
-          <p className="mt-1 text-[11px] text-black">
-            Month: {period.label} · {formatDdMmYyyy(period.start, system)} to {formatDdMmYyyy(period.end, system)}
+          {companyName ? (
+            <div className="break-words text-lg font-bold leading-tight text-black sm:text-xl">{companyName}</div>
+          ) : null}
+          <h1 className="break-words text-base font-bold leading-tight text-black sm:text-lg">Staff Salary Sheet</h1>
+          <p className="mt-1 break-words text-[11px] text-black">
+            Month: {period.label} · {formatDdMmYyyy(period.start, system)} to {formatDdMmYyyy(period.end, system)} · {allRows.length}{' '}
+            employee{allRows.length === 1 ? '' : 's'}
           </p>
+          <p className="break-words text-[11px] text-black">Generated: {formatDdMmYyyy(nepalTodayIso(), system)}</p>
         </div>
 
         <HorizontalScrollButtons targetRef={tableScrollRef} />
