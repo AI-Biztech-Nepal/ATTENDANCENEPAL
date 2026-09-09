@@ -440,25 +440,7 @@ export default function SalaryStructurePage() {
 
   return (
     <AppShell title="Salary Structure">
-      <div className="mb-5 flex flex-col divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:flex-row sm:divide-x sm:divide-y-0 print:hidden">
-        <div className="flex-1 px-5 py-3.5">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Total Gross Payroll{perDay && ' / day'}</span>
-          <div className="mt-1 text-lg font-semibold tabular-nums text-ink">{shown(totals.gross)}</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Basic {shown(totals.basic)} · Allowance {shown(totals.allowance)}</div>
-        </div>
-        <div className="flex-1 px-5 py-3.5">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Total Deductions{perDay && ' / day'}</span>
-          <div className="mt-1 text-lg font-semibold tabular-nums text-ink">{shown(totals.deductions)}</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">
-            PF {shown(totals.pfAmt)} · SSF by Employer {shown(totals.ssfAmt)} · SSF by Employee {shown(totals.tdsAmt)}
-          </div>
-        </div>
-        <div className="flex-1 px-5 py-3.5">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Total Net Payable{perDay && ' / day'}</span>
-          <div className="mt-1 text-lg font-bold tabular-nums text-ink">{shown(totals.net)}</div>
-          <div className="mt-0.5 text-[11px] text-slate-400">Across {totals.counted} staff on a salary</div>
-        </div>
-      </div>
+      {/* Period totals live in the table's own footer row — no summary band. */}
 
       {dirty && isAdmin && (
         <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 print:hidden">
