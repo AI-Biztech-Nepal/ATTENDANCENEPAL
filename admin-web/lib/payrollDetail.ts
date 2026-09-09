@@ -145,30 +145,70 @@ export function buildEmployeeDayRows(
   });
 }
 
-/** One day's slice of the monthly Salary — same hourly proration the
- * Payroll page's calculatedSalary()/overtimeSalary() use for the whole
- * period, just for one day, so per-day figures always add up to the period
- * total. Pay is earned per hour actually worked, not a flat day rate — a
- * day worked for 2 hours pays 2 hours, not a full day. `d.hours` already
- * includes any overtime portion (see computeDayStatus), so it's subtracted
- * back out here and paid separately at the overtime multiplier instead of
- * twice at the regular rate. */
+/** How the monthly Basic becomes this period's pay — the same three modes
+ * the Payroll report's header toggle offers. */
+export type SalaryMode = 'hourly' | 'daily' | 'flat';
+
+export type DailyEarningOpts = {
+  /** Calendar days in the period MINUS this employee's weekly-offs and
+   * holidays. The divisor for the per-day / per-hour rate — matches the
+   * Payroll report exactly, so the per-day rows here add up to the report's
+   * "Calculated Salary" for the same period. */
+  workingDays: number;
+  otHoursPerDay: number;
+  otMultiplier: number;
+  otOn: boolean;
+  mode: SalaryMode;
+  /** This date is a company Week-off / holiday (not a working day). A paid
+   * Leave that lands on one earns nothing extra — the divisor already
+   * covers it — exactly as the Payroll report scores it. */
+  isCompanyOffDay: boolean;
+};
+
+/** One day's slice of the monthly Salary — the per-day form of the Payroll
+ * report's calculatedSalary()/overtimeSalary(), so the daily rows here sum
+ * to the same period total the report shows.
+ *
+ *  hourly: rate = Basic / (workingDays × hours/day), paid per hour actually
+ *          worked; a paid Leave day on a working day earns one clean day.
+ *  daily:  rate = Basic / workingDays, paid per day present (a partial day
+ *          still counts as a whole day) or on paid Leave.
+ *  flat:   attendance ignored — every working day earns Basic / workingDays,
+ *          so the period always totals the full Basic.
+ *
+ * `d.hours` already includes any overtime portion (see computeDayStatus), so
+ * it's subtracted back out for the regular-hours base and paid separately at
+ * the multiplier. Week-offs contribute nothing — they're already priced into
+ * the working-days divisor. */
 export function dailySalaryEarning(
   d: DayDetail,
   salary: number | null,
-  daysInRange: number,
-  otHoursPerDay: number,
-  otMultiplier: number,
-  otOn: boolean
+  opts: DailyEarningOpts
 ): { base: number; overtime: number; total: number } | null {
   if (salary == null) return null;
-  const hourlyRate = salary / (daysInRange * otHoursPerDay);
-  // A paid Week-off/Leave day has no punches to derive hours from — credit
-  // one full standard day (hourlyRate * otHoursPerDay = salary / daysInRange)
-  // instead of the usual per-hour math.
-  if (d.paidOff) return { base: hourlyRate * otHoursPerDay, overtime: 0, total: hourlyRate * otHoursPerDay };
+  const { otHoursPerDay, otMultiplier, otOn, mode, isCompanyOffDay } = opts;
+  const workingDays = Math.max(1, opts.workingDays);
+  const hourlyRate = salary / (workingDays * otHoursPerDay);
+  const dayRate = salary / workingDays;
+
+  if (mode === 'flat') {
+    // The full monthly Basic regardless of attendance — split evenly over the
+    // working days so the period still totals exactly `salary`.
+    return isCompanyOffDay ? { base: 0, overtime: 0, total: 0 } : { base: dayRate, overtime: 0, total: dayRate };
+  }
+
+  if (d.paidOff) {
+    // Week-off / holiday (or a Leave that fell on one): nothing extra.
+    if (isCompanyOffDay) return { base: 0, overtime: 0, total: 0 };
+    // Approved Leave on a working day — paid like a day present.
+    const base = mode === 'daily' ? dayRate : hourlyRate * otHoursPerDay;
+    return { base, overtime: 0, total: base };
+  }
+
+  // A day the employee actually attended (summary row or live punches).
+  if (d.status !== 'Present' && d.status !== 'Late') return { base: 0, overtime: 0, total: 0 };
   const regularHours = Math.max(0, d.hours - d.overtime);
-  const base = hourlyRate * regularHours;
+  const base = mode === 'daily' ? dayRate : hourlyRate * regularHours;
   const overtime = otOn && d.overtime > 0 ? hourlyRate * otMultiplier * d.overtime : 0;
   return { base, overtime, total: base + overtime };
 }

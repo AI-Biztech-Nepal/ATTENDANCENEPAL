@@ -169,7 +169,11 @@ function SalaryStructureEmployeeView() {
   // deduction, positive means a net surplus.
   const adjustment = useMemo(() => {
     if (employee?.salary == null) return null;
-    const perStdDay = employee.salary / daysInMonth;
+    // Working days (calendar days − weekly-offs − holidays) — the same
+    // divisor the Payroll report uses, so a full month of attendance nets to
+    // zero adjustment and an absence costs exactly one working day's pay.
+    const workingDays = Math.max(1, Math.round(daysInMonth) - weekOffDates.size);
+    const perStdDay = employee.salary / workingDays;
     let expected = 0;
     let actualBase = 0;
     let overtime = 0;
@@ -179,20 +183,27 @@ function SalaryStructureEmployeeView() {
     let earlyMinutes = 0;
     for (const d of dayRows) {
       if (d.status === 'Upcoming') continue;
+      const off = weekOffDates.has(d.date);
+      const earn = dailySalaryEarning(d, employee.salary, {
+        workingDays,
+        otHoursPerDay,
+        otMultiplier,
+        otOn: true,
+        mode: 'hourly',
+        isCompanyOffDay: off,
+      });
+      if (earn) overtime += earn.overtime;
+      if (off) continue; // a week-off / holiday isn't a working day
       countedDays += 1;
       expected += perStdDay;
-      const earn = dailySalaryEarning(d, employee.salary, daysInMonth, otHoursPerDay, otMultiplier, true);
-      if (earn) {
-        actualBase += earn.base;
-        overtime += earn.overtime;
-      }
+      if (earn) actualBase += earn.base;
       if (d.status === 'Absent') absentDays += 1;
       lateMinutes += d.lateMinutes;
       earlyMinutes += d.earlyMinutes;
     }
     const shortfall = actualBase - expected; // ≤ 0 for absence / late / early
     return { net: shortfall + overtime, shortfall, overtime, countedDays, absentDays, lateMinutes, earlyMinutes };
-  }, [employee, dayRows, daysInMonth, otHoursPerDay, otMultiplier]);
+  }, [employee, dayRows, daysInMonth, weekOffDates, otHoursPerDay, otMultiplier]);
 
   function exportCsv() {
     if (!employee) return;

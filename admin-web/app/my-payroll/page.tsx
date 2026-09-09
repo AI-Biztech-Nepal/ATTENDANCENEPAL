@@ -7,8 +7,9 @@ import EmployeeShell from '@/components/EmployeeShell';
 import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPeriod, type CalendarPeriod } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes, nepalTodayIso, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
-import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail } from '@/lib/payrollDetail';
+import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail, type SalaryMode } from '@/lib/payrollDetail';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchCompanyPayrollFormat } from '@/lib/payrollFormat';
 
 /** Decimal hours -> "Xh Ym". */
 function fmtHrs(hours: number) {
@@ -50,10 +51,15 @@ export default function MyPayrollPage() {
   const [pfRate, setPfRate] = useState(10);
   const [ssfRate, setSsfRate] = useState(11);
   const [tdsRate, setTdsRate] = useState(0);
+  // Pay basis — 'flat' for the fixed-salary Staff Salary Sheet customer,
+  // per-hour for everyone else. Keeps this page's figures in step with the
+  // admin's Payroll report and the employee's own breakdown page.
+  const [salaryMode, setSalaryMode] = useState<SalaryMode>('hourly');
 
   const { start, end } = period;
 
   useEffect(() => {
+    fetchCompanyPayrollFormat().then(f => setSalaryMode(f === 'staff_salary_sheet' ? 'flat' : 'hourly'));
     fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate }) => {
       setWeeklyOffDay(weeklyOffDay);
       setOtHoursPerDay(otHoursPerDay);
@@ -232,7 +238,35 @@ export default function MyPayrollPage() {
       employee ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, undefined, weeklyPattern) : [],
     [employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern]
   );
-  const daysInRange = useMemo(() => (new Date(end).getTime() - new Date(start).getTime()) / 86400000 + 1, [start, end]);
+  // Company Week-offs / holidays only (no leave), across the whole employment
+  // history — the pay math treats these as non-working days, exactly as the
+  // admin Payroll report does. `.has()` on out-of-range dates never matches.
+  const companyOffDates = useMemo(() => {
+    if (!employee?.date_of_joining) return new Set<string>();
+    return weekOffDatesInRange(employee.date_of_joining, nepalTodayIso(), weeklyOffDay, holidays, employee.gender ?? null);
+  }, [employee?.date_of_joining, employee?.gender, weeklyOffDay, holidays]);
+
+  const countOffDates = (s: string, e: string) => {
+    let n = 0;
+    for (const dt of companyOffDates) if (dt >= s && dt <= e) n += 1;
+    return n;
+  };
+  const workingDaysBetween = (s: string, e: string) =>
+    Math.max(1, Math.round((new Date(e).getTime() - new Date(s).getTime()) / 86400000 + 1) - countOffDates(s, e));
+
+  const periodWorkingDays = useMemo(() => workingDaysBetween(start, end), [start, end, companyOffDates]);
+
+  // One day's earned pay for the selected period, on the same basis as the
+  // admin's Payroll report and the employee's breakdown page.
+  const earnOf = (r: DayDetail) =>
+    dailySalaryEarning(r, employee?.salary ?? null, {
+      workingDays: periodWorkingDays,
+      otHoursPerDay,
+      otMultiplier,
+      otOn: true,
+      mode: salaryMode,
+      isCompanyOffDay: companyOffDates.has(r.date),
+    });
 
   const lifetimeDayRows: DayDetail[] = useMemo(
     () =>
@@ -270,13 +304,22 @@ export default function MyPayrollPage() {
     for (const [key, rows] of byMonth) {
       const [y, m] = key.split('-').map(Number);
       const daysInMonth = new Date(y, m, 0).getDate();
+      const mWorkingDays = workingDaysBetween(`${key}-01`, `${key}-${String(daysInMonth).padStart(2, '0')}`);
       for (const row of rows) {
-        const earning = dailySalaryEarning(row, employee.salary, daysInMonth, otHoursPerDay, otMultiplier, true);
+        const earning = dailySalaryEarning(row, employee.salary, {
+          workingDays: mWorkingDays,
+          otHoursPerDay,
+          otMultiplier,
+          otOn: true,
+          mode: salaryMode,
+          isCompanyOffDay: companyOffDates.has(row.date),
+        });
         if (earning) total += earning.total;
       }
     }
     return Math.round(total);
-  }, [lifetimeDayRows, employee]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lifetimeDayRows, employee, companyOffDates, otHoursPerDay, otMultiplier, salaryMode]);
 
   const totals = useMemo(() => {
     const totalHours = dayRows.reduce((s, r) => s + r.hours, 0);
@@ -289,7 +332,7 @@ export default function MyPayrollPage() {
     let baseEarning = 0;
     let overtimeEarning = 0;
     for (const r of dayRows) {
-      const earning = dailySalaryEarning(r, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, true);
+      const earning = earnOf(r);
       if (earning) {
         baseEarning += earning.base;
         overtimeEarning += earning.overtime;
@@ -306,7 +349,8 @@ export default function MyPayrollPage() {
       totalSalary: baseEarning + overtimeEarning,
       overtimeEarning,
     };
-  }, [dayRows, employee, daysInRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayRows, employee, periodWorkingDays, companyOffDates, otHoursPerDay, otMultiplier, salaryMode]);
 
   // Payslip-style breakdown for the selected period. Basic Salary is the
   // attendance-prorated base earning (same figure "Receivable" used to show
@@ -331,14 +375,14 @@ export default function MyPayrollPage() {
   const chartData = useMemo(
     () =>
       dayRows.map(r => {
-        const earning =
-          r.checkIn || r.paidOff ? dailySalaryEarning(r, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, true) : null;
+        const earning = r.checkIn || r.paidOff ? earnOf(r) : null;
         return {
           label: formatDdMmYyyy(r.date, system).slice(0, 2),
           earning: earning ? Math.round(earning.total) : 0,
         };
       }),
-    [dayRows, system, employee, daysInRange]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dayRows, system, employee, periodWorkingDays, companyOffDates, otHoursPerDay, otMultiplier, salaryMode]
   );
 
   return (
@@ -415,10 +459,7 @@ export default function MyPayrollPage() {
                 </thead>
                 <tbody>
                   {dayRows.map((row, i) => {
-                    const earning =
-                      row.checkIn || row.paidOff
-                        ? dailySalaryEarning(row, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, true)
-                        : null;
+                    const earning = row.checkIn || row.paidOff ? earnOf(row) : null;
                     return (
                       <tr key={row.date} className={`border-b border-slate-100 last:border-0 ${i % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
                         <td className="truncate px-1 py-0.5 text-ink">{formatDdMmYyyy(row.date, system).slice(0, 5)}</td>

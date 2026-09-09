@@ -165,6 +165,9 @@ export default function PayrollPage() {
       end,
       otHoursPerDay: String(otHoursPerDay),
       otMultiplier: String(otMultiplier),
+      // Carry the pay basis so the employee's breakdown page reconciles with
+      // the row the admin clicked.
+      mode: salaryMode,
     });
     return `/payroll/${employeeId}?${params.toString()}`;
   }

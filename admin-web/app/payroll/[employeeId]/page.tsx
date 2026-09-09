@@ -13,8 +13,9 @@ import StatusText from '@/components/StatusText';
 import { buildMonth, formatAdDate, formatDdMmYyyy, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
-import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail } from '@/lib/payrollDetail';
+import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail, type SalaryMode } from '@/lib/payrollDetail';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchCompanyPayrollFormat } from '@/lib/payrollFormat';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
@@ -77,6 +78,15 @@ function PayrollEmployeeDetailView() {
   // extra for it) — on by default, toggled here on the employee's own page.
   // Seeded from the link that opened this page, then owned locally.
   const [otOn, setOtOn] = useState(searchParams.get('otOn') !== 'false');
+  // Which pay basis this page shows — carried on the link from the Payroll
+  // report so the two always agree. Falls back to the company's own default
+  // (flat for the fixed-salary Staff Salary Sheet customer, per-hour for
+  // everyone else) when opened without it.
+  const modeParam = searchParams.get('mode');
+  const linkedMode: SalaryMode | null =
+    modeParam === 'hourly' || modeParam === 'daily' || modeParam === 'flat' ? modeParam : null;
+  const [defaultMode, setDefaultMode] = useState<SalaryMode>('hourly');
+  const salaryMode: SalaryMode = linkedMode ?? defaultMode;
 
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -90,6 +100,7 @@ function PayrollEmployeeDetailView() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    fetchCompanyPayrollFormat().then(f => setDefaultMode(f === 'staff_salary_sheet' ? 'flat' : 'hourly'));
     fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
       setWeeklyOffDay(weeklyOffDay);
       // Not date-scoped (a pattern applies to every week), and only ever
@@ -155,16 +166,27 @@ function PayrollEmployeeDetailView() {
 
   const daysInRange = useMemo(() => (new Date(end).getTime() - new Date(start).getTime()) / 86400000 + 1, [start, end]);
   const monthLabel = useMemo(() => buildMonth(system, parseAdKey(start) ?? todayAnchor()).label, [system, start]);
-  // The flat "salary ÷ days in period" rate — same figure on every row,
-  // shown for reference next to My Salary/OT Salary which are earned per
-  // hour instead (see dailySalaryEarning() in lib/payrollDetail.ts).
-  const salaryPerDay = useMemo(() => (employee?.salary != null ? employee.salary / daysInRange : null), [employee, daysInRange]);
 
   // Gender-scoped holidays (e.g. Teej) count as a paid day off only for the
   // employees they cover — see weekOffDatesInRange().
   const weekOffDates = useMemo(
     () => weekOffDatesInRange(start, end, weeklyOffDay, holidays, employee?.gender ?? null),
     [start, end, weeklyOffDay, holidays, employee?.gender]
+  );
+
+  // Calendar days in the period minus this employee's weekly-offs and
+  // holidays — the divisor the Payroll report uses, so the figures here
+  // reconcile with that report's "Calculated Salary" column.
+  const workingDays = useMemo(
+    () => Math.max(1, Math.round(daysInRange) - weekOffDates.size),
+    [daysInRange, weekOffDates]
+  );
+
+  // The per-day rate the pay is built from — Basic ÷ working days (or, in
+  // flat mode, that same even slice). Shown for reference next to My Salary.
+  const salaryPerDay = useMemo(
+    () => (employee?.salary != null ? employee.salary / workingDays : null),
+    [employee, workingDays]
   );
 
   const leaveDates = useMemo(() => {
@@ -186,6 +208,21 @@ function PayrollEmployeeDetailView() {
         ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern)
         : [],
     [employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern]
+  );
+
+  // One day's earned pay, on the same basis (mode + working-days divisor) the
+  // Payroll report used — so the column here reconciles with that report.
+  const earningOf = useMemo(
+    () => (d: DayDetail) =>
+      dailySalaryEarning(d, employee?.salary ?? null, {
+        workingDays,
+        otHoursPerDay,
+        otMultiplier,
+        otOn,
+        mode: salaryMode,
+        isCompanyOffDay: weekOffDates.has(d.date),
+      }),
+    [employee, workingDays, otHoursPerDay, otMultiplier, otOn, salaryMode, weekOffDates]
   );
 
   const dayTotals = useMemo(() => {
@@ -211,7 +248,7 @@ function PayrollEmployeeDetailView() {
       if (d.checkIn) presentDays += 1;
       else if (d.status === 'Week Off' || d.status === 'Leave') paidOffDays += 1;
       else if (d.status !== 'Upcoming') absentDays += 1;
-      const earning = dailySalaryEarning(d, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, otOn);
+      const earning = earningOf(d);
       if (earning) {
         mySalary += earning.base;
         otSalary += earning.overtime;
@@ -219,16 +256,16 @@ function PayrollEmployeeDetailView() {
       }
     }
     return { hours, overtime, lateMinutes, earlyArrivalMinutes, earlyMinutes, lateDepartureMinutes, mySalary, otSalary, totalSalary, presentDays, absentDays, paidOffDays };
-  }, [dayRows, employee, daysInRange, otHoursPerDay, otMultiplier, otOn]);
+  }, [dayRows, earningOf]);
 
 
-  const periodQuery = `?start=${start}&end=${end}&otHoursPerDay=${otHoursPerDay}&otMultiplier=${otMultiplier}&otOn=${otOn}`;
+  const periodQuery = `?start=${start}&end=${end}&otHoursPerDay=${otHoursPerDay}&otMultiplier=${otMultiplier}&otOn=${otOn}&mode=${salaryMode}`;
 
   function exportCsv() {
     if (!employee) return;
     const header = ['Date', 'In', 'Out', 'Total Hours', 'Overtime', 'Late In (min)', 'Early In (min)', 'Early Out (min)', 'Late Out (min)', 'Status', 'Salary/Day', 'My Salary', 'OT Salary', 'Total Salary'];
     const lines = dayRows.map(d => {
-      const earning = dailySalaryEarning(d, employee.salary, daysInRange, otHoursPerDay, otMultiplier, otOn);
+      const earning = earningOf(d);
       return [
         d.date,
         d.checkIn ? fmtTime(d.checkIn) : '',
@@ -317,7 +354,9 @@ function PayrollEmployeeDetailView() {
               <span className="text-xs font-medium text-accent/80">My Salary</span>
               <div className="mt-1 text-base font-bold text-accent">{Math.round(dayTotals.mySalary).toLocaleString()}</div>
               <div className="mt-0.5 text-[11px] text-accent/70">
-                {salaryPerDay != null ? `${Math.round(salaryPerDay).toLocaleString()}/day` : 'This period'}
+                {salaryMode === 'flat'
+                  ? 'Fixed monthly salary'
+                  : `${salaryPerDay != null ? Math.round(salaryPerDay).toLocaleString() + '/day · ' : ''}${workingDays} working days`}
               </div>
             </div>
             <div className="rounded-xl bg-warning-bg p-3 shadow-sm ring-1 ring-inset ring-warning/10">
@@ -328,7 +367,7 @@ function PayrollEmployeeDetailView() {
             <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
               <span className="text-xs font-medium text-good-text/80">Total Salary</span>
               <div className="mt-1 text-base font-bold text-good-text">{Math.round(dayTotals.totalSalary).toLocaleString()}</div>
-              <div className="mt-0.5 text-[11px] text-good-text/70">Earned this period</div>
+              <div className="mt-0.5 text-[11px] text-good-text/70">{salaryMode === 'flat' ? 'Full monthly salary' : 'Earned this period'}</div>
             </div>
             <div className="rounded-xl bg-purple-50 p-3 shadow-sm ring-1 ring-inset ring-purple-200">
               <span className="text-xs font-medium text-purple-700/80">Overtime</span>
@@ -408,7 +447,7 @@ function PayrollEmployeeDetailView() {
                 </thead>
                 <tbody>
                   {dayRows.map((d, i) => {
-                    const earning = dailySalaryEarning(d, employee.salary, daysInRange, otHoursPerDay, otMultiplier, otOn);
+                    const earning = earningOf(d);
                     return (
                       <tr key={d.date} className={`border-b border-slate-100 last:border-0 ${i % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
                         <td className="truncate px-0.5 py-0.5 text-ink">{formatDdMmYyyy(d.date, system).slice(0, 5)}</td>
@@ -494,7 +533,7 @@ function PayrollEmployeeDetailView() {
                 </thead>
                 <tbody>
                   {dayRows.map((d, i) => {
-                    const earning = dailySalaryEarning(d, employee.salary, daysInRange, otHoursPerDay, otMultiplier, otOn);
+                    const earning = earningOf(d);
                     const rowBg = i % 2 === 1 ? 'bg-slate-50' : 'bg-white';
                     return (
                       <tr key={d.date} className={`border-b border-slate-100 last:border-0 hover:bg-slate-100 ${i % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
