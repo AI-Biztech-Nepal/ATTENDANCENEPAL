@@ -75,14 +75,13 @@ function punchHhmm(iso: string) {
 }
 
 /** The inline "Fix" affordance shown in an empty Check-In / Check-Out cell
- * when Correction mode is on — a one-punch day's missing end, or both ends of
- * an Absent / Week Off day with no punches at all. */
-function FixChip({ onClick, title = 'Add correction — missed punch' }: { onClick: () => void; title?: string }) {
+ * when Correction mode is on and the day has one punch but not the other. */
+function FixChip({ onClick }: { onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      title={title}
+      title="Add correction — missed punch"
       className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-accent/50 bg-accent/5 px-1.5 py-0.5 text-[11px] font-semibold text-good-text transition-colors hover:border-solid hover:border-accent hover:bg-accent-light print:hidden"
     >
       <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth={2.75} strokeLinecap="round">
@@ -790,10 +789,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             {rows.map(r => {
               const canFix = correctionMode && correctable(r);
               const blank = canFix ? blankPunch(r) : null;
-              // Amber only for a likely missed punch; an Absent / Week Off
-              // day is an ordinary state and just gets its Fix chips.
+              // Amber only for a likely missed punch. An Absent / Week Off day
+              // is an ordinary state: its –:– cells stay plain and are edited
+              // like any recorded time, via the hover pencil.
               const flagged = canFix && missedPunch(r);
-              const addDayTitle = r.status === 'Week Off' ? 'Add attendance — worked on a week off' : 'Add attendance for this day';
               return (
               <tr key={r.key} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}>
                 {/* Numeric date (22/05/2083) rather than the spelled-out
@@ -814,8 +813,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckInCell row={r} />
-                  ) : blank === 'in' || blank === 'both' ? (
-                    <FixChip onClick={() => openCorrection(r)} title={blank === 'both' ? addDayTitle : undefined} />
+                  ) : blank === 'in' ? (
+                    <FixChip onClick={() => openCorrection(r)} />
                   ) : (
                     <EditablePunch onClick={() => openCorrection(r)}>
                       <CheckInCell row={r} />
@@ -825,8 +824,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckOutCell row={r} />
-                  ) : blank === 'out' || blank === 'both' ? (
-                    <FixChip onClick={() => openCorrection(r)} title={blank === 'both' ? addDayTitle : undefined} />
+                  ) : blank === 'out' ? (
+                    <FixChip onClick={() => openCorrection(r)} />
                   ) : (
                     <EditablePunch onClick={() => openCorrection(r)}>
                       <CheckOutCell row={r} />
