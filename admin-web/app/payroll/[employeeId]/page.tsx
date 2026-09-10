@@ -100,14 +100,13 @@ function PayrollEmployeeDetailView() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
   // Which pay basis this page shows — carried on the link from the Payroll
-  // report so the two always agree. Falls back to the company's own default
-  // (per-day for the Staff Salary Sheet customer, per-hour for everyone else)
-  // when opened without it.
+  // report so the two always agree. Falls back to per-hour (duration: pay is
+  // built from the time between check-in and check-out, so a day with no
+  // check-out earns nothing) when opened without it.
   const modeParam = searchParams.get('mode');
   const linkedMode: SalaryMode | null =
     modeParam === 'hourly' || modeParam === 'daily' || modeParam === 'flat' ? modeParam : null;
-  const [defaultMode, setDefaultMode] = useState<SalaryMode>('hourly');
-  const salaryMode: SalaryMode = linkedMode ?? defaultMode;
+  const salaryMode: SalaryMode = linkedMode ?? 'hourly';
   // The fixed-salary customer's Net has no PF and never nets out the employer
   // SSF — keyed off the company, not the pay-basis mode.
   const [isStaffSheet, setIsStaffSheet] = useState(false);
@@ -132,9 +131,9 @@ function PayrollEmployeeDetailView() {
 
   useEffect(() => {
     fetchCompanyPayrollFormat().then(f => {
-      const sheet = f === 'staff_salary_sheet';
-      setIsStaffSheet(sheet);
-      setDefaultMode(sheet ? 'daily' : 'hourly');
+      // Only affects Net Payable (the fixed-salary customer nets out no PF /
+      // employer SSF). The pay basis is per-hour for everyone now.
+      setIsStaffSheet(f === 'staff_salary_sheet');
     });
     fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, pfRate, ssfRate, tdsRate, overtimeRate }) => {
       setWeeklyOffDay(weeklyOffDay);
@@ -221,12 +220,16 @@ function PayrollEmployeeDetailView() {
     [daysInRange, weekOffDates]
   );
 
-  // The per-day rate the pay is built from — Basic ÷ working days (or, in
-  // flat mode, that same even slice). Shown for reference next to My Salary.
+  // The rate the pay is built from, shown for reference next to My Salary:
+  // Basic ÷ working days in per-day mode, Basic ÷ (working days × hours/day)
+  // in per-hour mode.
   const salaryPerDay = useMemo(
     () => (employee?.salary != null ? employee.salary / workingDays : null),
     [employee, workingDays]
   );
+  const perUnitRate = salaryMode === 'hourly' ? (salaryPerDay != null ? salaryPerDay / otHoursPerDay : null) : salaryPerDay;
+  const perUnitSuffix = salaryMode === 'hourly' ? '/hr' : '/day';
+  const perUnitHeader = salaryMode === 'hourly' ? 'Rate / Hr' : 'Salary / Day';
 
   const leaveDates = useMemo(() => {
     const set = new Set<string>();
@@ -345,7 +348,7 @@ function PayrollEmployeeDetailView() {
 
   function exportCsv() {
     if (!employee) return;
-    const header = ['Date', 'In', 'Out', 'Total Hours', 'Overtime', 'Late In (min)', 'Early In (min)', 'Early Out (min)', 'Late Out (min)', 'Status', 'Salary/Day', 'My Salary', 'OT Salary', 'Total Salary'];
+    const header = ['Date', 'In', 'Out', 'Total Hours', 'Overtime', 'Late In (min)', 'Early In (min)', 'Early Out (min)', 'Late Out (min)', 'Status', salaryMode === 'hourly' ? 'Rate/Hr' : 'Salary/Day', 'My Salary', 'OT Salary', 'Total Salary'];
     const lines = dayRows.map(d => {
       const earning = earningOf(d);
       return [
@@ -359,7 +362,7 @@ function PayrollEmployeeDetailView() {
         d.earlyMinutes || '',
         d.lateDepartureMinutes || '',
         d.checkIn ? 'Present' : d.status,
-        salaryPerDay != null ? Math.round(salaryPerDay) : '',
+        perUnitRate != null ? Math.round(perUnitRate) : '',
         earning ? Math.round(earning.base) : '',
         earning ? Math.round(earning.overtime) : '',
         earning ? Math.round(earning.total) : '',
@@ -431,7 +434,7 @@ function PayrollEmployeeDetailView() {
               <span className="text-xs font-medium text-accent/80">My Salary</span>
               <div className="mt-1 text-base font-bold text-accent">{Math.round(dayTotals.mySalary).toLocaleString()}</div>
               <div className="mt-0.5 text-[11px] text-accent/70">
-                {salaryPerDay != null ? `${Math.round(salaryPerDay).toLocaleString()}/day · ` : ''}
+                {perUnitRate != null ? `${Math.round(perUnitRate).toLocaleString()}${perUnitSuffix} · ` : ''}
                 {workingDays} working days
               </div>
             </div>
@@ -618,7 +621,7 @@ function PayrollEmployeeDetailView() {
                     <th className="whitespace-nowrap px-3 py-2 font-medium">Check-In</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">Check-Out</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">Status</th>
-                    <th className="whitespace-nowrap px-3 py-2 font-medium">Salary/Day</th>
+                    <th className="whitespace-nowrap px-3 py-2 font-medium">{perUnitHeader}</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">My Salary</th>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">OT Salary</th>
                     <th className="sticky right-0 z-20 whitespace-nowrap bg-slate-50 px-3 py-2 font-medium shadow-[-6px_0_6px_-4px_rgba(0,0,0,0.08)] print:static print:shadow-none">
@@ -658,7 +661,7 @@ function PayrollEmployeeDetailView() {
                         </td>
                         <td className="px-3 py-2">{statusBadge(d)}</td>
                         <td className="px-3 py-2 text-slate-600">
-                          {salaryPerDay != null ? Math.round(salaryPerDay).toLocaleString() : '—'}
+                          {perUnitRate != null ? Math.round(perUnitRate).toLocaleString() : '—'}
                         </td>
                         <td className="px-3 py-2 text-slate-600">{earning ? Math.round(earning.base).toLocaleString() : '—'}</td>
                         <td className="px-3 py-2 text-slate-600">{earning ? Math.round(earning.overtime).toLocaleString() : '—'}</td>

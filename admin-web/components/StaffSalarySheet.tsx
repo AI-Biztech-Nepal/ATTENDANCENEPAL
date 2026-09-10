@@ -223,8 +223,10 @@ export default function StaffSalarySheet() {
   // Payroll report links to. This sheet carries no overtime settings, so
   // that page falls back to its own 8h/1.5x defaults.
   function detailHref(id: string) {
-    // The breakdown page opens on the same per-day basis this sheet counts on.
-    const params = new URLSearchParams({ start: period.start, end: period.end, mode: 'daily' });
+    // The breakdown page pays on a duration basis — hours between check-in and
+    // check-out — so a day with no check-out earns nothing there. This sheet's
+    // own earned-Basic column stays day-based; the two intentionally differ.
+    const params = new URLSearchParams({ start: period.start, end: period.end, mode: 'hourly' });
     return `/payroll/${id}?${params.toString()}`;
   }
 
