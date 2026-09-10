@@ -45,6 +45,12 @@ export default function SalaryStructurePage() {
 
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  // Oldest/newest punch on record — bounds the month picker to periods that
+  // actually have attendance, same as the Payroll report, so it stops
+  // offering months from before this company had any data (the figures are
+  // the fixed salary structure, identical every month, which made picking a
+  // pre-data month look like the app was inventing numbers for it).
+  const [dataRange, setDataRange] = useState<{ earliest: Date; latest: Date } | null>(null);
 
   // Saved rates (what's in the DB) vs the draft strings the header inputs
   // edit. The table previews with the draft so editing recalculates live;
@@ -89,7 +95,7 @@ export default function SalaryStructurePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [system]);
 
-  const periodOptions = useMemo(() => buildPeriodOptions(system, null, period), [system, period]);
+  const periodOptions = useMemo(() => buildPeriodOptions(system, dataRange, period), [system, dataRange, period]);
   const { start, end } = period;
 
   useEffect(() => {
@@ -109,6 +115,15 @@ export default function SalaryStructurePage() {
     });
 
     supabase.from('branches').select('*').then(({ data }) => setBranches(data ?? []));
+
+    Promise.all([
+      supabase.from('attendance_logs').select('punch_time').order('punch_time', { ascending: true }).limit(1),
+      supabase.from('attendance_logs').select('punch_time').order('punch_time', { ascending: false }).limit(1),
+    ]).then(([earliestRes, latestRes]) => {
+      const earliest = earliestRes.data?.[0]?.punch_time;
+      const latest = latestRes.data?.[0]?.punch_time;
+      if (earliest && latest) setDataRange({ earliest: new Date(earliest), latest: new Date(latest) });
+    });
 
     supabase
       .from('employees')
@@ -521,7 +536,7 @@ export default function SalaryStructurePage() {
         </div>
 
         <div className="border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs text-slate-500 sm:px-6 print:hidden">
-          {modeLine} · click an employee for their full breakdown
+          {modeLine} · the contracted structure, the same every month — a month&rsquo;s actual attendance-adjusted pay is on the Payroll report · click an employee for their breakdown
           {!isAdmin && <> · the PF / SSF by Employer / SSF by Employee / Overtime rates are read-only for your role — an admin sets them here.</>}
         </div>
 
