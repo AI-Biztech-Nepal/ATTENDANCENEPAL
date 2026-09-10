@@ -337,7 +337,11 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         // would freeze today's attendance at whatever it looked like the
         // moment it was last computed. Always compute today live instead;
         // past days' summaries are final and safe to trust.
-        const summary = day === today ? undefined : summaries.find(s => s.employee_id === emp.id && s.work_date === day);
+        const rawSummary = summaries.find(s => s.employee_id === emp.id && s.work_date === day);
+        // Today normally recomputes live (its nightly summary is stale — more
+        // punches can still land), but a manual admin correction is a
+        // deliberate override and must stick, today included.
+        const summary = day !== today || rawSummary?.manually_corrected ? rawSummary : undefined;
         const dayLogs = (logsByEmployeeDay.get(emp.id)?.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
         const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
         const shiftName = isWeekOff(resolved) ? 'Week Off' : resolved.name;
@@ -472,12 +476,13 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     return { workHours, overtimeHours, presentDays, absentDays };
   }, [rows]);
 
-  // Which side of a past, one-punch day is missing — the only rows that get
-  // a Fix chip. Week Off / Leave / Absent (no punches at all) and today
-  // (a missing check-out isn't a gap yet) are excluded.
+  // Which side of a one-punch day is missing — the only rows that get a Fix
+  // chip. Week Off / Leave / Absent (no punches at all) and future days are
+  // excluded; today IS correctable (someone who forgot to punch out is
+  // already a gap the admin may want to close).
   const reportToday = nepalTodayIso();
   function missingPunch(r: Row): 'in' | 'out' | null {
-    if (r.date >= reportToday) return null;
+    if (r.date > reportToday) return null;
     if (r.status !== 'Present' && r.status !== 'Late') return null;
     if (r.checkIn && !r.checkOut) return 'out';
     if (!r.checkIn && r.checkOut) return 'in';
