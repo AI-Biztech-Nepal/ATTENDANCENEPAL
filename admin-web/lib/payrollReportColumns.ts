@@ -27,8 +27,11 @@ export type PayrollReportColumns = {
 };
 
 export const DEFAULT_PAYROLL_REPORT_COLUMNS: PayrollReportColumns = {
+  // Worked Days is the figure people actually check; Total Hours is a second,
+  // noisier cut of the same attendance and starts hidden. Both are one tap
+  // away in the column cog.
   workedDays: true,
-  totalHours: true,
+  totalHours: false,
   overtime: true,
   lateEarly: true,
   deductions: true,
@@ -41,10 +44,11 @@ export const PAYROLL_REPORT_COLUMNS_KEY = 'payrollReportColumns';
 
 /** Coerce anything (a parsed localStorage blob, possibly stale or partial)
  * into a full PayrollReportColumns — each missing/!boolean key falls back to
- * shown. */
+ * its default (all shown except Total Hours). */
 export function normalizePayrollReportColumns(raw: unknown): PayrollReportColumns {
   const obj = (raw ?? {}) as Record<string, unknown>;
-  const pick = (k: keyof PayrollReportColumns) => (typeof obj[k] === 'boolean' ? (obj[k] as boolean) : true);
+  const pick = (k: keyof PayrollReportColumns) =>
+    typeof obj[k] === 'boolean' ? (obj[k] as boolean) : DEFAULT_PAYROLL_REPORT_COLUMNS[k];
   return {
     workedDays: pick('workedDays'),
     totalHours: pick('totalHours'),
