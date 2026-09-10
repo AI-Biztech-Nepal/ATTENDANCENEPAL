@@ -504,13 +504,13 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     return { workHours, overtimeHours, presentDays, absentDays };
   }, [rows]);
 
-  // In Correction mode every past/today day the employee actually attended is
-  // correctable — either end, whether it's blank or just wrong. Week Off /
-  // Leave / Absent (no punches to base a correction on) and future days are
-  // excluded; today counts (someone who forgot to punch out is already a gap).
+  // In Correction mode a day the employee actually attended is correctable —
+  // either end, whether it's blank or just wrong. Only days BEFORE today: an
+  // open check-out on today isn't a gap yet (they may still punch out), and
+  // Week Off / Leave / Absent days have no punch to base a correction on.
   const reportToday = nepalTodayIso();
   function correctable(r: Row): boolean {
-    if (r.date > reportToday) return false;
+    if (r.date >= reportToday) return false;
     if (r.status !== 'Present' && r.status !== 'Late') return false;
     return !!(r.checkIn || r.checkOut);
   }
