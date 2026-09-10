@@ -92,6 +92,34 @@ function FixChip({ onClick }: { onClick: () => void }) {
   );
 }
 
+/** Wraps a Check-In / Check-Out time that IS on record but is still editable
+ * in Correction mode — a click opens the same correction dialog. Subtle: the
+ * time reads normally, a pencil fades in on hover. */
+function EditablePunch({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Correct this day"
+      className="group -mx-1 inline-flex items-center gap-1 rounded px-1 transition-colors hover:bg-accent/10 print:mx-0 print:px-0 print:hover:bg-transparent"
+    >
+      {children}
+      <svg
+        viewBox="0 0 24 24"
+        className="h-2.5 w-2.5 shrink-0 text-slate-400 opacity-0 transition-opacity group-hover:opacity-100 print:hidden"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+      </svg>
+    </button>
+  );
+}
+
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 /** 'YYYY-MM-DD' (always the AD key, whatever calendar is being displayed)
@@ -476,23 +504,29 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     return { workHours, overtimeHours, presentDays, absentDays };
   }, [rows]);
 
-  // Which side of a one-punch day is missing — the only rows that get a Fix
-  // chip. Week Off / Leave / Absent (no punches at all) and future days are
-  // excluded; today IS correctable (someone who forgot to punch out is
-  // already a gap the admin may want to close).
+  // In Correction mode every past/today day the employee actually attended is
+  // correctable — either end, whether it's blank or just wrong. Week Off /
+  // Leave / Absent (no punches to base a correction on) and future days are
+  // excluded; today counts (someone who forgot to punch out is already a gap).
   const reportToday = nepalTodayIso();
-  function missingPunch(r: Row): 'in' | 'out' | null {
-    if (r.date > reportToday) return null;
-    if (r.status !== 'Present' && r.status !== 'Late') return null;
+  function correctable(r: Row): boolean {
+    if (r.date > reportToday) return false;
+    if (r.status !== 'Present' && r.status !== 'Late') return false;
+    return !!(r.checkIn || r.checkOut);
+  }
+  /** Which end is BLANK on a one-punch day — that cell gets the Fix chip
+   * instead of a clickable time. Null when both ends have a punch. */
+  function blankPunch(r: Row): 'in' | 'out' | null {
+    if (!correctable(r)) return null;
     if (r.checkIn && !r.checkOut) return 'out';
     if (!r.checkIn && r.checkOut) return 'in';
     return null;
   }
 
-  const incompleteCount = useMemo(() => rows.filter(r => missingPunch(r)).length, [rows, reportToday]);
+  const incompleteCount = useMemo(() => rows.filter(r => blankPunch(r)).length, [rows, reportToday]);
 
   function openCorrection(r: Row) {
-    if (!missingPunch(r)) return;
+    if (!correctable(r)) return;
     setFixError(null);
     setFixForm({
       checkIn: r.checkIn ? punchHhmm(r.checkIn) : r.shiftStart ?? '09:00',
@@ -734,15 +768,16 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           </thead>
           <tbody>
             {rows.map(r => {
-              const miss = correctionMode ? missingPunch(r) : null;
+              const canFix = correctionMode && correctable(r);
+              const blank = canFix ? blankPunch(r) : null;
               return (
-              <tr key={r.key} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${miss ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}>
+              <tr key={r.key} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${blank ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}>
                 {/* Numeric date (22/05/2083) rather than the spelled-out
                     "22 Bhadra 2083" — the month name is the same on every
                     row and the range is already named in the header, so the
                     words only cost width. The Day column beside it is what
                     makes a date scannable in practice. */}
-                <td className={`w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${miss ? 'border-l-2 border-l-warning' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
+                <td className={`w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${blank ? 'border-l-2 border-l-warning' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
                 <td className="whitespace-nowrap px-2 py-1 font-medium text-ink print:border print:border-slate-400 print:px-2 print:py-1">{r.employeeName}</td>
@@ -753,10 +788,26 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   </span>
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
-                  {miss === 'in' ? <FixChip onClick={() => openCorrection(r)} /> : <CheckInCell row={r} />}
+                  {!canFix ? (
+                    <CheckInCell row={r} />
+                  ) : blank === 'in' ? (
+                    <FixChip onClick={() => openCorrection(r)} />
+                  ) : (
+                    <EditablePunch onClick={() => openCorrection(r)}>
+                      <CheckInCell row={r} />
+                    </EditablePunch>
+                  )}
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
-                  {miss === 'out' ? <FixChip onClick={() => openCorrection(r)} /> : <CheckOutCell row={r} />}
+                  {!canFix ? (
+                    <CheckOutCell row={r} />
+                  ) : blank === 'out' ? (
+                    <FixChip onClick={() => openCorrection(r)} />
+                  ) : (
+                    <EditablePunch onClick={() => openCorrection(r)}>
+                      <CheckOutCell row={r} />
+                    </EditablePunch>
+                  )}
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-[10px] print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   <LateEarlyCell row={r} />
@@ -878,8 +929,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               </div>
             </div>
             <p className="mt-1.5 text-[11px] text-slate-400">
-              The punch on record is filled in; the missing side is pre-set to the shift boundary. Adjust it if the real
-              time is known.
+              Both times are pre-filled — from the punches on record, or the shift boundary where one is missing. Change
+              whichever is wrong; both are needed for the day to recalculate.
             </p>
 
             <div className="mt-3">
