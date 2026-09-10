@@ -16,7 +16,9 @@ import {
   formatHoursMinutes,
   isWeekOff,
   nepalDateKey,
+  nepalDateTimeToUtcMs,
   nepalTodayIso,
+  punchMinuteOfDay,
   resolveShiftForDate,
   type DailyShiftByDate,
 } from '@/lib/shift';
@@ -27,9 +29,14 @@ import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 type Row = {
   key: string;
   date: string;
+  employeeId: string;
   enrollId: string;
   employeeName: string;
   device: string;
+  /** The resolved shift's start / end as "HH:MM" — null on a Week Off. Used
+   * to pre-fill the missing side when correcting a one-punch day. */
+  shiftStart: string | null;
+  shiftEnd: string | null;
   /** "Name (HH:MM–HH:MM)" — one string, still what the CSV export writes. */
   shiftLabel: string;
   /** The same shift split in two so the column can stack them on separate
@@ -58,6 +65,31 @@ function fmtHrs(hours: number) {
 /** Punch timestamp -> "HH:MM" (24h). */
 function fmtPunch(iso: string | null) {
   return iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '–:–';
+}
+
+/** Punch timestamp -> "HH:MM" in Nepal local time, for the correction form's
+ * time inputs — same conversion payroll uses, not the viewer's clock. */
+function punchHhmm(iso: string) {
+  const m = punchMinuteOfDay(iso);
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+/** The inline "Fix" affordance shown in an empty Check-In / Check-Out cell
+ * when Correction mode is on and the day has one punch but not the other. */
+function FixChip({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Add correction — missed punch"
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-accent/50 bg-accent/5 px-1.5 py-0.5 text-[11px] font-semibold text-good-text transition-colors hover:border-solid hover:border-accent hover:bg-accent-light print:hidden"
+    >
+      <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth={2.75} strokeLinecap="round">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      Fix
+    </button>
+  );
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -182,6 +214,17 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Correction mode: an admin-only view toggle. Off = the standard report;
+  // on = a "Fix" chip in the empty punch cell of any past one-punch day,
+  // opening a direct correction that applies immediately (no approval — see
+  // saveCorrection). `refreshTick` re-pulls the day's data after one lands.
+  const [correctionMode, setCorrectionMode] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [fixRow, setFixRow] = useState<Row | null>(null);
+  const [fixForm, setFixForm] = useState({ checkIn: '', checkOut: '', reason: '' });
+  const [fixSaving, setFixSaving] = useState(false);
+  const [fixError, setFixError] = useState<string | null>(null);
+
   useEffect(() => {
     supabase
       .from('employees')
@@ -219,7 +262,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       setLeaveRequests(leaveRes.data ?? []);
       setLoading(false);
     });
-  }, [from, to]);
+  }, [from, to, refreshTick]);
 
   const scopedEmployees = useMemo(
     () => (employeeId === 'all' ? employees : employees.filter(e => e.id === employeeId)),
@@ -298,10 +341,11 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         const dayLogs = (logsByEmployeeDay.get(emp.id)?.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
         const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
         const shiftName = isWeekOff(resolved) ? 'Week Off' : resolved.name;
-        const shiftTime = isWeekOff(resolved)
-          ? null
-          : `${resolved.start_time.slice(0, 5)}–${resolved.end_time.slice(0, 5)}`;
+        const shiftStart = isWeekOff(resolved) ? null : resolved.start_time.slice(0, 5);
+        const shiftEnd = isWeekOff(resolved) ? null : resolved.end_time.slice(0, 5);
+        const shiftTime = shiftStart && shiftEnd ? `${shiftStart}–${shiftEnd}` : null;
         const shiftLabel = shiftTime ? `${shiftName} (${shiftTime})` : shiftName;
+        const rowBase = { employeeId: emp.id, shiftStart, shiftEnd };
 
         // Early-arrival / late-departure aren't stored on the summary row —
         // derive them live from check_in/check_out against the shift.
@@ -312,6 +356,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
         if (summary && summary.check_in) {
           out.push({
+            ...rowBase,
             key: `${emp.id}-${day}`,
             date: day,
             enrollId: emp.fingerprint_id ?? '—',
@@ -338,6 +383,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           // instead of leaving them blank until that job runs.
           const live = computeDayStatusForResolvedShift(dayLogs, resolved);
           out.push({
+            ...rowBase,
             key: `${emp.id}-${day}`,
             date: day,
             enrollId: emp.fingerprint_id ?? '—',
@@ -373,6 +419,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           const isOnLeave = leaveByEmployee.get(emp.id)?.has(day);
           const isOnWeekOff = weekOffDateSet.has(day) || isWeekOff(resolved);
           out.push({
+            ...rowBase,
             key: `${emp.id}-${day}`,
             date: day,
             enrollId: emp.fingerprint_id ?? '—',
@@ -424,6 +471,76 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     const absentDays = rows.filter(r => r.status === 'Absent').length;
     return { workHours, overtimeHours, presentDays, absentDays };
   }, [rows]);
+
+  // Which side of a past, one-punch day is missing — the only rows that get
+  // a Fix chip. Week Off / Leave / Absent (no punches at all) and today
+  // (a missing check-out isn't a gap yet) are excluded.
+  const reportToday = nepalTodayIso();
+  function missingPunch(r: Row): 'in' | 'out' | null {
+    if (r.date >= reportToday) return null;
+    if (r.status !== 'Present' && r.status !== 'Late') return null;
+    if (r.checkIn && !r.checkOut) return 'out';
+    if (!r.checkIn && r.checkOut) return 'in';
+    return null;
+  }
+
+  const incompleteCount = useMemo(() => rows.filter(r => missingPunch(r)).length, [rows, reportToday]);
+
+  function openCorrection(r: Row) {
+    if (!missingPunch(r)) return;
+    setFixError(null);
+    setFixForm({
+      checkIn: r.checkIn ? punchHhmm(r.checkIn) : r.shiftStart ?? '09:00',
+      checkOut: r.checkOut ? punchHhmm(r.checkOut) : r.shiftEnd ?? '17:00',
+      reason: '',
+    });
+    setFixRow(r);
+  }
+
+  // A direct admin correction: create the request row and immediately apply
+  // it through the same approve_attendance_correction() the Corrections page
+  // runs on an employee's request — recalculates the day's hours/late/early/
+  // overtime and locks it (manually_corrected) against the nightly recompute.
+  // No pending state, no second person: the reviewer is the admin doing it.
+  async function saveCorrection() {
+    if (!fixRow) return;
+    setFixError(null);
+    if (!fixForm.checkIn || !fixForm.checkOut) {
+      setFixError('Enter both a check-in and a check-out time.');
+      return;
+    }
+    const inTs = new Date(nepalDateTimeToUtcMs(fixRow.date, fixForm.checkIn)).toISOString();
+    const outTs = new Date(nepalDateTimeToUtcMs(fixRow.date, fixForm.checkOut)).toISOString();
+    if (outTs <= inTs) {
+      setFixError('Check-out must be after check-in.');
+      return;
+    }
+    setFixSaving(true);
+    const { data: inserted, error: insertError } = await supabase
+      .from('attendance_correction_requests')
+      .insert({
+        employee_id: fixRow.employeeId,
+        work_date: fixRow.date,
+        requested_check_in: inTs,
+        requested_check_out: outTs,
+        reason: fixForm.reason.trim() || null,
+      })
+      .select('id')
+      .single();
+    if (insertError || !inserted) {
+      setFixSaving(false);
+      setFixError(insertError?.message ?? 'Could not save the correction.');
+      return;
+    }
+    const { error: applyError } = await supabase.rpc('approve_attendance_correction', { p_request_id: inserted.id });
+    setFixSaving(false);
+    if (applyError) {
+      setFixError(`Saved, but applying it failed: ${applyError.message}`);
+      return;
+    }
+    setFixRow(null);
+    setRefreshTick(t => t + 1);
+  }
 
   function exportCsv() {
     const header = [
@@ -532,6 +649,46 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </div>
           </div>
 
+          {/* Correction mode — off is the standard report; on surfaces a Fix
+              chip on every past one-punch day for a direct admin correction. */}
+          <button
+            type="button"
+            onClick={() => setCorrectionMode(v => !v)}
+            title={
+              correctionMode
+                ? 'Correction mode on — click a Fix chip to correct a missed punch'
+                : `Turn on to fix missed punches inline${incompleteCount ? ` (${incompleteCount} in this range)` : ''}`
+            }
+            className={`flex items-center gap-2 self-end rounded-md border px-2.5 py-1.5 text-xs font-semibold shadow-sm transition-colors ${
+              correctionMode
+                ? 'border-accent/40 bg-accent-light text-good-text'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <CorrectionIcon className={`h-3.5 w-3.5 ${correctionMode ? 'text-good-text' : 'text-slate-400'}`} />
+            Correction
+            {incompleteCount > 0 && (
+              <span
+                className={`rounded-full px-1.5 py-px text-[10px] font-bold ${
+                  correctionMode ? 'bg-white/70 text-good-text' : 'bg-warning-bg text-warning-text'
+                }`}
+              >
+                {incompleteCount}
+              </span>
+            )}
+            <span
+              className={`ml-0.5 inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
+                correctionMode ? 'bg-accent' : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
+                  correctionMode ? 'translate-x-3.5' : 'translate-x-0.5'
+                }`}
+              />
+            </span>
+          </button>
+
           <TableExportBar onExportCsv={exportCsv} />
         </div>
       </div>
@@ -571,14 +728,16 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={r.key} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent">
+            {rows.map(r => {
+              const miss = correctionMode ? missingPunch(r) : null;
+              return (
+              <tr key={r.key} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${miss ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}>
                 {/* Numeric date (22/05/2083) rather than the spelled-out
                     "22 Bhadra 2083" — the month name is the same on every
                     row and the range is already named in the header, so the
                     words only cost width. The Day column beside it is what
                     makes a date scannable in practice. */}
-                <td className="w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{formatDdMmYyyy(r.date, system)}</td>
+                <td className={`w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${miss ? 'border-l-2 border-l-warning' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
                 <td className="whitespace-nowrap px-2 py-1 font-medium text-ink print:border print:border-slate-400 print:px-2 print:py-1">{r.employeeName}</td>
@@ -589,10 +748,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   </span>
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
-                  <CheckInCell row={r} />
+                  {miss === 'in' ? <FixChip onClick={() => openCorrection(r)} /> : <CheckInCell row={r} />}
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
-                  <CheckOutCell row={r} />
+                  {miss === 'out' ? <FixChip onClick={() => openCorrection(r)} /> : <CheckOutCell row={r} />}
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-[10px] print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   <LateEarlyCell row={r} />
@@ -609,7 +768,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 </td>
                 <td className="whitespace-nowrap print-wrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-[8px] print:text-ink">{r.device}</td>
               </tr>
-            ))}
+              );
+            })}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={12} className="px-4 py-6 text-center text-slate-400">
@@ -651,7 +811,127 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         </table>
         </div>
       </div>
+
+      {fixRow && (
+        <div
+          className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 sm:p-8 print:hidden"
+          onClick={() => !fixSaving && setFixRow(null)}
+        >
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-ink">Correct this day</h3>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              An admin edit — it applies straight away, no approval step. The day&apos;s hours, late/early and overtime
+              recalculate on save and the day is locked so the nightly recompute won&apos;t undo it.
+            </p>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div className="mb-1 text-xs font-medium text-slate-600">Employee</div>
+                <div className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-slate-600">
+                  <LockIcon className="h-3 w-3 shrink-0 text-slate-400" />
+                  <span className="truncate">
+                    {fixRow.employeeName}
+                    <span className="text-slate-400"> · ID {fixRow.enrollId}</span>
+                  </span>
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-medium text-slate-600">Work date</div>
+                <div className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-slate-600">
+                  <LockIcon className="h-3 w-3 shrink-0 text-slate-400" />
+                  <span className="truncate">{formatDdMmYyyy(fixRow.date, system)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Check-in{!fixRow.checkIn && <span className="text-warning-text"> — missing</span>}
+                </label>
+                <input
+                  type="time"
+                  value={fixForm.checkIn}
+                  onChange={e => setFixForm(f => ({ ...f, checkIn: e.target.value }))}
+                  className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 ${
+                    fixRow.checkIn ? 'border-slate-200' : 'border-warning ring-2 ring-warning/20'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-600">
+                  Check-out{!fixRow.checkOut && <span className="text-warning-text"> — missing</span>}
+                </label>
+                <input
+                  type="time"
+                  value={fixForm.checkOut}
+                  onChange={e => setFixForm(f => ({ ...f, checkOut: e.target.value }))}
+                  className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 ${
+                    fixRow.checkOut ? 'border-slate-200' : 'border-warning ring-2 ring-warning/20'
+                  }`}
+                />
+              </div>
+            </div>
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              The punch on record is filled in; the missing side is pre-set to the shift boundary. Adjust it if the real
+              time is known.
+            </p>
+
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                Reason <span className="font-normal text-slate-400">(optional)</span>
+              </label>
+              <input
+                value={fixForm.reason}
+                onChange={e => setFixForm(f => ({ ...f, reason: e.target.value }))}
+                placeholder="e.g. forgot to punch out"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+              />
+            </div>
+
+            {fixError && <p className="mt-3 text-sm text-critical">{fixError}</p>}
+
+            <div className="mt-5 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-400">Recorded as corrected by you</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setFixRow(null)}
+                  disabled={fixSaving}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveCorrection}
+                  disabled={fixSaving}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
+                >
+                  {fixSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+function CorrectionIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function LockIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
   );
 }
 
