@@ -249,7 +249,11 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const [correctionMode, setCorrectionMode] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [fixRow, setFixRow] = useState<Row | null>(null);
-  const [fixForm, setFixForm] = useState({ checkIn: '', checkOut: '', reason: '' });
+  // checkOutNextDay: the check-out falls on the morning after work_date — an
+  // overnight / 24-hour duty (09:00 -> 08:00). Without it both times were
+  // built on work_date, so such a duty was always rejected as "check-out
+  // before check-in", or saved as a few minutes' work.
+  const [fixForm, setFixForm] = useState({ checkIn: '', checkOut: '', checkOutNextDay: false, reason: '' });
   const [fixSaving, setFixSaving] = useState(false);
   const [fixError, setFixError] = useState<string | null>(null);
 
@@ -547,11 +551,29 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   function openCorrection(r: Row) {
     if (!correctable(r)) return;
     setFixError(null);
-    setFixForm({
-      checkIn: r.checkIn ? punchHhmm(r.checkIn) : r.shiftStart ?? '09:00',
-      checkOut: r.checkOut ? punchHhmm(r.checkOut) : r.shiftEnd ?? '17:00',
-      reason: '',
-    });
+    const overnight = !!(r.shiftStart && r.shiftEnd && r.shiftEnd <= r.shiftStart);
+    // A tap-out-only overnight duty: the one punch on record is dated the
+    // NEXT morning, so it is really this duty's check-out — the check-in was
+    // never punched. compute_payroll_summaries() stores it as check_in only
+    // because it is the day's sole punch. Offer it as the check-out and the
+    // shift start as the check-in, rather than pre-filling a next-morning
+    // time into the check-in box.
+    const soleNextMorningPunch = !!(r.checkIn && !r.checkOut && nepalDateKey(r.checkIn) > r.date);
+    if (soleNextMorningPunch) {
+      setFixForm({
+        checkIn: r.shiftStart ?? '09:00',
+        checkOut: punchHhmm(r.checkIn!),
+        checkOutNextDay: true,
+        reason: '',
+      });
+    } else {
+      setFixForm({
+        checkIn: r.checkIn ? punchHhmm(r.checkIn) : r.shiftStart ?? '09:00',
+        checkOut: r.checkOut ? punchHhmm(r.checkOut) : r.shiftEnd ?? '17:00',
+        checkOutNextDay: r.checkOut ? nepalDateKey(r.checkOut) > r.date : overnight,
+        reason: '',
+      });
+    }
     setFixRow(r);
   }
 
@@ -567,10 +589,17 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       setFixError('Enter both a check-in and a check-out time.');
       return;
     }
+    const outDate = fixForm.checkOutNextDay
+      ? new Date(Date.parse(`${fixRow.date}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)
+      : fixRow.date;
     const inTs = new Date(nepalDateTimeToUtcMs(fixRow.date, fixForm.checkIn)).toISOString();
-    const outTs = new Date(nepalDateTimeToUtcMs(fixRow.date, fixForm.checkOut)).toISOString();
+    const outTs = new Date(nepalDateTimeToUtcMs(outDate, fixForm.checkOut)).toISOString();
     if (outTs <= inTs) {
-      setFixError('Check-out must be after check-in.');
+      setFixError(
+        fixForm.checkOutNextDay
+          ? 'Check-out must be after check-in.'
+          : 'Check-out must be after check-in — tick "Next day" if they left the following morning.'
+      );
       return;
     }
     setFixSaving(true);
@@ -969,6 +998,16 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                     fixRow.checkOut ? 'border-slate-200' : 'border-warning ring-2 ring-warning/20'
                   }`}
                 />
+                <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={fixForm.checkOutNextDay}
+                    onChange={e => setFixForm(f => ({ ...f, checkOutNextDay: e.target.checked }))}
+                    className="h-3.5 w-3.5 rounded border-slate-300"
+                  />
+                  Next day
+                  <span className="text-slate-400">— left the following morning (overnight duty)</span>
+                </label>
               </div>
             </div>
             <p className="mt-1.5 text-[11px] text-slate-400">
