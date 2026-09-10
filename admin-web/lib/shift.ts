@@ -202,10 +202,33 @@ export function punchMinuteOfDay(iso: string) {
  *
  * Legacy break punches ('2'/'3', no longer created) are filtered out first —
  * one could otherwise be mistaken for the day's check-out. */
+/** Minimum gap between two punches for the second to count — a read inside
+ * this window is a mis-tap (the scanner double-firing, or a stray opposite
+ * punch seconds after arriving) and is dropped. Without this, two same-minute
+ * punches become a check-in + an instant check-out and zero the day's pay.
+ * Mirrors the reject_rapid_duplicate_punch DB trigger. */
+export const PUNCH_DEDUP_MINUTES = 15;
+
+/** Drop any punch that lands within PUNCH_DEDUP_MINUTES of the previous KEPT
+ * punch (the window resets to each punch that survives). */
+export function dedupePunches(sorted: AttendanceLog[]): AttendanceLog[] {
+  const gapMs = PUNCH_DEDUP_MINUTES * 60 * 1000;
+  const kept: AttendanceLog[] = [];
+  for (const l of sorted) {
+    const prev = kept[kept.length - 1];
+    if (!prev || new Date(l.punch_time).getTime() - new Date(prev.punch_time).getTime() >= gapMs) {
+      kept.push(l);
+    }
+  }
+  return kept;
+}
+
 export function selectDayPunches(logs: AttendanceLog[]): { checkIn: AttendanceLog; checkOut: AttendanceLog | null } {
-  const sorted = logs
-    .filter(l => l.punch_type !== '2' && l.punch_type !== '3')
-    .sort((a, b) => a.punch_time.localeCompare(b.punch_time));
+  const sorted = dedupePunches(
+    logs
+      .filter(l => l.punch_type !== '2' && l.punch_type !== '3')
+      .sort((a, b) => a.punch_time.localeCompare(b.punch_time))
+  );
   const checkIn = sorted.find(l => l.punch_type === '0') ?? sorted[0];
   const outCandidates = sorted.filter(l => l.punch_type === '1');
   const checkOut = outCandidates.length
