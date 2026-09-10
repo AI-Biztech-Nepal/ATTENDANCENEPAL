@@ -429,7 +429,7 @@ export default function SalaryStructurePage() {
       onToggle={toggleReportCol}
       options={STRUCTURE_COLUMN_OPTIONS}
       title="Salary Structure columns"
-      description="Hides the column here and in the printed / Excel copy. Net Payable still deducts PF and SSF either way — hide them when a rate is 0 and the column is a row of zeroes. Hiding Overtime does take the allowance out of Net Payable, and out of the Payroll report."
+      description="Hides the column here and in the printed / Excel copy. Net Payable still deducts PF and SSF either way — hide them when a rate is 0 and the column is a row of zeroes. Overtime is the company-wide switch for overtime pay: turning it off drops the allowance from Net Payable and the Payroll report, and stops every employee's breakdown page counting attendance-based overtime."
     />
   ) : null;
 

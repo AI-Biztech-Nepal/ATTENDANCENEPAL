@@ -18,6 +18,12 @@ import {
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
 import { buildEmployeeDayRows, dailySalaryEarning } from '@/lib/payrollDetail';
+import {
+  DEFAULT_PAYROLL_REPORT_COLUMNS,
+  loadPayrollReportColumns,
+  normalizePayrollReportColumns,
+  PAYROLL_REPORT_COLUMNS_KEY,
+} from '@/lib/payrollReportColumns';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
@@ -62,6 +68,24 @@ function SalaryStructureEmployeeView() {
   const [rates, setRates] = useState({ pf: 10, ssf: 11, tds: 0, overtime: 0 });
   const [config, setConfig] = useState({ weeklyOffDay: null as number | null, otHoursPerDay: 8, otMultiplier: 1.5 });
   const [loading, setLoading] = useState(true);
+
+  // Whether attendance-based overtime pay counts toward the adjustment — the
+  // company-wide "Overtime" switch in the Salary Structure column menu, kept
+  // live via the same `storage` event every other payroll surface listens to.
+  const [otOn, setOtOn] = useState(true);
+  useEffect(() => {
+    setOtOn(loadPayrollReportColumns().overtime);
+    function onStorage(e: StorageEvent) {
+      if (e.key !== PAYROLL_REPORT_COLUMNS_KEY) return;
+      try {
+        setOtOn(e.newValue ? normalizePayrollReportColumns(JSON.parse(e.newValue)).overtime : DEFAULT_PAYROLL_REPORT_COLUMNS.overtime);
+      } catch {
+        setOtOn(DEFAULT_PAYROLL_REPORT_COLUMNS.overtime);
+      }
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   // Attendance inputs for the period — same set the Payroll detail page
   // loads, used here only to derive the absence / late / overtime adjustment.
@@ -188,7 +212,7 @@ function SalaryStructureEmployeeView() {
         workingDays,
         otHoursPerDay,
         otMultiplier,
-        otOn: true,
+        otOn,
         mode: 'hourly',
         isCompanyOffDay: off,
         today: nepalTodayIso(),
@@ -204,7 +228,7 @@ function SalaryStructureEmployeeView() {
     }
     const shortfall = actualBase - expected; // ≤ 0 for absence / late / early
     return { net: shortfall + overtime, shortfall, overtime, countedDays, absentDays, lateMinutes, earlyMinutes };
-  }, [employee, dayRows, daysInMonth, weekOffDates, otHoursPerDay, otMultiplier]);
+  }, [employee, dayRows, daysInMonth, weekOffDates, otHoursPerDay, otMultiplier, otOn]);
 
   function exportCsv() {
     if (!employee) return;
