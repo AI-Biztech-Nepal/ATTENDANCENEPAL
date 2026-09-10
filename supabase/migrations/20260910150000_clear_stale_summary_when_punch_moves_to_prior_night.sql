@@ -24,9 +24,20 @@
 -- Identical to 20260909120000's compute_payroll_summaries apart from the
 -- "if check_in is null" branch.
 --
--- Existing stale rows are only cleared when their date is recomputed, e.g.:
---   select d::date, compute_payroll_summaries(d::date)
---   from generate_series(date '2026-07-17', date '2026-08-17', interval '1 day') d;
+-- Existing stale rows are only cleared when their date is recomputed.
+-- Apply 20260910160000 too before recomputing, and do NOT run a bare recompute from the SQL
+-- editor: it runs as a superuser, bypasses RLS, and recomputes every tenant
+-- -- restating other companies' past days too. Recompute one company by
+-- running as one of its admins, inside a transaction:
+--
+--   begin;
+--     set local role authenticated;
+--     select set_config('request.jwt.claim.sub', '<admin user id>', true);
+--     select set_config('request.jwt.claims',
+--       '{"sub":"<admin user id>","role":"authenticated"}', true);
+--     select d::date, compute_payroll_summaries(d::date)
+--     from generate_series(date '<from>', date '<to>', interval '1 day') d;
+--   commit;
 
 create or replace function compute_payroll_summaries(p_work_date date default null)
 returns integer as $$
