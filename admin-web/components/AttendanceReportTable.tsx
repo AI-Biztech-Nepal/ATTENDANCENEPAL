@@ -75,13 +75,14 @@ function punchHhmm(iso: string) {
 }
 
 /** The inline "Fix" affordance shown in an empty Check-In / Check-Out cell
- * when Correction mode is on and the day has one punch but not the other. */
-function FixChip({ onClick }: { onClick: () => void }) {
+ * when Correction mode is on — a one-punch day's missing end, or both ends of
+ * an Absent / Week Off day with no punches at all. */
+function FixChip({ onClick, title = 'Add correction — missed punch' }: { onClick: () => void; title?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      title="Add correction — missed punch"
+      title={title}
       className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-accent/50 bg-accent/5 px-1.5 py-0.5 text-[11px] font-semibold text-good-text transition-colors hover:border-solid hover:border-accent hover:bg-accent-light print:hidden"
     >
       <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth={2.75} strokeLinecap="round">
@@ -504,26 +505,45 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     return { workHours, overtimeHours, presentDays, absentDays };
   }, [rows]);
 
-  // In Correction mode a day the employee actually attended is correctable —
-  // either end, whether it's blank or just wrong. Only days BEFORE today: an
-  // open check-out on today isn't a gap yet (they may still punch out), and
-  // Week Off / Leave / Absent days have no punch to base a correction on.
+  // In Correction mode two kinds of past day are correctable:
+  //
+  //  - A day the employee attended (Present / Late): either end, whether it's
+  //    blank or just wrong.
+  //  - An Absent or Week Off day with no punches at all: the admin can add
+  //    the day outright — someone who worked but whose punches never reached
+  //    the device, or who came in on their day off. The dialog pre-fills the
+  //    shift's hours, and approve_attendance_correction() upserts the day's
+  //    payroll_summaries row, so no existing punch is needed to base it on.
+  //
+  // Only days BEFORE today: an open check-out on today isn't a gap yet (they
+  // may still punch out). Leave stays out — an approved leave day that
+  // "gained" punches would contradict the leave itself; cancel the leave
+  // first. Upcoming and Excused days are out for the same kind of reason.
   const reportToday = nepalTodayIso();
   function correctable(r: Row): boolean {
     if (r.date >= reportToday) return false;
-    if (r.status !== 'Present' && r.status !== 'Late') return false;
-    return !!(r.checkIn || r.checkOut);
+    if (r.status === 'Present' || r.status === 'Late') return !!(r.checkIn || r.checkOut);
+    return (r.status === 'Absent' || r.status === 'Week Off') && !r.checkIn && !r.checkOut;
   }
-  /** Which end is BLANK on a one-punch day — that cell gets the Fix chip
-   * instead of a clickable time. Null when both ends have a punch. */
-  function blankPunch(r: Row): 'in' | 'out' | null {
+  /** Which end is BLANK — that cell gets the Fix chip instead of a clickable
+   * time. 'both' for an Absent / Week Off day with no punches; null when both
+   * ends have a punch. */
+  function blankPunch(r: Row): 'in' | 'out' | 'both' | null {
     if (!correctable(r)) return null;
+    if (!r.checkIn && !r.checkOut) return 'both';
     if (r.checkIn && !r.checkOut) return 'out';
     if (!r.checkIn && r.checkOut) return 'in';
     return null;
   }
+  /** A one-punch day — a likely missed punch, as opposed to an ordinary
+   * Absent or Week Off day. Only these get the warning highlight and count
+   * toward the badge: counting every absence would bury the real gaps. */
+  function missedPunch(r: Row): boolean {
+    const b = blankPunch(r);
+    return b === 'in' || b === 'out';
+  }
 
-  const incompleteCount = useMemo(() => rows.filter(r => blankPunch(r)).length, [rows, reportToday]);
+  const incompleteCount = useMemo(() => rows.filter(missedPunch).length, [rows, reportToday]);
 
   function openCorrection(r: Row) {
     if (!correctable(r)) return;
@@ -695,8 +715,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             onClick={() => setCorrectionMode(v => !v)}
             title={
               correctionMode
-                ? 'Correction mode on — click a Fix chip to correct a missed punch'
-                : `Turn on to fix missed punches inline${incompleteCount ? ` (${incompleteCount} in this range)` : ''}`
+                ? 'Correction mode on — click a Fix chip to correct a missed punch, or to add attendance on an Absent / Week Off day'
+                : `Turn on to fix missed punches and add attendance on Absent / Week Off days${incompleteCount ? ` (${incompleteCount} missed punches in this range)` : ''}`
             }
             className={`flex items-center gap-2 self-end rounded-md border px-2.5 py-1.5 text-xs font-semibold shadow-sm transition-colors ${
               correctionMode
@@ -770,14 +790,18 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             {rows.map(r => {
               const canFix = correctionMode && correctable(r);
               const blank = canFix ? blankPunch(r) : null;
+              // Amber only for a likely missed punch; an Absent / Week Off
+              // day is an ordinary state and just gets its Fix chips.
+              const flagged = canFix && missedPunch(r);
+              const addDayTitle = r.status === 'Week Off' ? 'Add attendance — worked on a week off' : 'Add attendance for this day';
               return (
-              <tr key={r.key} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${blank ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}>
+              <tr key={r.key} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}>
                 {/* Numeric date (22/05/2083) rather than the spelled-out
                     "22 Bhadra 2083" — the month name is the same on every
                     row and the range is already named in the header, so the
                     words only cost width. The Day column beside it is what
                     makes a date scannable in practice. */}
-                <td className={`w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${blank ? 'border-l-2 border-l-warning' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
+                <td className={`w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
                 <td className="whitespace-nowrap px-2 py-1 font-medium text-ink print:border print:border-slate-400 print:px-2 print:py-1">{r.employeeName}</td>
@@ -790,8 +814,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckInCell row={r} />
-                  ) : blank === 'in' ? (
-                    <FixChip onClick={() => openCorrection(r)} />
+                  ) : blank === 'in' || blank === 'both' ? (
+                    <FixChip onClick={() => openCorrection(r)} title={blank === 'both' ? addDayTitle : undefined} />
                   ) : (
                     <EditablePunch onClick={() => openCorrection(r)}>
                       <CheckInCell row={r} />
@@ -801,8 +825,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckOutCell row={r} />
-                  ) : blank === 'out' ? (
-                    <FixChip onClick={() => openCorrection(r)} />
+                  ) : blank === 'out' || blank === 'both' ? (
+                    <FixChip onClick={() => openCorrection(r)} title={blank === 'both' ? addDayTitle : undefined} />
                   ) : (
                     <EditablePunch onClick={() => openCorrection(r)}>
                       <CheckOutCell row={r} />
@@ -874,11 +898,31 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           onClick={() => !fixSaving && setFixRow(null)}
         >
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-ink">Correct this day</h3>
+            <h3 className="text-lg font-semibold text-ink">
+              {!fixRow.checkIn && !fixRow.checkOut ? 'Add attendance for this day' : 'Correct this day'}
+            </h3>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
               An admin edit — it applies straight away, no approval step. The day&apos;s hours, late/early and overtime
               recalculate on save and the day is locked so the nightly recompute won&apos;t undo it.
             </p>
+            {/* A no-punch day changes pay, not just a record: an Absent day
+                starts earning, and a Week Off day is priced by
+                calc_payroll_fields() with 0 scheduled hours, so every hour
+                entered lands as overtime. Said before Save, not discovered on
+                the payroll report afterwards. */}
+            {fixRow.status === 'Week Off' && (
+              <p className="mt-3 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-xs leading-relaxed text-warning-text">
+                This is a <strong>week off</strong>. Nothing is scheduled, so <strong>every hour you enter is counted as
+                overtime</strong> — 09:00 to 17:00 records 8h of overtime. Use it for someone who genuinely came in on
+                their day off.
+              </p>
+            )}
+            {fixRow.status === 'Absent' && (
+              <p className="mt-3 rounded-lg border border-info/20 bg-info-bg px-3 py-2 text-xs leading-relaxed text-info-text">
+                This day is marked <strong>absent</strong> with no punches on record. Saving turns it into a worked day,
+                so it starts counting toward the employee&apos;s pay.
+              </p>
+            )}
 
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div>
