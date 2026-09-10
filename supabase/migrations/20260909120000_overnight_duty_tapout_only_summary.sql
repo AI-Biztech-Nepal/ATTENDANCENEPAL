@@ -24,7 +24,17 @@
 -- as the main upsert). Mirrors the client-side half in
 -- admin-web/mobile-app lib/shift.ts applyOvernightShiftCorrection().
 --
--- Everything above the new pass is verbatim from
+-- Also: STOP persisting summary rows with a null check_in. The function
+-- writes a row for every employee with a raw punch on target_date, so a
+-- Week Off / Absent day whose only punch was then claimed by the previous
+-- day's overnight window got a row with no check_in and 0 hours. Those rows
+-- carry no attendance, and every reader that saw "a row exists" treated the
+-- day as worked (the Attendance Report then rendered it "Absent" because
+-- Present + no check-in falls through every badge case; the payroll report
+-- counted it toward paid days). A stale-row cleanup for the processed dates
+-- runs first so existing ones clear on the next nightly run / recalculate.
+--
+-- Everything else is verbatim from
 -- 20260825150000_fix_compute_payroll_utc_date_bucketing.sql.
 
 create or replace function compute_payroll_summaries(p_work_date date default null)
@@ -48,6 +58,14 @@ declare
   v_prev_window record;
   d_scan date;
 begin
+  -- Clear stale no-check-in rows for the dates this run touches, so the
+  -- ones written before this migration disappear on the next nightly run /
+  -- "Recalculate month". The loops below no longer create them.
+  delete from payroll_summaries
+  where work_date in (target_date, target_date - 1)
+    and check_in is null
+    and not manually_corrected;
+
   for emp in
     select distinct e.id, e.company_id
     from employees e
@@ -119,6 +137,14 @@ begin
     check_out := case when v_punch_count > 1 then coalesce(v_last_out, v_last_any) else null end;
     if check_out = check_in then
       check_out := null;
+    end if;
+
+    -- No usable check-in (every punch this employee had for target_date was
+    -- claimed by the previous day's overnight window, or it is a Week Off /
+    -- Absent day the scan swept in): nothing to summarize. The top-of-
+    -- function delete already removed any prior row.
+    if check_in is null then
+      continue;
     end if;
 
     select * into fields from calc_payroll_fields(emp.id, check_in, check_out, target_date);
@@ -209,6 +235,9 @@ begin
       check_out := case when v_punch_count > 1 then coalesce(v_last_out, v_last_any) else null end;
       if check_out = check_in then
         check_out := null;
+      end if;
+      if check_in is null then
+        continue;
       end if;
 
       select * into fields from calc_payroll_fields(emp.id, check_in, check_out, d_scan);
