@@ -9,6 +9,10 @@ import { formatAdDate, formatDdMmYyyy, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   applyOvernightShiftCorrection,
+  dropPunchesClaimedBySummaries,
+  isDeletedDay,
+  nepalTodayIso,
+  withoutSupersededSummaries,
   buildWeeklyPatternByEmployee,
   computeDayStatusForResolvedShift,
   formatHoursMinutes,
@@ -114,7 +118,8 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
       setEmployee(emp ?? null);
       setShifts(shiftRows ?? []);
       setLogs(rows ?? []);
-      setSummaries(summaryRows ?? []);
+      // Rows a correction on another date has superseded are left out.
+      setSummaries(withoutSupersededSummaries(summaryRows ?? []));
       setLeaveRequests(leaveRows ?? []);
       setDailyShiftRows(rosterRows ?? []);
       setHolidays(holidayRows ?? []);
@@ -156,12 +161,16 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
     const map = new Map<string, ReturnType<typeof computeDayStatusForResolvedShift>>();
     if (!employee) return map;
     applyOvernightShiftCorrection(byDate, logs, employee, shifts, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
+    // A punch another day's saved row owns isn't this day's too, and a day an
+    // admin deleted (a corrected row with no times) has no attendance at all.
+    dropPunchesClaimedBySummaries(byDate, summaries, nepalTodayIso());
+    for (const s of summaries) if (isDeletedDay(s)) byDate.delete(s.work_date);
     for (const [date, dayLogs] of byDate) {
       const resolved = resolveShiftForDate(employee, shifts, date, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
       map.set(date, computeDayStatusForResolvedShift(dayLogs, resolved));
     }
     return map;
-  }, [logs, employee, shifts, dailyShiftByDate, companyWeekOffDates, weeklyPattern]);
+  }, [logs, employee, shifts, dailyShiftByDate, companyWeekOffDates, weeklyPattern, summaries]);
 
   const leaveByDate = useMemo(() => {
     const map = new Map<string, LeaveRequest>();

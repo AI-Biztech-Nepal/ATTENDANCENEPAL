@@ -11,6 +11,8 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   applyOvernightShiftCorrection,
   dropPunchesClaimedBySummaries,
+  isDeletedDay,
+  withoutSupersededSummaries,
   buildWeeklyPatternByEmployee,
   computeDayStatusForResolvedShift,
   edgePunctuality,
@@ -25,6 +27,7 @@ import {
 } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import { fetchLeavePolicy, leavePolicyActive } from '@/lib/leaveBalance';
+import { useSessionState } from '@/lib/useSessionState';
 import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
@@ -228,10 +231,20 @@ function statusBadge(r: Row) {
 export default function AttendanceReportTable({ initialEmployeeId }: { initialEmployeeId?: string | null }) {
   const { system } = useCalendarSystem();
   const tableScrollRef = useRef<HTMLDivElement>(null);
-  const [from, setFrom] = useState(isoDaysAgo(0));
-  const [to, setTo] = useState(isoDaysAgo(0));
-  const [status, setStatus] = useState<'All' | 'Present' | 'Late' | 'Early' | 'Absent' | 'Week Off' | 'Leave' | 'Exempt'>('All');
-  const [employeeId, setEmployeeId] = useState<string>(initialEmployeeId ?? 'all');
+  // Dates, status, employee and Correction mode are remembered for this
+  // browser tab, so a refresh picks up where you were (lib/useSessionState).
+  // An employee passed in the link wins over the remembered one.
+  const [from, setFrom] = useSessionState('attendanceReport:from', isoDaysAgo(0), { isValid: (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) });
+  const [to, setTo] = useSessionState('attendanceReport:to', isoDaysAgo(0), { isValid: (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) });
+  const [status, setStatus] = useSessionState<'All' | 'Present' | 'Late' | 'Early' | 'Absent' | 'Week Off' | 'Leave' | 'Exempt'>(
+    'attendanceReport:status',
+    'All',
+    { isValid: v => typeof v === 'string' && ['All', 'Present', 'Late', 'Early', 'Absent', 'Week Off', 'Leave', 'Exempt'].includes(v) }
+  );
+  const [employeeId, setEmployeeId] = useSessionState<string>('attendanceReport:employee', initialEmployeeId ?? 'all', {
+    enabled: !initialEmployeeId,
+    isValid: v => typeof v === 'string',
+  });
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [summaries, setSummaries] = useState<PayrollSummary[]>([]);
@@ -251,7 +264,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   // on = a "Fix" chip in the empty punch cell of any past one-punch day,
   // opening a direct correction that applies immediately (no approval — see
   // saveCorrection). `refreshTick` re-pulls the day's data after one lands.
-  const [correctionMode, setCorrectionMode] = useState(false);
+  const [correctionMode, setCorrectionMode] = useSessionState('attendanceReport:correctionMode', false, {
+    isValid: v => typeof v === 'boolean',
+  });
   const [refreshTick, setRefreshTick] = useState(0);
   const [fixRow, setFixRow] = useState<Row | null>(null);
   // checkOutNextDay: the check-out falls on the morning after work_date — an
@@ -261,6 +276,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const [fixForm, setFixForm] = useState({ checkIn: '', checkOut: '', checkOutNextDay: false, reason: '' });
   const [fixSaving, setFixSaving] = useState(false);
   const [fixError, setFixError] = useState<string | null>(null);
+  // The dialog's Delete asks once more, inline, before removing the day.
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     supabase
@@ -293,7 +310,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       supabase.from('company_holidays').select('*').gte('holiday_date', from).lte('holiday_date', to),
       supabase.from('leave_requests').select('*').eq('status', 'approved').lte('start_date', to).gte('end_date', from),
     ]).then(([summariesRes, logsRes, rosterRes, holidaysRes, leaveRes]) => {
-      setSummaries(summariesRes.data ?? []);
+      // Rows a correction on another date has superseded are left out.
+      setSummaries(withoutSupersededSummaries(summariesRes.data ?? []));
       setLogs(logsRes.data ?? []);
       setDailyShiftRows(rosterRes.data ?? []);
       setHolidays(holidaysRes.data ?? []);
@@ -383,7 +401,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         // punches can still land), but a manual admin correction is a
         // deliberate override and must stick, today included.
         const summary = day !== today || rawSummary?.manually_corrected ? rawSummary : undefined;
-        const dayLogs = (logsByEmployeeDay.get(emp.id)?.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
+        // A day an admin deleted has no attendance, whatever punches it had.
+        const deleted = isDeletedDay(summary);
+        const dayLogs = deleted ? [] : (logsByEmployeeDay.get(emp.id)?.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
         const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
         const shiftName = isWeekOff(resolved) ? 'Week Off' : resolved.name;
         const shiftStart = isWeekOff(resolved) ? null : resolved.start_time.slice(0, 5);
@@ -469,7 +489,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             date: day,
             enrollId: emp.fingerprint_id ?? '—',
             employeeName: emp.name,
-            device: 'N/A',
+            device: deleted ? 'Deleted by admin' : 'N/A',
             shiftLabel,
             shiftName,
             shiftTime,
@@ -560,6 +580,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   function openCorrection(r: Row) {
     if (!correctable(r)) return;
     setFixError(null);
+    setConfirmDelete(false);
     const overnight = !!(r.shiftStart && r.shiftEnd && r.shiftEnd <= r.shiftStart);
     // A tap-out-only overnight duty: the one punch on record is dated the
     // NEXT morning, so it is really this duty's check-out — the check-in was
@@ -634,6 +655,44 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       setFixError(`Saved, but applying it failed: ${applyError.message}`);
       return;
     }
+    setFixRow(null);
+    setRefreshTick(t => t + 1);
+  }
+
+  // Delete: the day is saved as a locked (manually_corrected) row with no
+  // times — see isDeletedDay() in lib/shift.ts. The punches themselves are not
+  // removed: the device would only sync them back, and they stay visible in
+  // the day's punch history. compute_payroll_summaries() never touches a
+  // corrected row, so the deletion holds. company_id is stamped by the
+  // table's insert trigger.
+  async function deleteAttendance() {
+    if (!fixRow) return;
+    setFixSaving(true);
+    setFixError(null);
+    const { error: deleteError } = await supabase.from('payroll_summaries').upsert(
+      {
+        employee_id: fixRow.employeeId,
+        work_date: fixRow.date,
+        shift_name: fixRow.shiftName,
+        check_in: null,
+        check_out: null,
+        total_hours: 0,
+        is_late: false,
+        late_minutes: 0,
+        is_early_departure: false,
+        early_departure_minutes: 0,
+        overtime_hours: 0,
+        manually_corrected: true,
+        computed_at: new Date().toISOString(),
+      },
+      { onConflict: 'employee_id,work_date' }
+    );
+    setFixSaving(false);
+    if (deleteError) {
+      setFixError(`Could not delete: ${deleteError.message}`);
+      return;
+    }
+    setConfirmDelete(false);
     setFixRow(null);
     setRefreshTick(t => t + 1);
   }
@@ -1045,8 +1104,49 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
             {fixError && <p className="mt-3 text-sm text-critical">{fixError}</p>}
 
+            {confirmDelete && (
+              <div className="mt-4 rounded-lg border border-critical/30 bg-critical-bg px-3 py-3 text-xs leading-relaxed text-critical-text">
+                <p>
+                  Delete <strong>{fixRow.employeeName}</strong>&apos;s attendance on{' '}
+                  <strong>{formatDdMmYyyy(fixRow.date, system)}</strong>? The day will show as{' '}
+                  <strong>{fixRow.shiftName === 'Week Off' ? 'Week Off' : 'Absent'}</strong>. The device punches stay in the history
+                  but are ignored for this day. A device sync or the nightly recalculation won&apos;t bring them back. To undo,
+                  add the attendance again.
+                </p>
+                <div className="mt-2.5 flex justify-end gap-2">
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    disabled={fixSaving}
+                    className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-white/60 disabled:opacity-60"
+                  >
+                    Keep it
+                  </button>
+                  <button
+                    onClick={deleteAttendance}
+                    disabled={fixSaving}
+                    className="rounded-md bg-critical px-3 py-1.5 text-xs font-semibold text-white hover:bg-critical/90 disabled:opacity-60"
+                  >
+                    {fixSaving ? 'Deleting…' : 'Delete attendance'}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="mt-5 flex items-center justify-between gap-2">
-              <span className="text-[11px] text-slate-400">Recorded as corrected by you</span>
+              {fixRow.checkIn || fixRow.checkOut ? (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  disabled={fixSaving || confirmDelete}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-critical-text hover:bg-critical-bg disabled:opacity-50"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+                  </svg>
+                  Delete
+                </button>
+              ) : (
+                <span className="text-[11px] text-slate-400">Recorded as corrected by you</span>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={() => setFixRow(null)}

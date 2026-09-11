@@ -363,7 +363,7 @@ export function nepalDateTimeToUtcMs(dateKey: string, time: string): number {
  * returns `byDate`. */
 export function dropPunchesClaimedBySummaries(
   byDate: Map<string, AttendanceLog[]>,
-  employeeSummaries: { work_date: string; check_in: string | null; check_out: string | null }[],
+  employeeSummaries: SummaryLike[],
   today: string
 ): Map<string, AttendanceLog[]> {
   const claimedBy = new Map<number, string>();
@@ -373,17 +373,78 @@ export function dropPunchesClaimedBySummaries(
       if (t) claimedBy.set(Date.parse(t), s.work_date);
     }
   }
-  if (claimedBy.size === 0) return byDate;
+  const spans = correctedSpans(employeeSummaries);
+  if (claimedBy.size === 0 && spans.length === 0) return byDate;
   for (const [date, list] of byDate) {
     const kept = list.filter(l => {
-      const owner = claimedBy.get(Date.parse(l.punch_time));
-      return owner === undefined || owner === date;
+      const t = Date.parse(l.punch_time);
+      const owner = claimedBy.get(t);
+      if (owner !== undefined && owner !== date) return false;
+      return !spans.some(sp => sp.date !== date && t >= sp.start && t < sp.end);
     });
     if (kept.length === list.length) continue;
     if (kept.length > 0) byDate.set(date, kept);
     else byDate.delete(date);
   }
   return byDate;
+}
+
+/** A day an admin deleted with Correction mode's Delete: a locked
+ * (manually_corrected) payroll_summaries row with no check-in or check-out.
+ * The day's punches stay in attendance_logs but are ignored — it reads as
+ * Absent, or Week Off on a day off — and neither a device re-sync nor the
+ * nightly recompute can bring them back (compute_payroll_summaries() never
+ * touches a corrected row). Adding attendance for the day replaces it. */
+export function isDeletedDay(
+  s: { manually_corrected?: boolean; check_in: string | null; check_out?: string | null } | null | undefined
+): boolean {
+  return !!s && !!s.manually_corrected && !s.check_in && !s.check_out;
+}
+
+type SummaryLike = {
+  employee_id?: string;
+  work_date: string;
+  check_in: string | null;
+  check_out: string | null;
+  manually_corrected?: boolean;
+};
+
+/** The time a manual correction records, to the minute: corrections are
+ * entered as HH:MM while the device stamps seconds, so a check-out of 17:23
+ * covers a 17:23:16 punch. Mirrors punch_claimed_by_correction()
+ * (20260911130000). */
+function correctedSpans(summaries: SummaryLike[]): { date: string; start: number; end: number }[] {
+  const out: { date: string; start: number; end: number }[] = [];
+  for (const s of summaries) {
+    if (!s.manually_corrected || !s.check_in) continue;
+    const minute = (iso: string) => Math.floor(Date.parse(iso) / 60000) * 60000;
+    out.push({ date: s.work_date, start: minute(s.check_in), end: minute(s.check_out ?? s.check_in) + 60000 });
+  }
+  return out;
+}
+
+/** `summaries` minus any automatic (not manually corrected) row whose
+ * check-in lies inside a correction made on ANOTHER date for the same
+ * employee — e.g. a day corrected to run 12 Aug 09:09 -> 13 Aug 17:23 owns
+ * the 17:23 punch, so a 13 Aug row built from that punch is superseded. The
+ * server drops such rows on its next recalculation (20260911130000); this
+ * keeps every page right in the meantime. */
+export function withoutSupersededSummaries<T extends SummaryLike & { employee_id: string }>(summaries: T[]): T[] {
+  const spansByEmployee = new Map<string, { date: string; start: number; end: number }[]>();
+  for (const s of summaries) {
+    if (!s.manually_corrected || !s.check_in) continue;
+    const list = spansByEmployee.get(s.employee_id) ?? [];
+    list.push(...correctedSpans([s]));
+    spansByEmployee.set(s.employee_id, list);
+  }
+  if (spansByEmployee.size === 0) return summaries;
+  return summaries.filter(s => {
+    if (s.manually_corrected || !s.check_in) return true;
+    const spans = spansByEmployee.get(s.employee_id);
+    if (!spans) return true;
+    const t = Date.parse(s.check_in);
+    return !spans.some(sp => sp.date !== s.work_date && t >= sp.start && t < sp.end);
+  });
 }
 
 /** Corrects a `byDate` grouping (built by each call site the usual way —

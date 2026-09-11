@@ -13,21 +13,21 @@ import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSumm
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from './types';
 
 /**
- * A yearly paid-leave balance (companies.paid_leave_days_per_year /
- * week_off_work_earns_leave, 20260911100000_company_paid_leave_balance.sql).
+ * A yearly paid-leave balance (employees.annual_leave_days, 20260911110000;
+ * companies.week_off_work_earns_leave, 20260911100000).
  *
- * Every employee starts each Nepal fiscal year (1 Shrawan) with their own
- * yearly allowance (employees.annual_leave_days, set on the Leave page), or
- * the company's `daysPerYear` when they have none. Walking the year day by
- * day, in order:
+ * Every employee starts each Nepal fiscal year (1 Shrawan) with the yearly
+ * leave an admin entered for them on the Leave page — none when blank; there
+ * is no company-wide default (companies.paid_leave_days_per_year is no longer
+ * read). Walking the year day by day, in order:
  *
  *   - a finished working day with no attendance (Absent), or taken as
  *     approved leave, is paid out of the balance -- as long as there is any.
- *     Once it reaches 0 the day is unpaid, exactly as before the balance
- *     existed.
+ *     It costs its rostered length in leave days (a DN 24h duty = 3, an 8h
+ *     day = 1). Once the balance reaches 0 the day is unpaid, exactly as
+ *     before the balance existed.
  *   - approved leave of type 'unpaid' is unpaid and leaves the balance alone.
- *   - attendance on the employee's Week Off, when the company turns that on,
- *     ADDS one whole day for every full hoursPerLeaveDay worked (8h = 1 day,
+ *   - attendance on the employee's Week Off ADDS one whole day for every full hoursPerLeaveDay worked (8h = 1 day,
  *     16h = 2, 24h = 3; under 8h adds nothing -- there are no half days) and
  *     is not counted as overtime.
  *
@@ -36,26 +36,42 @@ import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from './types';
  * the balance on its own.
  */
 export type LeavePolicy = {
-  daysPerYear: number;
+  /** On for every company using the balance: the Leave page turns it on the
+   * first time an admin gives anyone yearly leave. Also what makes the
+   * server measure a Week Off duty to its next-morning check-out. */
   weekOffWorkEarnsLeave: boolean;
   /** Hours that make one leave day — the company's standard day
    * (companies.ot_hours_per_day, 8 by default). */
   hoursPerLeaveDay: number;
 };
 
-export const NO_LEAVE_POLICY: LeavePolicy = { daysPerYear: 0, weekOffWorkEarnsLeave: false, hoursPerLeaveDay: 8 };
+export const NO_LEAVE_POLICY: LeavePolicy = { weekOffWorkEarnsLeave: false, hoursPerLeaveDay: 8 };
 
-/** This employee's yearly allowance: their own number if an admin set one,
- * otherwise the company default. */
-export function employeeLeaveAllowance(emp: Pick<Employee, 'annual_leave_days'>, p: LeavePolicy): number {
-  const own = emp.annual_leave_days;
-  return own != null && Number.isFinite(Number(own)) ? Number(own) : p.daysPerYear;
+/** This employee's yearly leave, as the admin entered it; 0 when blank. */
+export function employeeLeaveAllowance(emp: Pick<Employee, 'annual_leave_days'>): number {
+  const own = Number(emp.annual_leave_days);
+  return emp.annual_leave_days != null && Number.isFinite(own) ? own : 0;
 }
 
-/** Whether a balance is tracked at all: a company default, Week Off work
- * earning leave, or at least one employee given their own allowance. */
+/** Whether a balance is tracked at all: Week Off work earning leave, or at
+ * least one employee given yearly leave. */
 export function leavePolicyActive(p: LeavePolicy, employees?: Pick<Employee, 'annual_leave_days'>[]): boolean {
-  return p.daysPerYear > 0 || p.weekOffWorkEarnsLeave || !!employees?.some(e => Number(e.annual_leave_days) > 0);
+  return p.weekOffWorkEarnsLeave || !!employees?.some(e => Number(e.annual_leave_days) > 0);
+}
+
+/** Leave days a missed rostered duty costs: its scheduled hours in standard
+ * days, rounded to the nearest whole day, at least 1. DN 24 Hours Duty
+ * (09:00-08:00, 23h) = 3, N 16 Hours Duty = 2, an 8h day = 1. */
+export function rosteredDutyLeaveCost(
+  shift: { start_time: string; end_time: string } | null | undefined,
+  hoursPerLeaveDay: number
+): number {
+  if (!shift?.start_time || !shift?.end_time) return 1;
+  const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const start = toMin(shift.start_time);
+  const end = toMin(shift.end_time);
+  const minutes = end > start ? end - start : 24 * 60 - start + end;
+  return Math.max(1, Math.round(minutes / 60 / Math.max(1, hoursPerLeaveDay)));
 }
 
 /** Punches land a few minutes either side of the hour, so a 24h duty taken
@@ -71,9 +87,9 @@ export function weekOffLeaveCredit(hours: number, hoursPerLeaveDay: number): num
   return Math.floor((hours + WEEK_OFF_CREDIT_GRACE_HOURS) / Math.max(1, hoursPerLeaveDay) + 1e-6);
 }
 
-/** The caller's company leave policy. The two columns come from a migration
- * that may not be applied everywhere yet, so they're read on their own and a
- * failure just means "no policy" — like overtime_rate in lib/weekOff.ts. */
+/** The caller's company leave policy. The column comes from a migration that
+ * may not be applied everywhere yet, so it's read on its own and a failure
+ * just means "no policy" — like overtime_rate in lib/weekOff.ts. */
 export async function fetchLeavePolicy(): Promise<LeavePolicy & { companyId: string | null }> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return { ...NO_LEAVE_POLICY, companyId: null };
@@ -81,18 +97,12 @@ export async function fetchLeavePolicy(): Promise<LeavePolicy & { companyId: str
   const companyId = profile?.company_id ?? null;
   if (!companyId) return { ...NO_LEAVE_POLICY, companyId: null };
   const { data: base } = await supabase.from('companies').select('ot_hours_per_day').eq('id', companyId).single();
-  const { data, error } = await supabase
-    .from('companies')
-    .select('paid_leave_days_per_year, week_off_work_earns_leave')
-    .eq('id', companyId)
-    .single();
+  const { data, error } = await supabase.from('companies').select('week_off_work_earns_leave').eq('id', companyId).single();
   const hoursPerLeaveDay = Number(base?.ot_hours_per_day) > 0 ? Number(base!.ot_hours_per_day) : 8;
   if (error || !data) return { ...NO_LEAVE_POLICY, hoursPerLeaveDay, companyId };
-  const row = data as { paid_leave_days_per_year: number | null; week_off_work_earns_leave: boolean | null };
   return {
     companyId,
-    daysPerYear: Number(row.paid_leave_days_per_year) || 0,
-    weekOffWorkEarnsLeave: !!row.week_off_work_earns_leave,
+    weekOffWorkEarnsLeave: !!(data as { week_off_work_earns_leave: boolean | null }).week_off_work_earns_leave,
     hoursPerLeaveDay,
   };
 }
@@ -157,6 +167,9 @@ export type LeaveEntry = {
   kind: 'earned' | 'absent' | 'leave' | 'unpaid-leave';
   /** earned: days added. absent/leave: days paid from the balance. */
   days: number;
+  /** absent/leave: leave days the missed duty costs — its rostered hours
+   * in standard days (DN 24h duty = 3, N 16h = 2, an 8h day = 1). */
+  cost?: number;
   /** The part of the day NOT covered by the balance, so not paid. */
   unpaid: number;
   /** Hours worked, for an earned entry. */
@@ -193,6 +206,9 @@ export function buildLeaveLedger(opts: {
   days: DayDetail[];
   isOffDay: (date: string) => boolean;
   isUnpaidLeave: (date: string) => boolean;
+  /** Leave days a missed working day costs (rosteredDutyLeaveCost()).
+   * Defaults to 1. */
+  dayCost?: (date: string) => number;
   policy: LeavePolicy;
   /** This employee's yearly allowance (employeeLeaveAllowance()). */
   entitlement: number;
@@ -246,12 +262,18 @@ export function buildLeaveLedger(opts: {
       entries.push({ date: d.date, kind, days: 0, unpaid: 1, balance });
       continue;
     }
-    const covered = r2(Math.min(1, Math.max(0, balance)));
+    // A missed duty costs its rostered length in leave days — the same
+    // 8h = 1 day that Week Off work earns — so missing a 24h duty takes 3.
+    // When less than that is left, what is left is used and pays that share
+    // of the day (2 of 3 days left -> two thirds of the day paid).
+    const cost = Math.max(1, opts.dayCost?.(d.date) ?? 1);
+    const covered = r2(Math.min(cost, Math.max(0, balance)));
+    const paidShare = covered / cost;
     balance = r2(balance - covered);
     used = r2(used + covered);
-    unpaidDays = r2(unpaidDays + (1 - covered));
-    if (covered > 0) coveredByDate.set(d.date, covered);
-    entries.push({ date: d.date, kind, days: covered, unpaid: r2(1 - covered), balance });
+    unpaidDays = r2(unpaidDays + (1 - paidShare));
+    if (covered > 0) coveredByDate.set(d.date, paidShare);
+    entries.push({ date: d.date, kind, days: covered, cost, unpaid: r2(1 - paidShare), balance });
   }
 
   const fyStart = fy || fiscalYearStart(opts.until);
@@ -328,7 +350,7 @@ export async function loadLeaveLedgers(opts: {
           isOffDay: () => false,
           isUnpaidLeave: () => false,
           policy: opts.policy,
-          entitlement: employeeLeaveAllowance(e, opts.policy),
+          entitlement: employeeLeaveAllowance(e),
           from: walkStart,
           until,
         })
@@ -408,8 +430,12 @@ export async function loadLeaveLedgers(opts: {
         // 'Week Off'.
         isOffDay: date => isWeekOff(resolveShiftForDate(emp, shiftList, date, dailyShiftByDate, weekOffDates, weeklyPattern)),
         isUnpaidLeave: date => unpaid?.has(date) ?? false,
+        dayCost: date => {
+          const r = resolveShiftForDate(emp, shiftList, date, dailyShiftByDate, weekOffDates, weeklyPattern);
+          return isWeekOff(r) ? 1 : rosteredDutyLeaveCost(r, opts.policy.hoursPerLeaveDay);
+        },
         policy: opts.policy,
-        entitlement: employeeLeaveAllowance(emp, opts.policy),
+        entitlement: employeeLeaveAllowance(emp),
         from,
         until,
       })

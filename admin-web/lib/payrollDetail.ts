@@ -4,6 +4,8 @@ import {
   computeDayStatusForResolvedShift,
   dropPunchesClaimedBySummaries,
   edgePunctuality,
+  isDeletedDay,
+  withoutSupersededSummaries,
   isWeekOff,
   nepalDateKey,
   nepalTodayIso,
@@ -80,13 +82,16 @@ export function buildEmployeeDayRows(
   applyOvernightShiftCorrection(byDate, employeeLogs, employee, shifts, dailyShiftByDate, weekOffDates, weeklyPattern, days);
 
   const today = nepalTodayIso();
-  // A punch another day's saved row already owns isn't this day's too.
-  dropPunchesClaimedBySummaries(byDate, summaries.filter(s => s.employee_id === employee.id), today);
+  // This employee's saved rows, minus any a correction on another date has
+  // superseded; and a punch another day's saved row already owns isn't this
+  // day's too.
+  const employeeSummaries = withoutSupersededSummaries(summaries.filter(s => s.employee_id === employee.id));
+  dropPunchesClaimedBySummaries(byDate, employeeSummaries, today);
   return days.map(day => {
     // Today can still gain punches after its payroll_summaries row was
     // computed (not re-run until tomorrow's nightly job), so always compute
     // today live instead of trusting a possibly-stale summary.
-    const summary = day === today ? undefined : summaries.find(s => s.employee_id === employee.id && s.work_date === day);
+    const summary = day === today ? undefined : employeeSummaries.find(s => s.work_date === day);
     // A summary row can exist with NO check_in — the nightly job ran for a
     // day whose only punch was then claimed by an overnight shift on the day
     // before, or a Week Off / Absent day it swept in anyway. That is not a
@@ -113,7 +118,8 @@ export function buildEmployeeDayRows(
         status: summary.is_late && !employee.attendance_exempt ? 'Late' : 'Present',
       };
     }
-    const dayLogs = (byDate.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
+    // A day an admin deleted has no attendance, whatever punches it had.
+    const dayLogs = isDeletedDay(summary) ? [] : (byDate.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
     if (dayLogs.length === 0) {
       // A company Week-off or approved Leave day is a known, paid day off
       // regardless of whether it's already passed — takes priority over the

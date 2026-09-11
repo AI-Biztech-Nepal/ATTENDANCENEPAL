@@ -53,7 +53,7 @@ export type Employee = {
   ssf_no: string | null;
   attendance_exempt: boolean;
   /** Paid-leave days this employee gets each fiscal year, set on the Leave
-   * page. Null = the company default (companies.paid_leave_days_per_year).
+   * page. Null = none (there is no company-wide default).
    * Optional: the column comes from 20260911110000 and may not exist yet. */
   annual_leave_days?: number | null;
   created_at: string;

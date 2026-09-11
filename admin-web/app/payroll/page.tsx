@@ -31,6 +31,8 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   applyOvernightShiftCorrection,
   dropPunchesClaimedBySummaries,
+  isDeletedDay,
+  withoutSupersededSummaries,
   buildWeeklyPatternByEmployee,
   computeDayStatusForResolvedShift,
   formatHoursMinutes,
@@ -286,7 +288,8 @@ export default function PayrollPage() {
       supabase.from('company_holidays').select('*').gte('holiday_date', start).lte('holiday_date', end),
       supabase.from('leave_requests').select('*').eq('status', 'approved').lte('start_date', end).gte('end_date', start),
     ]).then(([summariesRes, logsRes, shiftsRes, employeesRes, rosterRes, holidaysRes, leaveRes]) => {
-      setSummaries(summariesRes.data ?? []);
+      // Rows a correction on another date has superseded are left out.
+      setSummaries(withoutSupersededSummaries(summariesRes.data ?? []));
       setLogs(logsRes.data ?? []);
       setShifts(shiftsRes.data ?? []);
       setEmployees(employeesRes.data ?? []);
@@ -472,7 +475,10 @@ export default function PayrollPage() {
           if (summary.is_early_departure) row.earlyDays += 1;
           continue;
         }
-        const dayLogs = (logsByEmployeeDay.get(emp.id)?.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
+        // A day an admin deleted has no attendance, whatever punches it had.
+        const dayLogs = isDeletedDay(summary)
+          ? []
+          : (logsByEmployeeDay.get(emp.id)?.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
         if (dayLogs.length === 0) {
           // No punch, but still a paid day: company Week-off, a per-employee
           // Week Off picked on the Weekly/Monthly Roster (checked via the

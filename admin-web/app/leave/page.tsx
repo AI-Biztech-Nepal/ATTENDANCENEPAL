@@ -23,6 +23,7 @@ import {
   type LeavePolicy,
 } from '@/lib/leaveBalance';
 import type { Employee, LeaveRequest } from '@/lib/types';
+import { useSessionState } from '@/lib/useSessionState';
 
 const ENTRY_LABEL: Record<LeaveEntry['kind'], string> = {
   earned: 'Worked on Week Off',
@@ -35,30 +36,31 @@ export default function LeavePage() {
   const { system } = useCalendarSystem();
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const balanceScrollRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<'requests' | 'balance'>('requests');
+  // Remembered for this browser tab, so a refresh stays on the same tab.
+  const [tab, setTab] = useSessionState<'requests' | 'balance'>('leave:tab', 'requests', {
+    isValid: v => v === 'requests' || v === 'balance',
+  });
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [filter, setFilter] = useState<'All' | 'pending' | 'approved' | 'rejected'>('pending');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Yearly paid-leave balance (lib/leaveBalance.ts). The saved policy, plus a
-  // draft the admin edits on the Leave Balance tab.
+  // Yearly paid-leave balance (lib/leaveBalance.ts). There is no company-wide
+  // default: each employee has only the leave an admin enters for them.
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [policy, setPolicy] = useState<LeavePolicy>(NO_LEAVE_POLICY);
-  const [draftDays, setDraftDays] = useState('0');
-  const [draftEarns, setDraftEarns] = useState(false);
-  const [savingPolicy, setSavingPolicy] = useState(false);
-  const [policyError, setPolicyError] = useState<string | null>(null);
   const [company, setCompany] = useState<{ weeklyOffDay: number | null; rosterMode: 'weekly' | 'monthly' } | null>(null);
   const [ledgers, setLedgers] = useState<Map<string, LeaveLedger>>(new Map());
   const [ledgersLoading, setLedgersLoading] = useState(false);
   const [openEmployee, setOpenEmployee] = useState<string | null>(null);
-  // Each employee's own yearly allowance, typed into the Yearly Leave cell.
-  // Blank = the company default. Saved one row at a time.
-  const [allowanceDraft, setAllowanceDraft] = useState<Record<string, string>>({});
+  // Yearly Leave editing — one row at a time: Edit opens the box, Save / Enter
+  // stores it, Cancel / Esc puts it back untouched.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
   const [savingAllowanceId, setSavingAllowanceId] = useState<string | null>(null);
   const [allowanceError, setAllowanceError] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   function reload() {
     supabase.from('leave_requests').select('*').order('created_at', { ascending: false }).then(({ data }) => setRequests(data ?? []));
@@ -70,8 +72,6 @@ export default function LeavePage() {
     fetchLeavePolicy().then(p => {
       setCompanyId(p.companyId);
       setPolicy(p);
-      setDraftDays(String(p.daysPerYear));
-      setDraftEarns(p.weekOffWorkEarnsLeave);
     });
     fetchMyCompanyWeekOffConfig().then(c => setCompany({ weeklyOffDay: c.weeklyOffDay, rosterMode: c.rosterMode }));
   }, []);
@@ -130,56 +130,35 @@ export default function LeavePage() {
     return Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1;
   }
 
-  const policyDirty = Number(draftDays) !== policy.daysPerYear || draftEarns !== policy.weekOffWorkEarnsLeave;
-
-  async function savePolicy() {
-    if (!companyId) return;
-    const days = Number(draftDays);
-    if (!Number.isFinite(days) || days < 0 || days > 366) {
-      setPolicyError('Enter a number of days between 0 and 366.');
-      return;
-    }
-    setSavingPolicy(true);
-    setPolicyError(null);
-    const { error: saveError } = await supabase
-      .from('companies')
-      .update({ paid_leave_days_per_year: days, week_off_work_earns_leave: draftEarns })
-      .eq('id', companyId);
-    setSavingPolicy(false);
-    if (saveError) {
-      setPolicyError(
-        /paid_leave_days_per_year|week_off_work_earns_leave/.test(saveError.message)
-          ? 'The leave-balance migration (20260911100000_company_paid_leave_balance.sql) has not been applied to the database yet.'
-          : saveError.message
-      );
-      return;
-    }
-    setPolicy(p => ({ ...p, daysPerYear: days, weekOffWorkEarnsLeave: draftEarns }));
+  function startEdit(emp: Employee) {
+    setEditingId(emp.id);
+    setEditText(emp.annual_leave_days != null ? String(emp.annual_leave_days) : '');
+    setAllowanceError(null);
+    setSavedId(null);
   }
 
-  /** The Yearly Leave cell's current text: the unsaved draft, else the
-   * employee's own saved number, else blank (= company default). */
-  function allowanceText(emp: Employee): string {
-    if (allowanceDraft[emp.id] !== undefined) return allowanceDraft[emp.id];
-    return emp.annual_leave_days != null ? String(emp.annual_leave_days) : '';
-  }
-  function allowanceDirty(emp: Employee): boolean {
-    const draft = allowanceDraft[emp.id];
-    return draft !== undefined && draft.trim() !== (emp.annual_leave_days != null ? String(emp.annual_leave_days) : '');
+  function cancelEdit() {
+    setEditingId(null);
+    setEditText('');
+    setAllowanceError(null);
   }
 
   async function saveAllowance(emp: Employee) {
-    const text = (allowanceDraft[emp.id] ?? '').trim();
+    const text = editText.trim();
     const value = text === '' ? null : Number(text);
     if (value != null && (!Number.isInteger(value) || value < 0 || value > 366)) {
-      setAllowanceError('Enter whole days between 0 and 366, or leave it blank to use the company default.');
+      setAllowanceError('Enter whole days from 0 to 366, or clear the box for no leave.');
+      return;
+    }
+    if (value === (emp.annual_leave_days ?? null)) {
+      cancelEdit();
       return;
     }
     setSavingAllowanceId(emp.id);
     setAllowanceError(null);
     const { error: saveError } = await supabase.from('employees').update({ annual_leave_days: value }).eq('id', emp.id);
-    setSavingAllowanceId(null);
     if (saveError) {
+      setSavingAllowanceId(null);
       setAllowanceError(
         /annual_leave_days/.test(saveError.message)
           ? 'The per-employee leave migration (20260911110000_employee_annual_leave_days.sql) has not been applied to the database yet.'
@@ -187,43 +166,83 @@ export default function LeavePage() {
       );
       return;
     }
+    // Week Off work always earns leave for a company using the balance —
+    // switched on the first time anyone is given leave.
+    if (!policy.weekOffWorkEarnsLeave && companyId && value != null && value > 0) {
+      const { error: policyError } = await supabase.from('companies').update({ week_off_work_earns_leave: true }).eq('id', companyId);
+      if (!policyError) setPolicy(p => ({ ...p, weekOffWorkEarnsLeave: true }));
+    }
+    setSavingAllowanceId(null);
     setEmployees(list => list.map(e => (e.id === emp.id ? { ...e, annual_leave_days: value } : e)));
-    setAllowanceDraft(d => {
-      const next = { ...d };
-      delete next[emp.id];
-      return next;
-    });
+    setEditingId(null);
+    setEditText('');
+    setSavedId(emp.id);
+    window.setTimeout(() => setSavedId(s => (s === emp.id ? null : s)), 2500);
   }
 
-  /** Yearly Leave cell: the employee's own allowance, blank = default. */
+  /** Yearly Leave cell: the number with an Edit button, or — while editing —
+   * a box with Save and Cancel. */
   function allowanceInput(emp: Employee) {
-    const dirty = allowanceDirty(emp);
-    return (
-      <span className="inline-flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-        <input
-          type="number"
-          min={0}
-          max={366}
-          step={1}
-          value={allowanceText(emp)}
-          placeholder={formatLeaveDays(policy.daysPerYear)}
-          onChange={e => setAllowanceDraft(d => ({ ...d, [emp.id]: e.target.value }))}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && dirty) saveAllowance(emp);
-          }}
-          aria-label={`Yearly leave for ${emp.name}`}
-          className="w-16 rounded-md border border-slate-300 px-2 py-1 text-right text-sm placeholder:text-slate-400"
-        />
-        <span className="text-xs text-slate-400">{emp.annual_leave_days == null && !dirty ? 'default' : 'days'}</span>
-        {dirty && (
+    const saving = savingAllowanceId === emp.id;
+    if (editingId === emp.id) {
+      return (
+        <span className="inline-flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={366}
+            step={1}
+            autoFocus
+            value={editText}
+            placeholder="0"
+            onFocus={e => e.target.select()}
+            onChange={e => setEditText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') saveAllowance(emp);
+              if (e.key === 'Escape') cancelEdit();
+            }}
+            aria-label={`Yearly leave for ${emp.name}`}
+            className="w-16 rounded-md border border-accent px-2 py-1 text-right text-sm outline-none ring-2 ring-accent/20"
+          />
+          <span className="text-xs text-slate-400">days</span>
           <button
             onClick={() => saveAllowance(emp)}
-            disabled={savingAllowanceId === emp.id}
-            className="rounded-md bg-accent px-2 py-1 text-xs font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+            disabled={saving}
+            className="rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
           >
-            {savingAllowanceId === emp.id ? '…' : 'Save'}
+            {saving ? 'Saving…' : 'Save'}
           </button>
+          <button
+            onClick={cancelEdit}
+            disabled={saving}
+            className="rounded-md border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-2" onClick={e => e.stopPropagation()}>
+        {emp.annual_leave_days != null ? (
+          <span className="min-w-[4.5rem] text-sm font-semibold text-ink">{formatLeaveDays(emp.annual_leave_days)} days</span>
+        ) : (
+          <span className="min-w-[4.5rem] text-sm text-slate-400">Not set</span>
         )}
+        <button
+          onClick={() => startEdit(emp)}
+          disabled={editingId !== null}
+          title={`Change ${emp.name}'s yearly leave`}
+          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+          {emp.annual_leave_days != null ? 'Edit' : 'Set'}
+        </button>
+        {savedId === emp.id && <span className="text-xs font-semibold text-good-text">Saved ✓</span>}
       </span>
     );
   }
@@ -404,43 +423,23 @@ export default function LeavePage() {
       {tab === 'balance' && (
         <>
           <div className="mb-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-ink">Paid leave policy</h2>
-            <p className="mt-1 max-w-3xl text-sm text-slate-500">
-              Each employee gets their yearly leave on 1 Shrawan. An absent working day, or approved leave, is paid from the
-              balance. Salary is cut only after the balance reaches 0. Unused days lapse at the end of the fiscal year.
-            </p>
-            <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
-              <label className="text-sm">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Default leave per year</span>
-                <span className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={0}
-                    max={366}
-                    step={1}
-                    value={draftDays}
-                    onChange={e => setDraftDays(e.target.value)}
-                    className="w-24 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-                  />
-                  <span className="text-slate-500">days, for anyone without their own number below</span>
-                </span>
-              </label>
-              <label className="flex items-center gap-2 pb-1.5 text-sm text-ink">
-                <input type="checkbox" checked={draftEarns} onChange={e => setDraftEarns(e.target.checked)} className="h-4 w-4 accent-accent" />
-                Week Off work earns leave: +1 day for every full {formatLeaveDays(policy.hoursPerLeaveDay)} hours (no half days; 30 min leeway, so a 24h duty = 3 days), not
-                overtime
-              </label>
-              {policyDirty && (
-                <button
-                  onClick={savePolicy}
-                  disabled={savingPolicy || !companyId}
-                  className="rounded-md bg-accent px-4 py-1.5 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
-                >
-                  {savingPolicy ? 'Saving…' : 'Save'}
-                </button>
-              )}
-            </div>
-            {policyError && <p className="mt-3 text-sm text-critical">{policyError}</p>}
+            <h2 className="text-sm font-bold text-ink">How leave works</h2>
+            <ul className="mt-2 max-w-4xl list-disc space-y-1 pl-5 text-sm text-slate-600">
+              <li>
+                Each employee gets the yearly leave you set for them below, on 1 Shrawan. Nobody gets leave until you set it.
+                Unused days lapse at the end of the fiscal year.
+              </li>
+              <li>
+                An absent working day, or approved leave, is paid from the balance and costs the rostered duty in days:{' '}
+                <strong>8h day = 1</strong>, <strong>16h duty = 2</strong>, <strong>24h duty = 3</strong>. Salary is cut only
+                once the balance runs out.
+              </li>
+              <li>
+                Work on a <strong>Week Off</strong> is always counted by the hours and added to the balance:{' '}
+                <strong>+1 day for every full {formatLeaveDays(policy.hoursPerLeaveDay)} hours</strong> (no half days; 30 minutes&apos;
+                leeway, so a 24h duty = 3 days). It is not paid as overtime.
+              </li>
+            </ul>
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -452,12 +451,12 @@ export default function LeavePage() {
                 </span>
               </div>
               <div className="text-xs text-slate-500">
-                {!balanceOn ? 'Set a default or an employee’s yearly leave to start' : ledgersLoading ? 'Calculating…' : 'Counted up to yesterday'}
+                {!balanceOn ? 'Set an employee’s yearly leave to start' : ledgersLoading ? 'Calculating…' : 'Counted up to yesterday'}
               </div>
             </div>
             <p className="border-b border-slate-100 px-5 py-2 text-xs text-slate-500">
-              Type an employee&apos;s own yearly leave in <strong>Yearly Leave</strong> and press Save. Leave it blank to use the
-              default ({formatLeaveDays(policy.daysPerYear)} days).
+              Click <strong>Set</strong> or <strong>Edit</strong> in <strong>Yearly Leave</strong>, type the days, then Save (Enter) or
+              Cancel (Esc). Clear the box to remove someone&apos;s leave.
             </p>
             {allowanceError && <p className="px-5 pt-3 text-sm text-critical">{allowanceError}</p>}
 
@@ -559,8 +558,8 @@ function LedgerEntries({ ledger, system }: { ledger: LeaveLedger; system: Return
   if (ledger.entries.length === 0) {
     return (
       <p className="mt-2 text-xs text-slate-500">
-        No absences or Week Off work since {formatAdDate(ledger.from, system)}. The full {formatLeaveDays(ledger.entitlement)} days are
-        available.
+        No absences or Week Off work since {formatAdDate(ledger.from, system)}.
+        {ledger.entitlement > 0 ? ` The full ${formatLeaveDays(ledger.entitlement)} days are available.` : ' No yearly leave set yet.'}
       </p>
     );
   }
@@ -584,6 +583,9 @@ function LedgerEntries({ ledger, system }: { ledger: LeaveLedger; system: Return
                 {ENTRY_LABEL[e.kind]}
                 {e.kind === 'earned' && e.hours != null && (
                   <span className="text-slate-500"> · {formatLeaveDays(e.hours)}h worked</span>
+                )}
+                {e.cost != null && e.cost > 1 && (
+                  <span className="text-slate-500"> · {e.cost}-day duty</span>
                 )}
                 {e.unpaid > 0 && <span className="ml-1 font-semibold text-critical-text">· {formatLeaveDays(e.unpaid)}d unpaid</span>}
               </td>
