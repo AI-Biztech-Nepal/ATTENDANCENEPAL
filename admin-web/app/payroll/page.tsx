@@ -139,6 +139,8 @@ export default function PayrollPage() {
     ['workedDays', 'Worked Days'],
     ['totalHours', 'Total Hours'],
     ['lateEarly', 'Late / Early Days'],
+    // Only offered once the company uses the yearly leave balance.
+    ...(leavePolicyActive(leavePolicy, employees) ? ([['paidLeave', 'Paid Leave']] as [keyof PayrollReportColumns, string][]) : []),
   ];
   function toggleVisibleCol(key: keyof PayrollReportColumns) {
     setVisibleCols(c => {
@@ -224,7 +226,8 @@ export default function PayrollPage() {
     fetchLeavePolicy().then(setLeavePolicy);
   }, []);
 
-  const leaveOn = leavePolicyActive(leavePolicy, employees);
+  // The Paid Leave switch in the cog turns the balance off for this report.
+  const leaveOn = visibleCols.paidLeave && leavePolicyActive(leavePolicy, employees);
 
   async function saveOtDefaults() {
     if (!companyId) return;
@@ -976,7 +979,7 @@ export default function PayrollPage() {
                 onToggle={toggleVisibleCol}
                 options={ATTENDANCE_COLUMN_OPTIONS}
                 title="Payroll report columns"
-                description="Hides the column from this report and its printed / PDF / Excel copy. Overtime is set on the Salary Structure page, since hiding it also takes overtime pay out of the totals there."
+                description="Hides the column from this report and its printed / PDF / Excel copy. Overtime is set on the Salary Structure page, since hiding it also takes overtime pay out of the totals there. Paid Leave off pays as if there were no leave balance: absences aren’t paid from it and Week Off work counts as a paid day and overtime again."
               />
             }
           />

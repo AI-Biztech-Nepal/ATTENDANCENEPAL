@@ -24,6 +24,11 @@ export type PayrollReportColumns = {
   /** No switch of its own anymore — always shown — but kept so the Payroll
    * report's existing `visibleCols.deductions` checks still resolve. */
   deductions: boolean;
+  /** The yearly leave balance (lib/leaveBalance.ts) on the Payroll report /
+   * Staff Salary Sheet. Off = pay as if there were no balance: absences are
+   * not paid from it, Week Off work is a paid day and overtime again, and the
+   * Paid Leave column is hidden. Like `overtime`, it changes the totals. */
+  paidLeave: boolean;
 };
 
 export const DEFAULT_PAYROLL_REPORT_COLUMNS: PayrollReportColumns = {
@@ -38,6 +43,7 @@ export const DEFAULT_PAYROLL_REPORT_COLUMNS: PayrollReportColumns = {
   pf: true,
   ssfEmployer: true,
   ssfEmployee: true,
+  paidLeave: true,
 };
 
 export const PAYROLL_REPORT_COLUMNS_KEY = 'payrollReportColumns';
@@ -58,6 +64,7 @@ export function normalizePayrollReportColumns(raw: unknown): PayrollReportColumn
     pf: pick('pf'),
     ssfEmployer: pick('ssfEmployer'),
     ssfEmployee: pick('ssfEmployee'),
+    paidLeave: pick('paidLeave'),
   };
 }
 

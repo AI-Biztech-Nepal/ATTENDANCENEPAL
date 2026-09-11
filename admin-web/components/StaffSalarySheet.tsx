@@ -153,6 +153,8 @@ export default function StaffSalarySheet() {
   const ATTENDANCE_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
     ['workedDays', 'Worked Days'],
     ['totalHours', 'Total Hours'],
+    // Only offered once the company uses the yearly leave balance.
+    ...(leavePolicyActive(leavePolicy, employees) ? ([['paidLeave', 'Paid Leave']] as [keyof PayrollReportColumns, string][]) : []),
   ];
   function toggleVisibleCol(key: keyof PayrollReportColumns) {
     setVisibleCols(c => {
@@ -211,7 +213,7 @@ export default function StaffSalarySheet() {
   // The balance is walked from 1 Shrawan, not just this period, so an absence
   // earlier in the year has already used its share before this month's days.
   useEffect(() => {
-    if (!rosterMode || !leavePolicyActive(leavePolicy, employees) || employees.length === 0) {
+    if (!rosterMode || !visibleCols.paidLeave || !leavePolicyActive(leavePolicy, employees) || employees.length === 0) {
       setLeaveLedgers(new Map());
       return;
     }
@@ -229,9 +231,10 @@ export default function StaffSalarySheet() {
     return () => {
       cancelled = true;
     };
-  }, [employees, leavePolicy, weeklyOffDay, rosterMode, period]);
+  }, [employees, leavePolicy, weeklyOffDay, rosterMode, period, visibleCols.paidLeave]);
 
-  const leaveOn = leavePolicyActive(leavePolicy, employees);
+  // The Paid Leave switch in the cog turns the balance off for this report.
+  const leaveOn = visibleCols.paidLeave && leavePolicyActive(leavePolicy, employees);
 
   useEffect(() => {
     const { start, end } = period;
@@ -657,7 +660,7 @@ export default function StaffSalarySheet() {
                 onToggle={toggleVisibleCol}
                 options={ATTENDANCE_COLUMN_OPTIONS}
                 title="Payroll report columns"
-                description="Hides the column from this sheet and its printed / PDF / Excel copy. Overtime is set on the Salary Structure page, since hiding it also takes overtime pay out of the totals there."
+                description="Hides the column from this sheet and its printed / PDF / Excel copy. Overtime is set on the Salary Structure page, since hiding it also takes overtime pay out of the totals there. Paid Leave off pays as if there were no leave balance: absences aren’t paid from it and Week Off work counts as a paid day and overtime again."
               />
             }
           />
