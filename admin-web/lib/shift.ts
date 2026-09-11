@@ -352,6 +352,40 @@ export function nepalDateTimeToUtcMs(dateKey: string, time: string): number {
   return Date.UTC(y, m - 1, d, hh, mm) - NEPAL_OFFSET_MINUTES * 60000;
 }
 
+/** Drops from each date's bucket any punch that a saved payroll_summaries row
+ * for a DIFFERENT date already used as its check-in or check-out. The server
+ * can hand a punch to a neighbouring day — an overnight window, or a Week Off
+ * duty taking the next morning's punch as its check-out
+ * (week_off_duty_checkout(), 20260911120000) — and a day left with no saved
+ * row of its own is rebuilt here from raw punches, which would otherwise
+ * count that same punch a second time as its own check-in. Summaries dated
+ * `today` are ignored, as every caller computes today live. Mutates and
+ * returns `byDate`. */
+export function dropPunchesClaimedBySummaries(
+  byDate: Map<string, AttendanceLog[]>,
+  employeeSummaries: { work_date: string; check_in: string | null; check_out: string | null }[],
+  today: string
+): Map<string, AttendanceLog[]> {
+  const claimedBy = new Map<number, string>();
+  for (const s of employeeSummaries) {
+    if (s.work_date === today) continue;
+    for (const t of [s.check_in, s.check_out]) {
+      if (t) claimedBy.set(Date.parse(t), s.work_date);
+    }
+  }
+  if (claimedBy.size === 0) return byDate;
+  for (const [date, list] of byDate) {
+    const kept = list.filter(l => {
+      const owner = claimedBy.get(Date.parse(l.punch_time));
+      return owner === undefined || owner === date;
+    });
+    if (kept.length === list.length) continue;
+    if (kept.length > 0) byDate.set(date, kept);
+    else byDate.delete(date);
+  }
+  return byDate;
+}
+
 /** Corrects a `byDate` grouping (built by each call site the usual way —
  * bucketing raw punches by their own calendar date) for overnight shifts
  * (Night Duty, Day & Night Duty): a shift starting in the evening has its

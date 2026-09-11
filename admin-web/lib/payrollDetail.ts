@@ -2,6 +2,7 @@ import type { AttendanceLog, Employee, PayrollSummary, Shift } from './types';
 import {
   applyOvernightShiftCorrection,
   computeDayStatusForResolvedShift,
+  dropPunchesClaimedBySummaries,
   edgePunctuality,
   isWeekOff,
   nepalDateKey,
@@ -79,6 +80,8 @@ export function buildEmployeeDayRows(
   applyOvernightShiftCorrection(byDate, employeeLogs, employee, shifts, dailyShiftByDate, weekOffDates, weeklyPattern, days);
 
   const today = nepalTodayIso();
+  // A punch another day's saved row already owns isn't this day's too.
+  dropPunchesClaimedBySummaries(byDate, summaries.filter(s => s.employee_id === employee.id), today);
   return days.map(day => {
     // Today can still gain punches after its payroll_summaries row was
     // computed (not re-run until tomorrow's nightly job), so always compute

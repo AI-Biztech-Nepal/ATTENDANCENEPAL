@@ -10,6 +10,7 @@ import { formatDdMmYyyy } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   applyOvernightShiftCorrection,
+  dropPunchesClaimedBySummaries,
   buildWeeklyPatternByEmployee,
   computeDayStatusForResolvedShift,
   edgePunctuality,
@@ -361,6 +362,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         if (dayLogs.length > 0) byDate.set(day, dayLogs);
       }
       applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern, days);
+      // A punch another day's saved row already owns (e.g. a Week Off duty's
+      // next-morning check-out) isn't this day's too.
+      dropPunchesClaimedBySummaries(byDate, summaries.filter(s => s.employee_id === emp.id), today);
       logsByEmployeeDay.set(emp.id, byDate);
     }
 

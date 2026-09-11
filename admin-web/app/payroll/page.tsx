@@ -30,6 +30,7 @@ import {
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   applyOvernightShiftCorrection,
+  dropPunchesClaimedBySummaries,
   buildWeeklyPatternByEmployee,
   computeDayStatusForResolvedShift,
   formatHoursMinutes,
@@ -435,6 +436,8 @@ export default function PayrollPage() {
         if (dayLogs.length > 0) byDate.set(day, dayLogs);
       }
       applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern, days);
+      // A punch another day's saved row already owns isn't this day's too.
+      dropPunchesClaimedBySummaries(byDate, summaries.filter(s => s.employee_id === emp.id), today);
       logsByEmployeeDay.set(emp.id, byDate);
     }
 

@@ -400,8 +400,13 @@ export async function loadLeaveLedgers(opts: {
       buildLeaveLedger({
         employeeId: emp.id,
         days,
-        isOffDay: date =>
-          weekOffDates.has(date) || isWeekOff(resolveShiftForDate(emp, shiftList, date, dailyShiftByDate, weekOffDates, weeklyPattern)),
+        // The roster wins, as it does server-side and in the payroll reports: a
+        // duty rostered on a company holiday is a normal duty (paid as a day),
+        // not Week Off work, so it earns no leave. A holiday with no roster
+        // entry still resolves to Week Off. Punchless holidays never reach
+        // the ledger as absences — buildEmployeeDayRows already labels them
+        // 'Week Off'.
+        isOffDay: date => isWeekOff(resolveShiftForDate(emp, shiftList, date, dailyShiftByDate, weekOffDates, weeklyPattern)),
         isUnpaidLeave: date => unpaid?.has(date) ?? false,
         policy: opts.policy,
         entitlement: employeeLeaveAllowance(emp, opts.policy),
