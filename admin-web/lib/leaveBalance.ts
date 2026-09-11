@@ -58,11 +58,17 @@ export function leavePolicyActive(p: LeavePolicy, employees?: Pick<Employee, 'an
   return p.daysPerYear > 0 || p.weekOffWorkEarnsLeave || !!employees?.some(e => Number(e.annual_leave_days) > 0);
 }
 
+/** Punches land a few minutes either side of the hour, so a 24h duty taken
+ * 09:02 -> 08:57 measures 23h 55m. This much short of a full standard day
+ * still counts as one. */
+export const WEEK_OFF_CREDIT_GRACE_HOURS = 0.5;
+
 /** Whole leave days earned by `hours` of Week Off work: one per full
- * standard day, never a part day. */
+ * standard day (less the grace above), never a part day. 8h -> 1, 16h -> 2,
+ * 24h -> 3; 7h 29m -> 0. */
 export function weekOffLeaveCredit(hours: number, hoursPerLeaveDay: number): number {
-  // The epsilon keeps an exact 8h stored as 7.9999… from rounding down.
-  return Math.floor(hours / Math.max(1, hoursPerLeaveDay) + 1e-6);
+  // The epsilon keeps an exact boundary stored as x.9999… from rounding down.
+  return Math.floor((hours + WEEK_OFF_CREDIT_GRACE_HOURS) / Math.max(1, hoursPerLeaveDay) + 1e-6);
 }
 
 /** The caller's company leave policy. The two columns come from a migration

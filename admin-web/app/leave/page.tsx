@@ -427,7 +427,7 @@ export default function LeavePage() {
               </label>
               <label className="flex items-center gap-2 pb-1.5 text-sm text-ink">
                 <input type="checkbox" checked={draftEarns} onChange={e => setDraftEarns(e.target.checked)} className="h-4 w-4 accent-accent" />
-                Week Off work earns leave: +1 day for every full {formatLeaveDays(policy.hoursPerLeaveDay)} hours (no half days), not
+                Week Off work earns leave: +1 day for every full {formatLeaveDays(policy.hoursPerLeaveDay)} hours (no half days; 30 min leeway, so a 24h duty = 3 days), not
                 overtime
               </label>
               {policyDirty && (

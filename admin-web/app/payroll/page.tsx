@@ -382,6 +382,9 @@ export default function PayrollPage() {
         daysToYesterday: number;
         hours: number;
         overtime: number;
+        /** Week Off hours that earned leave instead of pay (yearly leave
+         * balance). Inside `hours`, but never paid — see calculatedSalary. */
+        leaveEarningHours: number;
         lateDays: number;
         earlyDays: number;
         /** Punchless-but-paid days: company Week-off + approved Leave. Used for
@@ -409,6 +412,7 @@ export default function PayrollPage() {
         daysToYesterday: 0,
         hours: 0,
         overtime: 0,
+        leaveEarningHours: 0,
         lateDays: 0,
         earlyDays: 0,
         paidOffDays: 0,
@@ -448,17 +452,19 @@ export default function PayrollPage() {
         // job swept in a Week Off / Absent day, or the only punch was claimed
         // by an overnight shift the day before. Fall through so it's scored
         // as a paid day off / absence, not counted toward worked days or pay.
-        // Week Off attendance that earns leave (yearly leave balance) is not
-        // overtime — it's added to the balance instead.
+        // Week Off attendance that earns leave (yearly leave balance) is paid
+        // in leave days only — not as a day or hours of Basic, not overtime.
         const weekOffWorkEarnsLeave = () =>
           leaveOn &&
           leavePolicy.weekOffWorkEarnsLeave &&
           isWeekOff(resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern));
         if (summary && summary.check_in) {
+          const earnsLeave = weekOffWorkEarnsLeave();
           row.days += 1;
-          row.daysToYesterday += 1; // a summary row only exists for a past day
+          if (!earnsLeave) row.daysToYesterday += 1; // a summary row only exists for a past day
           row.hours += Number(summary.total_hours);
-          if (!weekOffWorkEarnsLeave()) row.overtime += Number(summary.overtime_hours);
+          if (earnsLeave) row.leaveEarningHours += Number(summary.total_hours);
+          else row.overtime += Number(summary.overtime_hours);
           if (summary.is_late) row.lateDays += 1;
           if (summary.is_early_departure) row.earlyDays += 1;
           continue;
@@ -491,10 +497,12 @@ export default function PayrollPage() {
         // from the raw punches, same as the Attendance Report page does.
         const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
         const live = computeDayStatusForResolvedShift(dayLogs, resolved);
+        const earnsLeave = leaveOn && leavePolicy.weekOffWorkEarnsLeave && isWeekOff(resolved);
         row.days += 1;
-        if (day < today) row.daysToYesterday += 1;
+        if (day < today && !earnsLeave) row.daysToYesterday += 1;
         row.hours += live.totalMinutes / 60;
-        if (!(leaveOn && leavePolicy.weekOffWorkEarnsLeave && isWeekOff(resolved))) row.overtime += live.overtimeMinutes / 60;
+        if (earnsLeave) row.leaveEarningHours += live.totalMinutes / 60;
+        else row.overtime += live.overtimeMinutes / 60;
         if (live.isLate && !emp.attendance_exempt) row.lateDays += 1;
         if (live.isEarly && !emp.attendance_exempt) row.earlyDays += 1;
       }
@@ -569,7 +577,7 @@ export default function PayrollPage() {
       return Math.round(dayRate * (row.daysToYesterday + row.paidLeaveDays));
     }
     const hourlyRate = row.salary / (divisorDays * otHoursPerDay);
-    const regularHours = Math.max(0, row.hours - row.overtime);
+    const regularHours = Math.max(0, row.hours - row.overtime - row.leaveEarningHours);
     return Math.round(hourlyRate * regularHours + hourlyRate * otHoursPerDay * row.paidLeaveDays);
   }
 

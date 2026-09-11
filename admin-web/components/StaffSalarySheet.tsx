@@ -343,9 +343,12 @@ export default function StaffSalarySheet() {
         // running, so it counts for the attendance columns but not for pay.
         const finished = d.date < today;
         const attended = d.status === 'Present' || d.status === 'Late';
+        // Week Off work that earns leave is paid in leave days (the balance),
+        // not as an extra day of Basic and not as overtime — only once.
+        const earnsLeave = leaveOn && leavePolicy.weekOffWorkEarnsLeave && attended && offDay(d.date);
         if (attended) {
           days += 1;
-          if (finished) paidDaysToYesterday += 1;
+          if (finished && !earnsLeave) paidDaysToYesterday += 1;
         }
         if (d.paidOff) paidOffDays += 1;
         // With the yearly balance on, paid leave comes from the ledger below
@@ -354,10 +357,7 @@ export default function StaffSalarySheet() {
           paidLeaveDays += 1;
         }
         hours += d.hours;
-        // Week Off work that earns leave is not overtime.
-        if (!(leaveOn && leavePolicy.weekOffWorkEarnsLeave && attended && offDay(d.date))) {
-          overtime += d.overtime;
-        }
+        if (!earnsLeave) overtime += d.overtime;
       }
       if (leaveOn) paidLeaveDays = coveredDaysInRange(leaveLedgers.get(emp.id), start, end);
       map.set(emp.id, { days, hours, overtime, paidOffDays, paidDaysToYesterday, paidLeaveDays, workingDays });

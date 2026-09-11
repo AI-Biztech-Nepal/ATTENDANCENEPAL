@@ -32,8 +32,8 @@ alter table companies
 alter table companies
   add column if not exists week_off_work_earns_leave boolean not null default false;
 
--- ASHADEEP FOUNDATION: 30 paid-leave days a year; Week Off work earns leave.
+-- ASHADEEP FOUNDATION: Week Off work earns leave. No default allowance --
+-- the admin enters each employee's yearly leave on the Leave page.
 update companies
-set paid_leave_days_per_year = 30,
-    week_off_work_earns_leave = true
+set week_off_work_earns_leave = true
 where id = '3211d649-4ecb-476a-b059-aa06e90899f6';
