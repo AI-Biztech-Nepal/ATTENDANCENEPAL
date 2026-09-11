@@ -114,9 +114,8 @@ html, body {
   }
 
   /* ── Payroll Salary Report — fit-to-page ────────────────────────────
-     Every tenant except one legacy customer (Ashadeep Foundation, which
-     keeps the plain `.print-report` rules above). Two fixes over that
-     baseline:
+     The standard (hourly) report's print layout, for a company set back to
+     payroll_format 'standard'. Two fixes over the `.print-report` baseline:
 
      1. The report can carry up to ~16 columns (all deduction columns on).
         The baseline's forced `white-space: nowrap` then pushes the last

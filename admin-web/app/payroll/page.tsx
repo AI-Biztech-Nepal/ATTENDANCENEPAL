@@ -775,10 +775,17 @@ export default function PayrollPage() {
     );
   }
 
-  // Standard companies never hit this branch — the format resolves to
-  // 'standard' and the normal report below renders throughout, unchanged.
-  // Only the one customer with payroll_format = 'staff_salary_sheet' gets
-  // swapped over (after a brief flash of this page while it resolves).
+  // Every company's format is the Staff Salary Sheet (20260911140000); the
+  // hourly report below is only for a company set back to 'standard'. Hold
+  // a plain loading state until the format resolves, so nobody sees a flash
+  // of the wrong report first.
+  if (payrollFormat === null) {
+    return (
+      <AppShell title="Payroll Report">
+        <p className="p-8 text-center text-sm text-slate-400">Loading…</p>
+      </AppShell>
+    );
+  }
   if (payrollFormat === 'staff_salary_sheet') {
     return <StaffSalarySheet />;
   }
@@ -900,7 +907,7 @@ export default function PayrollPage() {
 
       {/* First print-visible block — the summary grid above is `print:hidden`
           — so the page opens on the masthead. Landscape is set by the @page
-          rule injected above (for every tenant but Ashadeep Foundation). */}
+          rule injected above. */}
       <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white pb-2 shadow-sm print:overflow-visible print:border-0 print:shadow-none">
         <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-accent/10 via-accent/5 to-transparent px-4 py-4 sm:px-6 print:hidden">
           <div className="flex items-center gap-2.5">
@@ -987,9 +994,7 @@ export default function PayrollPage() {
         {/* Print-only masthead — gives the report a proper document header
             (company name, title, the period it covers, headcount, when it
             was run) instead of opening straight into a bare table. The
-            company name is pulled live from the tenant's own record and
-            prints for every tenant (Ashadeep Foundation included — only the
-            fit-to-page table layout is carved out for them). */}
+            company name is pulled live from the tenant's own record. */}
         <div className="hidden px-4 pt-2 print:block sm:px-6">
           {companyName ? (
             <div className="break-words text-lg font-bold leading-tight text-black sm:text-xl">{companyName}</div>

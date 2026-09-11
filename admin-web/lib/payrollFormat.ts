@@ -3,13 +3,15 @@ import { supabase } from './supabase';
 /**
  * Which payroll report the current user's company sees.
  *
- * 'standard' — the attendance-based Payroll report every company gets.
- * 'staff_salary_sheet' — a fixed-salary sheet enabled for exactly one
- *   customer via `update companies set payroll_format = 'staff_salary_sheet'`.
+ * 'staff_salary_sheet' — the Staff Salary Sheet: Basic earned per day
+ *   present, Allowance, SSF gross-up, Net. Every company's format, and the
+ *   column default for new ones (20260911140000).
+ * 'standard' — the older hourly attendance-based Payroll report, kept for a
+ *   company set back to it with
+ *   `update companies set payroll_format = 'standard' where id = ...`.
  *
- * Deliberately isolated from lib/weekOff.ts's shared config fetch: only the
- * Payroll Report page calls this, and a not-yet-applied migration (or no
- * company) degrades to 'standard' rather than breaking anything.
+ * Deliberately isolated from lib/weekOff.ts's shared config fetch: a missing
+ * company degrades to 'standard' rather than breaking anything.
  */
 export type PayrollFormat = 'standard' | 'staff_salary_sheet';
 
@@ -23,11 +25,9 @@ export async function fetchCompanyPayrollFormat(): Promise<PayrollFormat> {
 }
 
 /**
- * The current company's display name. Used only to keep one legacy customer
- * (Ashadeep Foundation) on the old payroll-print layout while every other
- * tenant — present and future — gets the fit-to-page print fix. Returns ''
- * when there's no company or the row can't be read, so the caller treats
- * "unknown" as "not the exception" and applies the fix.
+ * The current company's display name — printed as the document header on the
+ * payroll reports. Returns '' when there's no company or the row can't be
+ * read.
  */
 export async function fetchCompanyName(): Promise<string> {
   const { data: auth } = await supabase.auth.getUser();
@@ -38,18 +38,11 @@ export async function fetchCompanyName(): Promise<string> {
   return (data?.name as string | null)?.trim() ?? '';
 }
 
-/** True for the single legacy tenant that must keep the pre-fit payroll
- * print layout. Everyone else (and any new tenant) gets the fixed one. */
-export function isLegacyPayrollPrintTenant(companyName: string | null | undefined): boolean {
-  return (companyName ?? '').trim().toLowerCase() === 'ashadeep foundation';
-}
-
 /**
  * Config the Staff Salary Sheet needs beyond the standard company config —
  * the editable SSF employer / employee rates and the overtime policy. Its own
  * fetch (not folded into the shared lib/weekOff.ts one) so a not-yet-applied
- * ssf_employer_rate migration only degrades this sheet, nothing else. Called
- * only when payroll_format is 'staff_salary_sheet'.
+ * ssf_employer_rate migration only degrades this sheet, nothing else.
  */
 export type StaffSheetConfig = {
   ssfEmployerRate: number; // % of Basic
