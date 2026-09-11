@@ -23,6 +23,7 @@ import {
   type DailyShiftByDate,
 } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
+import { fetchLeavePolicy, leavePolicyActive } from '@/lib/leaveBalance';
 import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
@@ -240,6 +241,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
+  // Company leave policy (lib/leaveBalance.ts): Week Off work adds to the
+  // yearly leave balance instead of being paid as overtime.
+  const [weekOffLeaveHours, setWeekOffLeaveHours] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Correction mode: an admin-only view toggle. Off = the standard report;
@@ -276,6 +280,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           .then(({ data }) => setWeeklyPatternRows(data ?? []));
       }
     });
+    fetchLeavePolicy().then(p => setWeekOffLeaveHours(leavePolicyActive(p) && p.weekOffWorkEarnsLeave ? p.hoursPerLeaveDay : null));
   }, []);
 
   useEffect(() => {
@@ -938,7 +943,14 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 calc_payroll_fields() with 0 scheduled hours, so every hour
                 entered lands as overtime. Said before Save, not discovered on
                 the payroll report afterwards. */}
-            {fixRow.status === 'Week Off' && (
+            {fixRow.status === 'Week Off' && weekOffLeaveHours != null && (
+              <p className="mt-3 rounded-lg border border-info/20 bg-info-bg px-3 py-2 text-xs leading-relaxed text-info-text">
+                This is a <strong>week off</strong>. The hours you enter are <strong>added to the employee&apos;s leave
+                balance</strong> — 1 day for every full {weekOffLeaveHours}h, no half days — not paid as overtime. Use it for
+                someone who genuinely came in on their day off.
+              </p>
+            )}
+            {fixRow.status === 'Week Off' && weekOffLeaveHours == null && (
               <p className="mt-3 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-xs leading-relaxed text-warning-text">
                 This is a <strong>week off</strong>. Nothing is scheduled, so <strong>every hour you enter is counted as
                 overtime</strong> — 09:00 to 17:00 records 8h of overtime. Use it for someone who genuinely came in on

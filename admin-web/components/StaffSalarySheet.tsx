@@ -21,6 +21,16 @@ import {
 import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import { fetchCompanyName } from '@/lib/payrollFormat';
 import {
+  NO_LEAVE_POLICY,
+  coveredDaysInRange,
+  fetchLeavePolicy,
+  formatLeaveDays,
+  leavePolicyActive,
+  loadLeaveLedgers,
+  type LeaveLedger,
+  type LeavePolicy,
+} from '@/lib/leaveBalance';
+import {
   DEFAULT_PAYROLL_REPORT_COLUMNS,
   loadPayrollReportColumns,
   normalizePayrollReportColumns,
@@ -59,7 +69,8 @@ type AttendanceAgg = {
    * built from. The plain days count stays whole-period so the Worked Days column
    * still shows today once someone has punched in. */
   paidDaysToYesterday: number;
-  /** Paid Leave on a working day, also only up to yesterday. */
+  /** Paid Leave on a working day, also only up to yesterday. With a yearly
+   * leave balance on, this is every absent / leave day the balance paid. */
   paidLeaveDays: number;
   workingDays: number;
 };
@@ -122,6 +133,12 @@ export default function StaffSalarySheet() {
   const [ssfEmployerRate, setSsfEmployerRate] = useState(11);
   const [ssfEmployeeRate, setSsfEmployeeRate] = useState(0);
   const [otHoursPerDay, setOtHoursPerDay] = useState(8);
+  const [rosterMode, setRosterMode] = useState<'weekly' | 'monthly' | null>(null);
+  // Yearly paid-leave balance (lib/leaveBalance.ts, set on the Leave page).
+  // An absent working day the balance still covers is paid like a day
+  // present; Week Off work earns leave instead of showing as overtime.
+  const [leavePolicy, setLeavePolicy] = useState<LeavePolicy>(NO_LEAVE_POLICY);
+  const [leaveLedgers, setLeaveLedgers] = useState<Map<string, LeaveLedger>>(new Map());
 
   // Which attendance columns show — the switches live on the Salary Structure
   // page now (shared localStorage, lib/payrollReportColumns); this sheet just
@@ -180,6 +197,7 @@ export default function StaffSalarySheet() {
       setOtHoursPerDay(otHoursPerDay);
       setSsfEmployerRate(ssfRate);
       setSsfEmployeeRate(tdsRate);
+      setRosterMode(rosterMode);
       if (rosterMode === 'weekly') {
         supabase
           .from('employee_weekly_pattern')
@@ -187,7 +205,33 @@ export default function StaffSalarySheet() {
           .then(({ data }) => setWeeklyPatternRows(data ?? []));
       }
     });
+    fetchLeavePolicy().then(setLeavePolicy);
   }, []);
+
+  // The balance is walked from 1 Shrawan, not just this period, so an absence
+  // earlier in the year has already used its share before this month's days.
+  useEffect(() => {
+    if (!rosterMode || !leavePolicyActive(leavePolicy, employees) || employees.length === 0) {
+      setLeaveLedgers(new Map());
+      return;
+    }
+    let cancelled = false;
+    loadLeaveLedgers({
+      employees,
+      policy: leavePolicy,
+      weeklyOffDay,
+      rosterMode,
+      until: period.end,
+      periodStart: period.start,
+    }).then(m => {
+      if (!cancelled) setLeaveLedgers(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [employees, leavePolicy, weeklyOffDay, rosterMode, period]);
+
+  const leaveOn = leavePolicyActive(leavePolicy, employees);
 
   useEffect(() => {
     const { start, end } = period;
@@ -292,29 +336,34 @@ export default function StaffSalarySheet() {
       // Calendar days minus company week-offs, so a full month of attendance
       // earns exactly the full Basic. Matches the standard report's divisor.
       const workingDays = Math.max(1, daysInRange - weekOffDates.size);
+      const offDay = (date: string) =>
+        isWeekOff(resolveShiftForDate(emp, shifts, date, dailyShiftByDate, weekOffDates, weeklyPattern));
       for (const d of rows) {
         // Everything before today is a finished day; today itself is still
         // running, so it counts for the attendance columns but not for pay.
         const finished = d.date < today;
-        if (d.status === 'Present' || d.status === 'Late') {
+        const attended = d.status === 'Present' || d.status === 'Late';
+        if (attended) {
           days += 1;
           if (finished) paidDaysToYesterday += 1;
         }
         if (d.paidOff) paidOffDays += 1;
-        if (
-          finished &&
-          d.status === 'Leave' &&
-          !isWeekOff(resolveShiftForDate(emp, shifts, d.date, dailyShiftByDate, weekOffDates, weeklyPattern))
-        ) {
+        // With the yearly balance on, paid leave comes from the ledger below
+        // instead — leave past the balance is no longer paid.
+        if (!leaveOn && finished && d.status === 'Leave' && !offDay(d.date)) {
           paidLeaveDays += 1;
         }
         hours += d.hours;
-        overtime += d.overtime;
+        // Week Off work that earns leave is not overtime.
+        if (!(leaveOn && leavePolicy.weekOffWorkEarnsLeave && attended && offDay(d.date))) {
+          overtime += d.overtime;
+        }
       }
+      if (leaveOn) paidLeaveDays = coveredDaysInRange(leaveLedgers.get(emp.id), start, end);
       map.set(emp.id, { days, hours, overtime, paidOffDays, paidDaysToYesterday, paidLeaveDays, workingDays });
     }
     return map;
-  }, [employees, shifts, summaries, logs, dailyShiftByDate, holidays, leaveRequests, weeklyOffDay, weeklyPatternRows, period]);
+  }, [employees, shifts, summaries, logs, dailyShiftByDate, holidays, leaveRequests, weeklyOffDay, weeklyPatternRows, period, leaveOn, leavePolicy, leaveLedgers]);
 
   /** Stored monthly Basic -> what has actually been earned so far, counting
    * attendance up to and including YESTERDAY.
@@ -446,15 +495,17 @@ export default function StaffSalarySheet() {
     let hours = 0;
     let overtime = 0;
     let paidOffDays = 0;
+    let paidLeaveDays = 0;
     for (const r of allRows) {
       const a = att(r.id);
       days += a.days;
       hours += a.hours;
       overtime += a.overtime;
       paidOffDays += a.paidOffDays;
+      paidLeaveDays += a.paidLeaveDays;
     }
     const absentDays = Math.max(0, allRows.length * elapsedDays - days - paidOffDays);
-    return { workedDays: days, hours, overtime, absentDays };
+    return { workedDays: days, hours, overtime, absentDays, paidLeaveDays };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allRows, attendanceByEmployee, period]);
 
@@ -466,6 +517,7 @@ export default function StaffSalarySheet() {
       'Branch',
       'Employee Name',
       ...(visibleCols.workedDays ? ['Worked Days'] : []),
+      ...(leaveOn ? ['Paid Leave'] : []),
       ...(visibleCols.totalHours ? ['Total Hours'] : []),
       ...(visibleCols.overtime ? ['Overtime'] : []),
       'Basic Salary Earned',
@@ -486,6 +538,7 @@ export default function StaffSalarySheet() {
           g.branch,
           r.name,
           ...(visibleCols.workedDays ? [a.days] : []),
+          ...(leaveOn ? [formatLeaveDays(a.paidLeaveDays)] : []),
           ...(visibleCols.totalHours ? [fmtHrs(a.hours)] : []),
           ...(visibleCols.overtime ? [fmtHrs(a.overtime)] : []),
           r.basic.toFixed(2),
@@ -542,7 +595,7 @@ export default function StaffSalarySheet() {
   // columns; the row order is stable, so it is still followable.
   const td = 'whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700';
 
-  const colCount = 10 + visibleAttCols.length;
+  const colCount = 10 + visibleAttCols.length + (leaveOn ? 1 : 0);
 
   return (
     <AppShell title="Payroll Report">
@@ -640,6 +693,12 @@ export default function StaffSalarySheet() {
                     Days
                   </th>
                 )}
+                {leaveOn && (
+                  <th className={thAtt} title="Absent working days paid from the yearly leave balance (see Leave → Leave Balance)">
+                    Paid<br />
+                    Leave
+                  </th>
+                )}
                 {visibleCols.totalHours && (
                   <th className={thAtt}>
                     Total<br />
@@ -696,6 +755,7 @@ export default function StaffSalarySheet() {
                       </Link>
                     </td>
                     {visibleCols.workedDays && <td className={td}>{att(item.row.id).days}</td>}
+                    {leaveOn && <td className={td}>{formatLeaveDays(att(item.row.id).paidLeaveDays)}</td>}
                     {visibleCols.totalHours && <td className={td}>{fmtHrs(att(item.row.id).hours)}</td>}
                     {visibleCols.overtime && <td className={td}>{fmtHrs(att(item.row.id).overtime)}</td>}
                     <td className={td}>{money(item.row.basic)}</td>
@@ -739,6 +799,9 @@ export default function StaffSalarySheet() {
                       {' / '}
                       <span className="text-critical-text">{attTotals.absentDays}A</span>
                     </td>
+                  )}
+                  {leaveOn && (
+                    <td className="px-2.5 py-2.5 text-right tabular-nums">{formatLeaveDays(attTotals.paidLeaveDays)}</td>
                   )}
                   {visibleCols.totalHours && <td className="px-2.5 py-2.5 text-right tabular-nums">{fmtHrs(attTotals.hours)}</td>}
                   {visibleCols.overtime && <td className="px-2.5 py-2.5 text-right tabular-nums">{fmtHrs(attTotals.overtime)}</td>}

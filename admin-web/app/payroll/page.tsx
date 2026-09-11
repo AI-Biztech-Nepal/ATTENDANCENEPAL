@@ -11,6 +11,15 @@ import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { fetchCompanyPayrollFormat, fetchCompanyName, type PayrollFormat } from '@/lib/payrollFormat';
 import {
+  NO_LEAVE_POLICY,
+  coveredDaysInRange,
+  fetchLeavePolicy,
+  leavePolicyActive,
+  loadLeaveLedgers,
+  type LeaveLedger,
+  type LeavePolicy,
+} from '@/lib/leaveBalance';
+import {
   buildPeriodOptions,
   currentSystemYearMonth,
   formatAdDate,
@@ -62,6 +71,12 @@ export default function PayrollPage() {
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
+  const [rosterMode, setRosterMode] = useState<'weekly' | 'monthly' | null>(null);
+  // Yearly paid-leave balance (lib/leaveBalance.ts, set on the Leave page):
+  // an absent working day it still covers is paid, and Week Off work earns
+  // leave instead of overtime pay.
+  const [leavePolicy, setLeavePolicy] = useState<LeavePolicy>(NO_LEAVE_POLICY);
+  const [leaveLedgers, setLeaveLedgers] = useState<Map<string, LeaveLedger>>(new Map());
   const [pendingSalary, setPendingSalary] = useState<Record<string, string>>({});
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
   const [editingSalaryId, setEditingSalaryId] = useState<string | null>(null);
@@ -193,6 +208,7 @@ export default function PayrollPage() {
       setSsfRate(ssfRate);
       setSsfByEmployeeRate(tdsRate);
       setOvertimeAllowanceRate(overtimeRate);
+      setRosterMode(rosterMode);
       // Not date-scoped (a pattern applies to every week), and only ever
       // relevant in 'weekly' roster_mode — see resolveShiftForDate().
       if (rosterMode === 'weekly') {
@@ -202,7 +218,10 @@ export default function PayrollPage() {
           .then(({ data }) => setWeeklyPatternRows(data ?? []));
       }
     });
+    fetchLeavePolicy().then(setLeavePolicy);
   }, []);
+
+  const leaveOn = leavePolicyActive(leavePolicy, employees);
 
   async function saveOtDefaults() {
     if (!companyId) return;
@@ -278,6 +297,23 @@ export default function PayrollPage() {
   }
 
   useEffect(reload, [start, end]);
+
+  // Walked from 1 Shrawan rather than just this period, so absences earlier
+  // in the year have already used their share of the balance.
+  useEffect(() => {
+    // A staff_salary_sheet company renders StaffSalarySheet, which loads its own.
+    if (payrollFormat !== 'standard' || !rosterMode || !leaveOn || employees.length === 0) {
+      setLeaveLedgers(new Map());
+      return;
+    }
+    let cancelled = false;
+    loadLeaveLedgers({ employees, policy: leavePolicy, weeklyOffDay, rosterMode, until: end, periodStart: start }).then(m => {
+      if (!cancelled) setLeaveLedgers(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [payrollFormat, employees, leaveOn, leavePolicy, weeklyOffDay, rosterMode, start, end]);
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
     const map: DailyShiftByDate = new Map();
@@ -412,11 +448,17 @@ export default function PayrollPage() {
         // job swept in a Week Off / Absent day, or the only punch was claimed
         // by an overnight shift the day before. Fall through so it's scored
         // as a paid day off / absence, not counted toward worked days or pay.
+        // Week Off attendance that earns leave (yearly leave balance) is not
+        // overtime — it's added to the balance instead.
+        const weekOffWorkEarnsLeave = () =>
+          leaveOn &&
+          leavePolicy.weekOffWorkEarnsLeave &&
+          isWeekOff(resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern));
         if (summary && summary.check_in) {
           row.days += 1;
           row.daysToYesterday += 1; // a summary row only exists for a past day
           row.hours += Number(summary.total_hours);
-          row.overtime += Number(summary.overtime_hours);
+          if (!weekOffWorkEarnsLeave()) row.overtime += Number(summary.overtime_hours);
           if (summary.is_late) row.lateDays += 1;
           if (summary.is_early_departure) row.earlyDays += 1;
           continue;
@@ -439,7 +481,9 @@ export default function PayrollPage() {
             // earns pay on top of days present — a week-off is already covered
             // by dividing Basic over working days, not calendar days. Only
             // finished days are earned (see daysToYesterday).
-            if (onLeave && !offDay && day < today) row.paidLeaveDays += 1;
+            // With a yearly leave balance, paid leave comes from the ledger
+            // (after the loop) — leave past the balance is not paid.
+            if (!leaveOn && onLeave && !offDay && day < today) row.paidLeaveDays += 1;
           }
           continue;
         }
@@ -450,13 +494,18 @@ export default function PayrollPage() {
         row.days += 1;
         if (day < today) row.daysToYesterday += 1;
         row.hours += live.totalMinutes / 60;
-        row.overtime += live.overtimeMinutes / 60;
+        if (!(leaveOn && leavePolicy.weekOffWorkEarnsLeave && isWeekOff(resolved))) row.overtime += live.overtimeMinutes / 60;
         if (live.isLate && !emp.attendance_exempt) row.lateDays += 1;
         if (live.isEarly && !emp.attendance_exempt) row.earlyDays += 1;
       }
     }
+    // Absent / leave days the yearly balance paid for — earned like approved
+    // Leave always was (calculatedSalary below).
+    if (leaveOn) {
+      for (const row of map.values()) row.paidLeaveDays = coveredDaysInRange(leaveLedgers.get(row.id), start, end);
+    }
     return Array.from(map.values()).sort((a, b) => a.enrollId.localeCompare(b.enrollId, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [summaries, logs, shifts, scopedEmployees, start, end, daysInRange, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
+  }, [summaries, logs, shifts, scopedEmployees, start, end, daysInRange, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern, leaveOn, leavePolicy, leaveLedgers]);
 
   const totals = useMemo(() => {
     const totalHours = byEmployee.reduce((s, r) => s + r.hours, 0);
