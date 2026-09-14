@@ -966,7 +966,15 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   <span className="print:hidden">{statusBadge(r)}</span>
                   <span className="hidden print:inline print:text-ink">{r.status}</span>
                 </td>
-                <td className="whitespace-nowrap print-wrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-[8px] print:text-ink">{r.device}</td>
+                <td className="whitespace-nowrap print-wrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-[8px] print:text-ink">
+                  {canFix ? (
+                    <EditablePunch onClick={() => openCorrection(r)}>
+                      <span>{r.device}</span>
+                    </EditablePunch>
+                  ) : (
+                    r.device
+                  )}
+                </td>
               </tr>
               );
             })}
