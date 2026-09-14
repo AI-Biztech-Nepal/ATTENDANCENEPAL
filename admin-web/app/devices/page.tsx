@@ -59,7 +59,12 @@ type BridgeCredential = { id: string; email: string; createdAt: string };
 type BridgeResult = { email: string; password: string; envFile: string };
 
 function downloadEnvFile(envFile: string) {
-  const blob = new Blob([envFile], { type: 'text/plain' });
+  // application/octet-stream, not text/plain: Chrome/Edge on Windows silently
+  // append .txt to a dotfile (no name before the extension) downloaded as
+  // text/plain, turning .env into .env.txt with the visible name unchanged
+  // when "hide known extensions" is on — invisible until the bridge can't
+  // find its credential file.
+  const blob = new Blob([envFile], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
