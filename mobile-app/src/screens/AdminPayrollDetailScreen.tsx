@@ -98,8 +98,15 @@ export default function AdminPayrollDetailScreen({ route }: any) {
       .then(({ data }) => setLeaveRequests((data as LeaveRequest[]) ?? []));
   }, [employeeId, start, end]);
 
-  const paidOffDates = useMemo(() => {
-    const set = weekOffDatesInRange(start, end, weeklyOffDay, holidays, employee?.gender ?? null);
+  // Week-offs and approved Leave are kept apart, as on the dashboard: a
+  // week-off is already priced into the working-days divisor, while a Leave
+  // day on a working day earns a clean day on top.
+  const weekOffDates = useMemo(
+    () => weekOffDatesInRange(start, end, weeklyOffDay, holidays, employee?.gender ?? null),
+    [start, end, weeklyOffDay, holidays, employee?.gender]
+  );
+  const leaveDates = useMemo(() => {
+    const set = new Set<string>();
     for (const req of leaveRequests) {
       const cur = new Date((req.start_date < start ? start : req.start_date) + 'T00:00:00Z');
       const endDate = new Date((req.end_date > end ? end : req.end_date) + 'T00:00:00Z');
@@ -109,7 +116,7 @@ export default function AdminPayrollDetailScreen({ route }: any) {
       }
     }
     return set;
-  }, [start, end, weeklyOffDay, holidays, leaveRequests, employee?.gender]);
+  }, [start, end, leaveRequests]);
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
     const map: DailyShiftByDate = new Map();
@@ -125,10 +132,20 @@ export default function AdminPayrollDetailScreen({ route }: any) {
   }, [weeklyPatternRows, employeeId]);
 
   const dayRows: DayDetail[] = useMemo(
-    () => (employee ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern) : []),
-    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern]
+    () =>
+      employee
+        ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern)
+        : [],
+    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern]
   );
   const daysInRange = useMemo(() => (new Date(end).getTime() - new Date(start).getTime()) / 86400000 + 1, [start, end]);
+  // Basic is spread over WORKING days (calendar days minus week-offs), the
+  // same divisor the dashboard uses, so the two agree to the rupee.
+  const workingDays = useMemo(() => Math.max(1, Math.round(daysInRange) - weekOffDates.size), [daysInRange, weekOffDates]);
+  const earningOpts = useMemo(
+    () => ({ workingDays, otHoursPerDay, otMultiplier, otOn, mode: 'hourly' as const, today: nepalTodayIso() }),
+    [workingDays, otHoursPerDay, otMultiplier, otOn]
+  );
 
   const totals = useMemo(() => {
     const totalHours = dayRows.reduce((s, r) => s + r.hours, 0);
@@ -139,14 +156,14 @@ export default function AdminPayrollDetailScreen({ route }: any) {
     let baseEarning = 0;
     let overtimeEarning = 0;
     for (const r of dayRows) {
-      const earning = dailySalaryEarning(r, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, otOn);
+      const earning = dailySalaryEarning(r, employee?.salary ?? null, { ...earningOpts, isCompanyOffDay: weekOffDates.has(r.date) });
       if (earning) {
         baseEarning += earning.base;
         overtimeEarning += earning.overtime;
       }
     }
     return { totalHours, overtimeHours, presentDays, absentDays, paidOffDays, totalSalary: baseEarning + overtimeEarning, overtimeEarning };
-  }, [dayRows, employee, daysInRange, otHoursPerDay, otMultiplier, otOn]);
+  }, [dayRows, employee, earningOpts, weekOffDates]);
 
   function changeMonth(delta: number) {
     let m = month + delta;
@@ -205,7 +222,7 @@ export default function AdminPayrollDetailScreen({ route }: any) {
                 <View style={[styles.statCard, { backgroundColor: colors.goodBg }]}>
                   <Text style={[styles.statLabel, { color: colors.goodText }]}>Salary/Day</Text>
                   <Text style={styles.statValue}>{employee.salary.toLocaleString()}</Text>
-                  <Text style={[styles.statHint, { color: colors.goodText }]}>{Math.round(employee.salary / daysInRange).toLocaleString()}/day</Text>
+                  <Text style={[styles.statHint, { color: colors.goodText }]}>{Math.round(employee.salary / workingDays).toLocaleString()}/day</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: colors.infoBg }]}>
                   <Text style={[styles.statLabel, { color: colors.infoText }]}>Receivable</Text>
@@ -243,7 +260,9 @@ export default function AdminPayrollDetailScreen({ route }: any) {
         }
         renderItem={({ item: row, index }) => {
           const earning =
-            row.checkIn || row.paidOff ? dailySalaryEarning(row, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, otOn) : null;
+            row.checkIn || row.paidOff
+              ? dailySalaryEarning(row, employee?.salary ?? null, { ...earningOpts, isCompanyOffDay: weekOffDates.has(row.date) })
+              : null;
           return (
             <View style={[styles.tr, index % 2 === 1 && styles.trAlt]}>
               <Text style={[styles.td, { flex: 0.16 }]}>{formatDdMmYyyy(row.date, system).slice(0, 5)}</Text>

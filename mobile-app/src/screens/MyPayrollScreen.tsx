@@ -151,10 +151,15 @@ export default function MyPayrollScreen() {
   // One combined set of paid-off dates spanning this employee's whole
   // employment history — reused for both the selected period's rows and the
   // lifetime rows below.
-  const paidOffDates = useMemo(() => {
+  // Week-offs and approved Leave stay apart, as on the dashboard: a week-off
+  // is already priced into the working-days divisor, a Leave day on a working
+  // day earns a clean day on top.
+  const weekOffDates = useMemo(() => {
     if (!employee?.date_of_joining) return new Set<string>();
-    const today = nepalTodayIso();
-    const set = weekOffDatesInRange(employee.date_of_joining, today, weeklyOffDay, holidays, employee.gender);
+    return weekOffDatesInRange(employee.date_of_joining, nepalTodayIso(), weeklyOffDay, holidays, employee.gender);
+  }, [employee?.date_of_joining, employee?.gender, weeklyOffDay, holidays]);
+  const leaveDates = useMemo(() => {
+    const set = new Set<string>();
     for (const req of leaveRequests) {
       const cur = new Date(req.start_date + 'T00:00:00Z');
       const endDate = new Date(req.end_date + 'T00:00:00Z');
@@ -164,7 +169,7 @@ export default function MyPayrollScreen() {
       }
     }
     return set;
-  }, [employee?.date_of_joining, employee?.gender, weeklyOffDay, holidays, leaveRequests]);
+  }, [leaveRequests]);
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
     const map: DailyShiftByDate = new Map();
@@ -182,17 +187,42 @@ export default function MyPayrollScreen() {
   }, [weeklyPatternRows, employeeId]);
 
   const dayRows: DayDetail[] = useMemo(
-    () => (employee ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern) : []),
-    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern]
+    () =>
+      employee
+        ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern)
+        : [],
+    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern]
   );
   const daysInRange = useMemo(() => (new Date(end).getTime() - new Date(start).getTime()) / 86400000 + 1, [start, end]);
+  // Basic over WORKING days (calendar days minus week-offs) — the dashboard's
+  // divisor, so this page and the admin's report agree.
+  const workingDays = useMemo(() => {
+    let offInRange = 0;
+    for (const d of weekOffDates) if (d >= start && d <= end) offInRange += 1;
+    return Math.max(1, Math.round(daysInRange) - offInRange);
+  }, [daysInRange, weekOffDates, start, end]);
+  const earningOpts = useMemo(
+    () => ({ workingDays, otHoursPerDay, otMultiplier, otOn: true, mode: 'hourly' as const, today: nepalTodayIso() }),
+    [workingDays, otHoursPerDay, otMultiplier]
+  );
 
   const lifetimeDayRows: DayDetail[] = useMemo(
     () =>
       employee?.date_of_joining
-        ? buildEmployeeDayRows(employee, shifts, lifetimeSummaries, lifetimeLogs, employee.date_of_joining, nepalTodayIso(), dailyShiftByDate, paidOffDates, weeklyPattern)
+        ? buildEmployeeDayRows(
+            employee,
+            shifts,
+            lifetimeSummaries,
+            lifetimeLogs,
+            employee.date_of_joining,
+            nepalTodayIso(),
+            dailyShiftByDate,
+            weekOffDates,
+            leaveDates,
+            weeklyPattern
+          )
         : [],
-    [employee, shifts, lifetimeSummaries, lifetimeLogs, dailyShiftByDate, paidOffDates, weeklyPattern]
+    [employee, shifts, lifetimeSummaries, lifetimeLogs, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern]
   );
 
   const totalEarned = useMemo(() => {
@@ -208,8 +238,23 @@ export default function MyPayrollScreen() {
     for (const [key, rows] of byMonth) {
       const [y, m] = key.split('-').map(Number);
       const daysInMonth = new Date(y, m, 0).getDate();
+      // Each past month gets its own working-days divisor (its calendar days
+      // minus that month's week-offs), same as the dashboard.
+      const monthStart = `${key}-01`;
+      const monthEnd = `${key}-${String(daysInMonth).padStart(2, '0')}`;
+      let monthOff = 0;
+      for (const d of weekOffDates) if (d >= monthStart && d <= monthEnd) monthOff += 1;
+      const monthWorkingDays = Math.max(1, daysInMonth - monthOff);
       for (const row of rows) {
-        const earning = dailySalaryEarning(row, employee.salary, daysInMonth, otHoursPerDay, otMultiplier, true);
+        const earning = dailySalaryEarning(row, employee.salary, {
+          workingDays: monthWorkingDays,
+          otHoursPerDay,
+          otMultiplier,
+          otOn: true,
+          mode: 'hourly',
+          isCompanyOffDay: weekOffDates.has(row.date),
+          today: nepalTodayIso(),
+        });
         if (earning) total += earning.total;
       }
     }
@@ -225,14 +270,14 @@ export default function MyPayrollScreen() {
     let baseEarning = 0;
     let overtimeEarning = 0;
     for (const r of dayRows) {
-      const earning = dailySalaryEarning(r, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, true);
+      const earning = dailySalaryEarning(r, employee?.salary ?? null, { ...earningOpts, isCompanyOffDay: weekOffDates.has(r.date) });
       if (earning) {
         baseEarning += earning.base;
         overtimeEarning += earning.overtime;
       }
     }
     return { totalHours, overtimeHours, presentDays, absentDays, paidOffDays, totalSalary: baseEarning + overtimeEarning, overtimeEarning };
-  }, [dayRows, employee, daysInRange]);
+  }, [dayRows, employee, earningOpts, weekOffDates]);
 
   // Payslip-style breakdown for the selected period — mirrors the web My
   // Payroll page. Basic Salary is the attendance-prorated base earning;
@@ -332,7 +377,9 @@ export default function MyPayrollScreen() {
         }
         renderItem={({ item: row, index }) => {
           const earning =
-            row.checkIn || row.paidOff ? dailySalaryEarning(row, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, true) : null;
+            row.checkIn || row.paidOff
+              ? dailySalaryEarning(row, employee?.salary ?? null, { ...earningOpts, isCompanyOffDay: weekOffDates.has(row.date) })
+              : null;
           return (
             <View style={[styles.tr, index % 2 === 1 && styles.trAlt]}>
               <Text style={[styles.td, { flex: 0.11 }]}>{formatDdMmYyyy(row.date, system).slice(0, 5)}</Text>
@@ -378,7 +425,7 @@ export default function MyPayrollScreen() {
                   data={dayRows.map(row => {
                     const earning =
                       row.checkIn || row.paidOff
-                        ? dailySalaryEarning(row, employee?.salary ?? null, daysInRange, otHoursPerDay, otMultiplier, true)
+                        ? dailySalaryEarning(row, employee?.salary ?? null, { ...earningOpts, isCompanyOffDay: weekOffDates.has(row.date) })
                         : null;
                     return { label: formatDdMmYyyy(row.date, system).slice(0, 2), value: earning ? Math.round(earning.total) : 0 };
                   })}

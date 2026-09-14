@@ -24,6 +24,9 @@ export type Employee = {
   address: string | null;
   branch_id: string | null;
   fingerprint_id: string | null;
+  /** Paid-leave days this employee gets each fiscal year, set on the
+   * dashboard's Leave page. Null = none (there is no company-wide default). */
+  annual_leave_days?: number | null;
   username: string | null;
   gender: Gender | null;
   status: 'active' | 'inactive';
