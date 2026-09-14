@@ -53,6 +53,12 @@ type Row = {
   shiftTime: string | null;
   checkIn: string | null;
   checkOut: string | null;
+  /** The device a manually-corrected day is explicitly attributed to
+   * (payroll_summaries.device_id) — null for an ordinary punch-derived day,
+   * where `device` above is read live off attendance_logs instead. Carried
+   * separately from `device` (the display string) so the correction dialog
+   * can pre-fill its dropdown to whatever was picked last time. */
+  deviceId: string | null;
   hours: number;
   status: 'Present' | 'Late' | 'Absent' | 'Upcoming' | 'Week Off' | 'Leave' | 'Exempt';
   lateMinutes: number;
@@ -250,6 +256,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const [summaries, setSummaries] = useState<PayrollSummary[]>([]);
   const [logs, setLogs] = useState<AttendanceLog[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  // Options for the correction dialog's device picker — only devices that
+  // have actually logged a punch (devices_with_punches()), not every paired
+  // device, so one that's never synced a log doesn't clutter the list.
+  const [punchDevices, setPunchDevices] = useState<Device[]>([]);
   const [dailyShiftRows, setDailyShiftRows] = useState<{ employee_id: string; work_date: string; shift_id: string | null }[]>([]);
   const [weeklyOffDay, setWeeklyOffDay] = useState<number | null>(null);
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
@@ -273,7 +283,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   // overnight / 24-hour duty (09:00 -> 08:00). Without it both times were
   // built on work_date, so such a duty was always rejected as "check-out
   // before check-in", or saved as a few minutes' work.
-  const [fixForm, setFixForm] = useState({ checkIn: '', checkOut: '', checkOutNextDay: false, reason: '' });
+  const [fixForm, setFixForm] = useState({ checkIn: '', checkOut: '', checkOutNextDay: false, reason: '', deviceId: '' });
   const [fixSaving, setFixSaving] = useState(false);
   const [fixError, setFixError] = useState<string | null>(null);
   // The dialog's Delete asks once more, inline, before removing the day.
@@ -287,6 +297,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       .then(({ data }) => setEmployees((data ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))));
     supabase.from('shifts').select('*').then(({ data }) => setShifts(data ?? []));
     supabase.from('devices').select('*').then(({ data }) => setDevices(data ?? []));
+    supabase.rpc('devices_with_punches').then(({ data }) => setPunchDevices(data ?? []));
     fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
       setWeeklyOffDay(weeklyOffDay);
       // Not date-scoped (a pattern applies to every week), and only ever
@@ -357,6 +368,12 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       if (log.method === 'zkteco') return devices.find(d => d.id === log.device_id)?.name ?? 'Machine';
       return 'App';
     };
+    // An admin's explicit pick from the correction dialog overrides the
+    // punch-derived device — the whole point of letting them choose one.
+    // Falls back to punchSource() when no override was made (the common
+    // case, including every ordinary un-corrected day).
+    const deviceFor = (summaryDeviceId: string | null | undefined, log: AttendanceLog | undefined) =>
+      summaryDeviceId ? (devices.find(d => d.id === summaryDeviceId)?.name ?? 'Unknown device') : punchSource(log);
     const days: string[] = [];
     const cur = new Date(from + 'T00:00:00Z');
     const end = new Date(to + 'T00:00:00Z');
@@ -426,7 +443,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             date: day,
             enrollId: emp.fingerprint_id ?? '—',
             employeeName: emp.name,
-            device: punchSource(dayLogs[0]),
+            device: deviceFor(summary.device_id, dayLogs[0]),
+            deviceId: summary.device_id ?? null,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -454,6 +472,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             enrollId: emp.fingerprint_id ?? '—',
             employeeName: emp.name,
             device: punchSource(dayLogs[0]),
+            deviceId: null,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -490,6 +509,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             enrollId: emp.fingerprint_id ?? '—',
             employeeName: emp.name,
             device: deleted ? 'Deleted by admin' : 'N/A',
+            deviceId: null,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -595,6 +615,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         checkOut: punchHhmm(r.checkIn!),
         checkOutNextDay: true,
         reason: '',
+        deviceId: r.deviceId ?? '',
       });
     } else {
       setFixForm({
@@ -602,6 +623,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         checkOut: r.checkOut ? punchHhmm(r.checkOut) : r.shiftEnd ?? '17:00',
         checkOutNextDay: r.checkOut ? nepalDateKey(r.checkOut) > r.date : overnight,
         reason: '',
+        deviceId: r.deviceId ?? '',
       });
     }
     setFixRow(r);
@@ -641,6 +663,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         requested_check_in: inTs,
         requested_check_out: outTs,
         reason: fixForm.reason.trim() || null,
+        device_id: fixForm.deviceId || null,
       })
       .select('id')
       .single();
@@ -683,6 +706,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         early_departure_minutes: 0,
         overtime_hours: 0,
         manually_corrected: true,
+        device_id: null,
         computed_at: new Date().toISOString(),
       },
       { onConflict: 'employee_id,work_date' }
@@ -1089,6 +1113,26 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               Both times are pre-filled — from the punches on record, or the shift boundary where one is missing. Change
               whichever is wrong; both are needed for the day to recalculate.
             </p>
+
+            <div className="mt-3">
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                Device <span className="font-normal text-slate-400">(optional — shown in the report's Device column)</span>
+              </label>
+              <select
+                value={fixForm.deviceId}
+                onChange={e => setFixForm(f => ({ ...f, deviceId: e.target.value }))}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+              >
+                <option value="">
+                  {fixRow.deviceId ? 'Clear — read the device off the punch again' : `Leave as-is (${fixRow.device})`}
+                </option>
+                {punchDevices.map(d => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div className="mt-3">
               <label className="mb-1 block text-xs font-medium text-slate-600">

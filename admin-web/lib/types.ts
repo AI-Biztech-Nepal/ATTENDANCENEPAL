@@ -176,6 +176,9 @@ export type CorrectionRequest = {
   created_at: string;
   lat: number | null;
   lng: number | null;
+  /** Which device the requester says the correction should be attributed
+   * to — optional, set from the Attendance Report's correction dialog. */
+  device_id: string | null;
 };
 
 export type AttendanceGpsRequest = {
@@ -256,6 +259,11 @@ export type PayrollSummary = {
   overtime_hours: number;
   manually_corrected: boolean;
   overtime_approved: boolean;
+  /** Which device a manually-corrected day is attributed to — set only via
+   * the Attendance Report's correction dialog (see AttendanceReportTable's
+   * device picker); null for every ordinary, punch-derived day, where the
+   * Device column is read live off attendance_logs instead. */
+  device_id: string | null;
   computed_at: string;
 };
 
@@ -263,4 +271,4 @@ export type PayrollSummary = {
  * PayrollSummary fields, so `select(PAYROLL_SUMMARY_COLUMNS)` is identical to
  * `select('*')` for the code but future-proof against wide columns. */
 export const PAYROLL_SUMMARY_COLUMNS =
-  'id, employee_id, work_date, shift_name, check_in, check_out, total_hours, is_late, late_minutes, is_early_departure, early_departure_minutes, overtime_hours, manually_corrected, overtime_approved, computed_at';
+  'id, employee_id, work_date, shift_name, check_in, check_out, total_hours, is_late, late_minutes, is_early_departure, early_departure_minutes, overtime_hours, manually_corrected, overtime_approved, device_id, computed_at';
