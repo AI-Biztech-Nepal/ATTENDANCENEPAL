@@ -143,6 +143,15 @@ function EmployeesView() {
   const [usernameDraft, setUsernameDraft] = useState('');
   const [savingUsername, setSavingUsername] = useState(false);
 
+  // Bio Enrollment badge edits its own row too, same immediate Save/Cancel
+  // pattern as username — this is the manual override for devices that
+  // never reported an enrollment back (or reported a stale one), so an
+  // admin can set/clear the fingerprint_id directly instead of waiting on
+  // the device.
+  const [editingFingerprintId, setEditingFingerprintId] = useState<string | null>(null);
+  const [fingerprintDraft, setFingerprintDraft] = useState('');
+  const [savingFingerprint, setSavingFingerprint] = useState(false);
+
   const [loginModalEmployee, setLoginModalEmployee] = useState<Employee | null>(null);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [creatingLogin, setCreatingLogin] = useState(false);
@@ -248,6 +257,37 @@ function EmployeesView() {
     }
     setEditingUsernameId(null);
     loadLoginEmails();
+  }
+
+  function startEditFingerprint(emp: Employee) {
+    setEditingFingerprintId(emp.id);
+    setFingerprintDraft(emp.fingerprint_id ?? '');
+  }
+
+  function cancelEditFingerprint() {
+    setEditingFingerprintId(null);
+    setFingerprintDraft('');
+  }
+
+  async function saveFingerprint(emp: Employee) {
+    const value = fingerprintDraft.trim() || null;
+    if (value === (emp.fingerprint_id ?? null)) {
+      setEditingFingerprintId(null);
+      return;
+    }
+    setSavingFingerprint(true);
+    const { error } = await supabase.from('employees').update({ fingerprint_id: value }).eq('id', emp.id);
+    setSavingFingerprint(false);
+    if (error) {
+      alert(
+        error.code === '23505'
+          ? 'That biometric ID is already assigned to another employee.'
+          : `Could not update biometric enrollment: ${error.message}`
+      );
+      return;
+    }
+    setEditingFingerprintId(null);
+    reload();
   }
 
   useEffect(reload, []);
@@ -627,6 +667,60 @@ function EmployeesView() {
     setResetResult(resetPassword);
   }
 
+  // Shared by the mobile card and desktop table — the badge is clickable in
+  // both so a bugged device (one that never reported an enrollment back, or
+  // reported a stale one) doesn't leave an admin stuck: clicking it opens a
+  // direct editor for the underlying fingerprint_id, the same field a
+  // device push normally sets.
+  function renderBioEnrollment(emp: Employee) {
+    if (editingFingerprintId === emp.id) {
+      return (
+        <div className="flex flex-col items-start gap-1.5" onClick={e => e.stopPropagation()}>
+          <input
+            type="text"
+            autoFocus
+            value={fingerprintDraft}
+            onChange={e => setFingerprintDraft(e.target.value)}
+            placeholder="Biometric ID"
+            className="w-28 rounded-md border border-slate-200 px-1.5 py-1 text-xs font-semibold text-ink"
+          />
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            <button
+              type="button"
+              onClick={() => saveFingerprint(emp)}
+              disabled={savingFingerprint}
+              className="text-xs font-medium text-accent hover:underline disabled:opacity-60"
+            >
+              {savingFingerprint ? 'Saving…' : 'Save'}
+            </button>
+            {fingerprintDraft && (
+              <button
+                type="button"
+                onClick={() => setFingerprintDraft('')}
+                className="text-xs font-medium text-warning-text hover:underline"
+              >
+                Clear
+              </button>
+            )}
+            <button type="button" onClick={cancelEditFingerprint} className="text-xs font-medium text-slate-400 hover:underline">
+              Cancel
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => startEditFingerprint(emp)}
+        title="Click to set or clear this employee's biometric enrollment — use this if a device never reported an enrollment back"
+        className="cursor-pointer rounded-md transition hover:opacity-80"
+      >
+        <Badge tone={emp.fingerprint_id ? 'good' : 'neutral'}>{emp.fingerprint_id ? 'Bio Enrolled' : 'Not Enrolled'}</Badge>
+      </button>
+    );
+  }
+
   return (
     <AppShell title="Employee Directory">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -791,7 +885,7 @@ function EmployeesView() {
                     {emp.email && <div className="truncate text-xs text-slate-400">{emp.email}</div>}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
-                    <Badge tone={emp.fingerprint_id ? 'good' : 'neutral'}>{emp.fingerprint_id ? 'Bio Enrolled' : 'Not Enrolled'}</Badge>
+                    {renderBioEnrollment(emp)}
                     {linkedEmployeeIds.has(emp.id) && <Badge tone="good">Login Active</Badge>}
                     {emp.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
                   </div>
@@ -1136,7 +1230,7 @@ function EmployeesView() {
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-col items-start gap-1">
-                        <Badge tone={emp.fingerprint_id ? 'good' : 'neutral'}>{emp.fingerprint_id ? 'Bio Enrolled' : 'Not Enrolled'}</Badge>
+                        {renderBioEnrollment(emp)}
                         {linkedEmployeeIds.has(emp.id) && <Badge tone="good">Login Active</Badge>}
                       </div>
                     </td>
