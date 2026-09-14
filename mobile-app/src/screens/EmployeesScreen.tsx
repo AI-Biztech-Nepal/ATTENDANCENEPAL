@@ -7,6 +7,7 @@ import type { Branch, Department, Employee, Gender, Profile, Shift } from '../ty
 import { resolveShift, formatShiftHours } from '../lib/shift';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
+import DatePicker from '../components/DatePicker';
 import { ChevronIcon, EditIcon, KeyIcon } from '../components/icons';
 import { createLogin, fetchAccounts, resetPassword, updateLoginEmail } from '../lib/accountsApi';
 
@@ -65,6 +66,11 @@ export default function EmployeesScreen({ route, navigation }: any) {
   const [forceDeleteConfirmText, setForceDeleteConfirmText] = useState('');
   const [forceDeleting, setForceDeleting] = useState(false);
   const [forceDeleteError, setForceDeleteError] = useState<string | null>(null);
+
+  const [resignEmployee, setResignEmployee] = useState<Employee | null>(null);
+  const [resignDate, setResignDate] = useState('');
+  const [resigning, setResigning] = useState(false);
+  const [resignError, setResignError] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState<Set<string>>(new Set());
   const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
 
@@ -157,22 +163,27 @@ export default function EmployeesScreen({ route, navigation }: any) {
     reload();
   }
 
-  async function handleMarkResigned(emp: Employee) {
-    Alert.alert('Mark Resigned', `Mark ${emp.name} as resigned? They'll be removed from active views but their history is kept.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Mark Resigned',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase
-            .from('employees')
-            .update({ status: 'inactive', resigned_at: new Date().toISOString().slice(0, 10) })
-            .eq('id', emp.id);
-          if (error) Alert.alert('Could not update', error.message);
-          reload();
-        },
-      },
-    ]);
+  function openResignModal(emp: Employee) {
+    setResignEmployee(emp);
+    setResignDate(emp.resigned_at ?? new Date().toISOString().slice(0, 10));
+    setResignError(null);
+  }
+
+  async function handleConfirmResign() {
+    if (!resignEmployee || !resignDate) return;
+    setResigning(true);
+    setResignError(null);
+    const { error } = await supabase
+      .from('employees')
+      .update({ status: 'inactive', resigned_at: resignDate })
+      .eq('id', resignEmployee.id);
+    setResigning(false);
+    if (error) {
+      setResignError(error.message);
+      return;
+    }
+    setResignEmployee(null);
+    reload();
   }
   async function handleRestore(emp: Employee) {
     Alert.alert('Restore', `Restore ${emp.name} to active? They'll show up in active views again.`, [
@@ -492,7 +503,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
                   </TouchableOpacity>
                 )}
                 {item.status === 'active' ? (
-                  <TouchableOpacity style={[styles.actionTile, styles.actionWarning]} onPress={() => handleMarkResigned(item)}>
+                  <TouchableOpacity style={[styles.actionTile, styles.actionWarning]} onPress={() => openResignModal(item)}>
                     <Text style={[styles.actionText, { color: colors.warningText }]}>Resign</Text>
                   </TouchableOpacity>
                 ) : (
@@ -504,9 +515,14 @@ export default function EmployeesScreen({ route, navigation }: any) {
                   <Text style={[styles.actionText, { color: colors.criticalText }]}>Remove</Text>
                 </TouchableOpacity>
                 {item.status !== 'active' && (
-                  <TouchableOpacity style={[styles.actionTile, styles.actionCritical]} onPress={() => openForceDelete(item)}>
-                    <Text style={[styles.actionText, { color: colors.criticalText }]}>Delete forever</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity style={[styles.actionTile, styles.actionWarning]} onPress={() => openResignModal(item)}>
+                      <Text style={[styles.actionText, { color: colors.warningText }]}>Edit date</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.actionTile, styles.actionCritical]} onPress={() => openForceDelete(item)}>
+                      <Text style={[styles.actionText, { color: colors.criticalText }]}>Delete forever</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
             </View>
@@ -749,6 +765,38 @@ export default function EmployeesScreen({ route, navigation }: any) {
                 style={[styles.saveModalBtn, { backgroundColor: colors.critical, opacity: forceDeleteConfirmText !== forceDeleteEmployee?.name ? 0.5 : 1 }]}
               >
                 <Text style={styles.saveModalBtnText}>{forceDeleting ? 'Deleting…' : 'Permanently delete'}</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={!!resignEmployee} transparent animationType="fade" onRequestClose={() => setResignEmployee(null)}>
+        <TouchableOpacity style={styles.modalBackdropCenter} activeOpacity={1} onPress={() => setResignEmployee(null)}>
+          <TouchableOpacity activeOpacity={1} style={styles.formSheet}>
+            <Text style={styles.formTitle}>
+              {resignEmployee?.status === 'active' ? `Mark ${resignEmployee?.name} as resigned?` : `Resignation date for ${resignEmployee?.name}`}
+            </Text>
+            <Text style={styles.hint}>
+              {resignEmployee?.status === 'active'
+                ? "They'll be removed from active views but their history is kept."
+                : 'Update the date their resignation takes effect.'}
+            </Text>
+            <Text style={styles.label}>Resignation date</Text>
+            <DatePicker value={resignDate} onChange={setResignDate} />
+            {resignError && <Text style={styles.errorText}>{resignError}</Text>}
+            <View style={styles.formActions}>
+              <TouchableOpacity onPress={() => setResignEmployee(null)} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleConfirmResign}
+                disabled={resigning || !resignDate}
+                style={[styles.saveModalBtn, { backgroundColor: colors.critical, opacity: resigning || !resignDate ? 0.5 : 1 }]}
+              >
+                <Text style={styles.saveModalBtnText}>
+                  {resigning ? 'Saving…' : resignEmployee?.status === 'active' ? 'Mark resigned' : 'Save date'}
+                </Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>

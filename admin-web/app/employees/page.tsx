@@ -166,6 +166,14 @@ function EmployeesView() {
   const [forceDeleting, setForceDeleting] = useState(false);
   const [forceDeleteError, setForceDeleteError] = useState<string | null>(null);
 
+  // Marking someone resigned (or, for someone already resigned, correcting
+  // the date) needs a date field — the old flow just stamped "today", which
+  // is wrong whenever the resignation is being entered after the fact.
+  const [resignEmployee, setResignEmployee] = useState<Employee | null>(null);
+  const [resignDate, setResignDate] = useState('');
+  const [resigning, setResigning] = useState(false);
+  const [resignError, setResignError] = useState<string | null>(null);
+
   function reload() {
     supabase.from('employees').select('*').order('created_at', { ascending: false }).then(({ data }) => setEmployees(data ?? []));
     supabase.from('shifts').select('*').then(({ data }) => setShifts(data ?? []));
@@ -383,13 +391,26 @@ function EmployeesView() {
     reload();
   }
 
-  async function handleMarkResigned(emp: Employee) {
-    if (!(await confirm(`Mark ${emp.name} as resigned? They'll be removed from active views but their history is kept.`, { title: 'Mark as resigned?', confirmLabel: 'Mark resigned', tone: 'danger' }))) return;
+  function openResignModal(emp: Employee) {
+    setResignEmployee(emp);
+    setResignDate(emp.resigned_at ?? new Date().toISOString().slice(0, 10));
+    setResignError(null);
+  }
+
+  async function handleConfirmResign() {
+    if (!resignEmployee || !resignDate) return;
+    setResigning(true);
+    setResignError(null);
     const { error } = await supabase
       .from('employees')
-      .update({ status: 'inactive', resigned_at: new Date().toISOString().slice(0, 10) })
-      .eq('id', emp.id);
-    if (error) alert(`Could not update: ${error.message}`);
+      .update({ status: 'inactive', resigned_at: resignDate })
+      .eq('id', resignEmployee.id);
+    setResigning(false);
+    if (error) {
+      setResignError(error.message);
+      return;
+    }
+    setResignEmployee(null);
     reload();
   }
 
@@ -918,12 +939,18 @@ function EmployeesView() {
                       icon={<UserMinusIcon className="h-4 w-4" />}
                       label="Mark Resigned"
                       tone="warning"
-                      onClick={() => handleMarkResigned(emp)}
+                      onClick={() => openResignModal(emp)}
                     />
                   )}
                   <ActionTile icon={<TrashIcon className="h-4 w-4" />} label="Remove" tone="critical" onClick={() => handleDelete(emp.id)} />
                   {emp.status !== 'active' && (
                     <>
+                      <ActionTile
+                        icon={<PencilIcon className="h-4 w-4" />}
+                        label="Edit Date"
+                        tone="warning"
+                        onClick={() => openResignModal(emp)}
+                      />
                       <ActionTile
                         icon={<RestoreIcon className="h-4 w-4" />}
                         label="Restore"
@@ -1138,7 +1165,7 @@ function EmployeesView() {
                             label="Resign"
                             title="Mark Resigned"
                             tone="warning"
-                            onClick={() => handleMarkResigned(emp)}
+                            onClick={() => openResignModal(emp)}
                           />
                         )}
                         <ActionTile
@@ -1149,6 +1176,13 @@ function EmployeesView() {
                         />
                         {emp.status !== 'active' && (
                           <>
+                            <ActionTile
+                              icon={<PencilIcon className="h-3.5 w-3.5" />}
+                              label="Edit date"
+                              title="Edit resignation date"
+                              tone="warning"
+                              onClick={() => openResignModal(emp)}
+                            />
                             <ActionTile
                               icon={<RestoreIcon className="h-3.5 w-3.5" />}
                               label="Restore"
@@ -1544,6 +1578,44 @@ function EmployeesView() {
                 className="rounded-lg bg-critical px-4 py-2 text-sm font-semibold text-white hover:bg-critical/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {forceDeleting ? 'Deleting…' : 'Permanently delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {resignEmployee && (
+        <div
+          className="fixed inset-0 z-10 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setResignEmployee(null)}
+        >
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg" onClick={e => e.stopPropagation()}>
+            <h3 className="mb-2 text-lg font-semibold text-ink">
+              {resignEmployee.status === 'active' ? `Mark ${resignEmployee.name} as resigned?` : `Resignation date for ${resignEmployee.name}`}
+            </h3>
+            <p className="mb-4 text-sm text-slate-600">
+              {resignEmployee.status === 'active'
+                ? "They'll be removed from active views but their history is kept."
+                : 'Update the date their resignation takes effect.'}
+            </p>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Resignation date</label>
+            <DatePicker value={resignDate} onChange={setResignDate} />
+            {resignError && <p className="mt-3 text-sm text-critical">{resignError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setResignEmployee(null)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmResign}
+                disabled={resigning || !resignDate}
+                className="rounded-lg bg-critical px-4 py-2 text-sm font-semibold text-white hover:bg-critical/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {resigning ? 'Saving…' : resignEmployee.status === 'active' ? 'Mark resigned' : 'Save date'}
               </button>
             </div>
           </div>
