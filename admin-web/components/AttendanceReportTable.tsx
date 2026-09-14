@@ -103,16 +103,22 @@ function FixChip({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Wraps a Check-In / Check-Out time that IS on record but is still editable
- * in Correction mode — a click opens the same correction dialog. Subtle: the
- * time reads normally, a pencil fades in on hover. */
+/** Wraps a Check-In / Check-Out time (or the Device cell) that IS on record
+ * but is still editable in Correction mode — a click opens the same
+ * correction dialog. Subtle: the value reads normally, a pencil fades in on
+ * hover. `print:contents` drops the button's own flex box for print/PDF —
+ * a flex item won't shrink below its content's unwrapped width by default,
+ * which silently defeated `.print-wrap` on the Device column (long values
+ * like "Deleted by admin" ran off the page edge instead of wrapping); as
+ * plain inline content again it wraps exactly like it did before this
+ * button existed. The interactivity this loses is irrelevant on paper. */
 function EditablePunch({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title="Correct this day"
-      className="group -mx-1 inline-flex items-center gap-1 rounded px-1 transition-colors hover:bg-accent/10 print:mx-0 print:px-0 print:hover:bg-transparent"
+      className="group -mx-1 inline-flex items-center gap-1 rounded px-1 transition-colors hover:bg-accent/10 print:contents"
     >
       {children}
       <svg
