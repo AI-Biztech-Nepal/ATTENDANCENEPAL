@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
 import Badge from '@/components/Badge';
+import DatePicker from '@/components/DatePicker';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -142,6 +143,7 @@ export default function CorrectionsPage() {
     setAddError(null);
     if (!form.employeeId) return setAddError('Pick an employee.');
     if (!form.workDate) return setAddError('Pick a date.');
+    if (form.workDate > nepalTodayIso()) return setAddError('Work date cannot be in the future.');
     if (!form.checkIn || !form.checkOut) {
       // calc_payroll_fields needs both to work out hours — a one-sided
       // correction would zero the day out on approval.
@@ -477,14 +479,8 @@ export default function CorrectionsPage() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Work date (AD)</label>
-                  <input
-                    type="date"
-                    value={form.workDate}
-                    max={nepalTodayIso()}
-                    onChange={e => setForm(f => ({ ...f, workDate: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
-                  />
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Work date</label>
+                  <DatePicker value={form.workDate} onChange={v => setForm(f => ({ ...f, workDate: v }))} />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Check-in</label>
