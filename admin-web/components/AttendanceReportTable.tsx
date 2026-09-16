@@ -257,15 +257,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     enabled: !initialEmployeeId,
     isValid: v => typeof v === 'string',
   });
-  // "All Employees" over a full month of daily rows is legitimately long
-  // (22 employees × ~30 daily rows routinely runs 25-30 printed pages) —
-  // the recurring complaint isn't a layout bug, it's that daily detail is
-  // the only print option. Summary gives one row per employee (totals
-  // only), the same screen-matches-print table just aggregated, so a
-  // whole-company monthly printout is ~1 page instead of dozens.
-  const [viewMode, setViewMode] = useSessionState<'daily' | 'summary'>('attendanceReport:viewMode', 'daily', {
-    isValid: v => v === 'daily' || v === 'summary',
-  });
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [summaries, setSummaries] = useState<PayrollSummary[]>([]);
@@ -570,38 +561,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     const presentDays = rows.filter(r => r.checkIn).length;
     const absentDays = rows.filter(r => r.status === 'Absent').length;
     return { workHours, overtimeHours, presentDays, absentDays };
-  }, [rows]);
-
-  // One row per employee instead of one per day — rows is already sorted by
-  // enrollId (see the .sort() above it), so iterating in order and keying by
-  // employeeId groups each person's whole date range into a single running
-  // total without needing a second pass or re-sort.
-  type EmployeeSummary = {
-    employeeId: string; enrollId: string; employeeName: string;
-    presentDays: number; lateDays: number; absentDays: number; weekOffDays: number; leaveDays: number;
-    workHours: number; overtimeHours: number;
-  };
-  const employeeSummaries = useMemo(() => {
-    const byEmployee = new Map<string, EmployeeSummary>();
-    for (const r of rows) {
-      let s = byEmployee.get(r.employeeId);
-      if (!s) {
-        s = {
-          employeeId: r.employeeId, enrollId: r.enrollId, employeeName: r.employeeName,
-          presentDays: 0, lateDays: 0, absentDays: 0, weekOffDays: 0, leaveDays: 0,
-          workHours: 0, overtimeHours: 0,
-        };
-        byEmployee.set(r.employeeId, s);
-      }
-      if (r.status === 'Present' || r.status === 'Late') s.presentDays++;
-      if (r.status === 'Late') s.lateDays++;
-      if (r.status === 'Absent') s.absentDays++;
-      if (r.status === 'Week Off') s.weekOffDays++;
-      if (r.status === 'Leave') s.leaveDays++;
-      s.workHours += r.hours;
-      s.overtimeHours += r.overtime;
-    }
-    return Array.from(byEmployee.values());
   }, [rows]);
 
   // In Correction mode two kinds of past day are correctable:
@@ -915,26 +874,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </span>
           </button>
 
-          <TableExportBar
-            onExportCsv={exportCsv}
-            leading={
-              <div className="flex items-center rounded-md border border-slate-200 bg-white p-0.5 text-xs font-semibold shadow-sm print:hidden">
-                <button
-                  onClick={() => setViewMode('daily')}
-                  className={`rounded px-2 py-1 transition-colors ${viewMode === 'daily' ? 'bg-accent text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-                >
-                  Daily
-                </button>
-                <button
-                  onClick={() => setViewMode('summary')}
-                  title="One row per employee (totals only) — much shorter to print"
-                  className={`rounded px-2 py-1 transition-colors ${viewMode === 'summary' ? 'bg-accent text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-                >
-                  Summary
-                </button>
-              </div>
-            }
-          />
+          <TableExportBar onExportCsv={exportCsv} />
         </div>
       </div>
 
@@ -955,7 +895,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             globally in globals.css (not here) so there's one source of
             truth — see the comment there for why border-collapse is
             `separate`, not `collapse`. */}
-        {viewMode === 'daily' && (
         <table className="w-full text-left text-xs">
           <thead>
             <tr className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 print:static print:text-ink">
@@ -1097,47 +1036,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </tfoot>
           )}
         </table>
-        )}
-
-        {viewMode === 'summary' && (
-        <table className="w-full text-left text-xs">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 print:text-ink">
-              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">ID</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Employee</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Present</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Late</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Absent</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Week Off</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Leave</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Work Hours</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Overtime</th>
-            </tr>
-          </thead>
-          <tbody>
-            {employeeSummaries.map(s => (
-              <tr key={s.employeeId} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent">
-                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{s.enrollId}</td>
-                <td className="whitespace-nowrap px-2 py-1 font-medium text-ink print:border print:border-slate-400 print:px-2 print:py-1">{s.employeeName}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{s.presentDays}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{s.lateDays}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{s.absentDays}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{s.weekOffDays}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{s.leaveDays}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{fmtHrs(s.workHours)}</td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{fmtHrs(s.overtimeHours)}</td>
-              </tr>
-            ))}
-            {employeeSummaries.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
-                  {loading ? 'Loading…' : 'No records in this range.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        )}
         </div>
       </div>
 
