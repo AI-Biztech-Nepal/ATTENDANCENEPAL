@@ -261,11 +261,11 @@ async function upsertLogs(device, rawLogs) {
 // admin) is left alone. Only device users with no matching employee yet get
 // a brand-new employees row, so this is safe to run repeatedly.
 async function upsertUsers(device, rawUsers) {
+  const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
   let added = 0;
   for (const u of rawUsers) {
     const fingerprintId = String(u.userId);
-    const existing = await fetchEmployeeByFingerprint(fingerprintId);
-    if (existing) continue;
+    if (employeeIdByFingerprint.has(fingerprintId)) continue;
     const { error } = await supabase.from('employees').insert({
       employee_code: `ZK-${device.id.slice(0, 8)}-${fingerprintId}`,
       name: u.name || `Device user ${fingerprintId}`,
