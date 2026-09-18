@@ -184,11 +184,11 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-async function withDevice(device, fn) {
+async function withDevice(device, fn, operationTimeoutMs = 30000) {
   const zk = new ZKLib(device.ip_address, device.port, 10000, 4000);
   await withTimeout(zk.createSocket(), 15000, `${device.name}: connect`);
   try {
-    return await withTimeout(fn(zk), 30000, `${device.name}: operation`);
+    return await withTimeout(fn(zk), operationTimeoutMs, `${device.name}: operation`);
   } finally {
     // Best-effort and separately capped — a hung disconnect must never block
     // releasing the busyDeviceIds lock either. Its own failure is swallowed;
@@ -209,6 +209,27 @@ async function pullDeviceUsers(device) {
     const result = await zk.getUsers();
     return result.data || [];
   });
+}
+
+// Used by the automatic periodic poll (syncDevice) so a newly-enrolled
+// fingerprint gets its own employees row without anyone having to click
+// "Sync Users" on the dashboard — one connection, both pulls, since a
+// ZKTeco terminal only tolerates one session at a time and opening a
+// second one right after the first just to fetch users would double how
+// often the device gets connected to on every single poll. A higher
+// timeout than the single-purpose pulls' default 30s: a device with a
+// large stored history can genuinely take a while just for getAttendances,
+// and this call has to wait on getUsers() too, on top of that.
+async function pullDeviceLogsAndUsers(device) {
+  return withDevice(
+    device,
+    async zk => {
+      const logsResult = await zk.getAttendances();
+      const usersResult = await zk.getUsers();
+      return { rawLogs: logsResult.data || [], rawUsers: usersResult.data || [] };
+    },
+    60000
+  );
 }
 
 async function upsertLogs(device, rawLogs) {
@@ -315,14 +336,20 @@ async function syncDevice(device) {
 
   busyDeviceIds.add(device.id);
   try {
-    const rawLogs = await pullDeviceLogs(device);
-    // upsertLogs() makes its own per-row Supabase calls (fetchEmployeeByFingerprint
-    // for each punch, then the upsert itself) with no timeout of their own — a
-    // stalled connection here (this machine's network has been observed dropping
-    // out for stretches) would wedge busyDeviceIds exactly like the unbounded ZK
-    // call did before withDevice() got its own timeout. Same fix, same reason.
+    // Pulls both logs and the device's current enrolled-user list on every
+    // automatic poll now, not just punches — so a fingerprint enrolled
+    // directly on the device gets its own employees row on its own,
+    // without anyone having to click "Sync Users" on the dashboard first.
+    const { rawLogs, rawUsers } = await pullDeviceLogsAndUsers(device);
+    // upsertLogs()/upsertUsers() make their own Supabase calls with no
+    // timeout of their own — a stalled connection here (this machine's
+    // network has been observed dropping out for stretches) would wedge
+    // busyDeviceIds exactly like the unbounded ZK call did before
+    // withDevice() got its own timeout. Same fix, same reason.
     const count = await withTimeout(upsertLogs(device, rawLogs), UPSERT_TIMEOUT_MS, `${device.name}: upsertLogs`);
+    const { added } = await withTimeout(upsertUsers(device, rawUsers), UPSERT_TIMEOUT_MS, `${device.name}: upsertUsers`);
     if (count > 0) console.log(`[${device.name}] synced ${count} new punch(es)`);
+    if (added > 0) console.log(`[${device.name}] added ${added} new employee(s) from device enrollment`);
     failureCounts.set(device.id, 0);
     nextRetryAt.delete(device.id);
     await markDeviceStatus(device.id, { last_sync: new Date().toISOString(), status: 'online' });
