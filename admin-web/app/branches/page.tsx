@@ -6,7 +6,7 @@ import AppShell from '@/components/AppShell';
 import { useConfirm } from '@/components/ConfirmDialog';
 import type { Branch, BranchDepartment, Department } from '@/lib/types';
 
-const EMPTY_FORM = { name: '' };
+const EMPTY_FORM = { name: '', radius_meters: 150 };
 
 // branch_code is only ever unique per-company (uq_branches_company_code),
 // never shown to an employee, and nothing keys off its specific value
@@ -74,7 +74,7 @@ export default function BranchesPage() {
 
   function openEdit(b: Branch) {
     setEditing(b);
-    setForm({ name: b.name });
+    setForm({ name: b.name, radius_meters: b.radius_meters });
     setFormError(null);
     setShowForm(true);
   }
@@ -85,7 +85,10 @@ export default function BranchesPage() {
     setSaving(true);
 
     if (editing) {
-      const { error } = await supabase.from('branches').update({ name: form.name }).eq('id', editing.id);
+      const { error } = await supabase
+        .from('branches')
+        .update({ name: form.name, radius_meters: form.radius_meters })
+        .eq('id', editing.id);
       setSaving(false);
       if (error) {
         setFormError(error.message);
@@ -103,7 +106,7 @@ export default function BranchesPage() {
     let error: { code?: string; message: string } | null = null;
     for (let attempt = 0; attempt < 10; attempt++) {
       const branch_code = attempt === 0 ? base : `${base}-${attempt + 1}`;
-      const result = await supabase.from('branches').insert({ name: form.name, branch_code });
+      const result = await supabase.from('branches').insert({ name: form.name, branch_code, radius_meters: form.radius_meters });
       error = result.error;
       if (!error || error.code !== '23505') break;
     }
@@ -306,6 +309,20 @@ export default function BranchesPage() {
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
               className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
+
+            <label className="mb-1 block text-xs font-medium text-slate-600">Radius (meters)</label>
+            <input
+              type="number"
+              min={10}
+              required
+              value={form.radius_meters}
+              onChange={e => setForm(f => ({ ...f, radius_meters: Number(e.target.value) }))}
+              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+            <p className="mb-3 text-xs text-slate-400">
+              How far (in meters) from this point an employee can still check in — e.g. 150 covers most of a single
+              office building.
+            </p>
 
             {formError && <p className="mb-3 text-sm text-critical">{formError}</p>}
             <div className="mt-4 flex justify-end gap-2">
