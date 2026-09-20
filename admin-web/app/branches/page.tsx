@@ -6,7 +6,22 @@ import AppShell from '@/components/AppShell';
 import { useConfirm } from '@/components/ConfirmDialog';
 import type { Branch, BranchDepartment, Department } from '@/lib/types';
 
-const EMPTY_FORM = { name: '', branch_code: '', radius_meters: 150 };
+const EMPTY_FORM = { name: '' };
+
+// branch_code is only ever unique per-company (uq_branches_company_code),
+// never shown to an employee, and nothing keys off its specific value
+// (checked: only ever displayed, never matched against) — so it's safe to
+// derive from the name instead of making an admin type one. Retried with a
+// numeric suffix on a collision rather than checked for uniqueness up
+// front, since a race with another insert is always possible either way.
+function slugifyBranchName(name: string): string {
+  const slug = name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || 'BRANCH';
+}
 
 type EmployeeScope = { branch_id: string | null; department: string | null };
 
@@ -59,11 +74,7 @@ export default function BranchesPage() {
 
   function openEdit(b: Branch) {
     setEditing(b);
-    setForm({
-      name: b.name,
-      branch_code: b.branch_code,
-      radius_meters: b.radius_meters,
-    });
+    setForm({ name: b.name });
     setFormError(null);
     setShowForm(true);
   }
@@ -72,14 +83,30 @@ export default function BranchesPage() {
     e.preventDefault();
     setFormError(null);
     setSaving(true);
-    const payload = {
-      name: form.name,
-      branch_code: form.branch_code,
-      radius_meters: form.radius_meters,
-    };
-    const { error } = editing
-      ? await supabase.from('branches').update(payload).eq('id', editing.id)
-      : await supabase.from('branches').insert(payload);
+
+    if (editing) {
+      const { error } = await supabase.from('branches').update({ name: form.name }).eq('id', editing.id);
+      setSaving(false);
+      if (error) {
+        setFormError(error.message);
+        return;
+      }
+      setShowForm(false);
+      reload();
+      return;
+    }
+
+    // Retry with a numeric suffix on a unique-constraint collision
+    // (Postgres 23505) instead of pre-checking — a race with another
+    // insert is possible either way, so the retry has to exist regardless.
+    const base = slugifyBranchName(form.name);
+    let error: { code?: string; message: string } | null = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const branch_code = attempt === 0 ? base : `${base}-${attempt + 1}`;
+      const result = await supabase.from('branches').insert({ name: form.name, branch_code });
+      error = result.error;
+      if (!error || error.code !== '23505') break;
+    }
     setSaving(false);
     if (error) {
       setFormError(error.message);
@@ -279,28 +306,6 @@ export default function BranchesPage() {
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
               className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
-
-            <label className="mb-1 block text-xs font-medium text-slate-600">Branch code</label>
-            <input
-              required
-              value={form.branch_code}
-              onChange={e => setForm(f => ({ ...f, branch_code: e.target.value }))}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-
-            <label className="mb-1 block text-xs font-medium text-slate-600">Radius (meters)</label>
-            <input
-              type="number"
-              min={10}
-              required
-              value={form.radius_meters}
-              onChange={e => setForm(f => ({ ...f, radius_meters: Number(e.target.value) }))}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <p className="mb-3 text-xs text-slate-400">
-              How far (in meters) from this point an employee can still check in — e.g. 150 covers most of a single
-              office building.
-            </p>
 
             {formError && <p className="mb-3 text-sm text-critical">{formError}</p>}
             <div className="mt-4 flex justify-end gap-2">
