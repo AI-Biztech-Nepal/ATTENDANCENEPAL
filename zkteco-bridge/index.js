@@ -48,7 +48,15 @@ const UPSERT_TIMEOUT_MS = Number(process.env.UPSERT_TIMEOUT_MS || 120000);
 // SYNC_INTERVAL_MS regardless. On-demand syncs (click-to-sync, the dashboard's
 // Sync Log/Sync Users buttons) are one-off, not a tight loop, so they always
 // pull both and ignore this.
-const USERS_POLL_INTERVAL_MS = Number(process.env.USERS_POLL_INTERVAL_MS || 2 * 60 * 1000);
+//
+// Originally defaulted to 2 minutes, which is exactly long enough that
+// testing a fresh enrollment looks broken — nothing shows up, no error, and
+// only a restart (which resets lastUsersPullAt and forces an immediate pull)
+// makes it appear. That's indistinguishable from a real bug to anyone who
+// doesn't know this throttle exists, which is everyone setting this up for
+// the first time. Restarting to "fix" a bridge that was actually just about
+// to update on its own is now a permanently closed chapter.
+const USERS_POLL_INTERVAL_MS = Number(process.env.USERS_POLL_INTERVAL_MS || 30 * 1000);
 const lastUsersPullAt = new Map();
 
 // Set by sync.bat (or any .env) when the device's real LAN address differs
