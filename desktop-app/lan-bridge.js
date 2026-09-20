@@ -5,6 +5,17 @@
 // Runs only once configure() has been given a device-bridge credential
 // (generated from the dashboard's Devices page) — until then it's inert.
 //
+// Kept at feature parity with zkteco-bridge/index.js (batched employee
+// lookups, batched upserts, longer upsert timeout, backoff, periodic
+// enrollment auto-detection) — this had drifted badly out of sync with it
+// (still doing a Supabase round-trip per punch, the exact bug that made a
+// device's first sync time out having uploaded nothing) since this file was
+// forked into its own module shape and never revisited. Whenever index.js
+// changes, port the same fix here AND to admin-web/public/lan-bridge.js (see
+// desktop-app/README.md — that's the copy every already-installed app
+// actually fetches and runs; this bundled copy is only its first-launch,
+// no-internet-yet fallback).
+//
 // Same trust model as the standalone bridge: signs in as a normal Supabase
 // Auth user (never the service-role master key), so everything below is
 // automatically scoped to that credential's own company by Postgres RLS,
@@ -23,6 +34,19 @@ const SUPABASE_ANON_KEY =
 const SYNC_INTERVAL_MS = 15 * 1000;
 const SYNC_REQUEST_POLL_MS = 15 * 1000;
 const MAX_BACKOFF_MS = 10 * 60 * 1000;
+// Uploading a device's whole stored history on a first sync is a lot more
+// than 30s allows — the batched upsert below still has to make one
+// round-trip per 500 punches.
+const UPSERT_TIMEOUT_MS = 120000;
+// getUsers() pulls the device's *entire* enrolled-fingerprint list (template
+// data included) over the same slow ZK link as getAttendances() — doing
+// that on every single automatic poll (every SYNC_INTERVAL_MS) made each
+// cycle noticeably heavier for no real benefit, since enrollment doesn't
+// happen anywhere near that often. The periodic poll only pulls the user
+// list once per this interval; punches still sync every SYNC_INTERVAL_MS.
+// On-demand syncs (the dashboard's Sync Log/Sync Users buttons) are
+// one-off, not a tight loop, so they always pull both and ignore this.
+const USERS_POLL_INTERVAL_MS = 2 * 60 * 1000;
 
 let supabase = null;
 let companyId = null;
@@ -49,6 +73,9 @@ const busyDeviceIds = new Set();
 // "Sync Now" requests, which always represent explicit intent and should
 // still try right away).
 const nextRetryAt = new Map();
+// device_id -> last time the enrolled-user list was actually pulled, so
+// syncDevice() can throttle getUsers() to USERS_POLL_INTERVAL_MS.
+const lastUsersPullAt = new Map();
 
 const status = {
   configured: false,
@@ -68,15 +95,28 @@ async function fetchActiveDevices() {
   return data;
 }
 
-async function fetchEmployeeByFingerprint(fingerprintId) {
-  const { data, error } = await supabase
-    .from('employees')
-    .select('id')
-    .eq('fingerprint_id', String(fingerprintId))
-    .eq('company_id', companyId)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+// fingerprint_id -> employee id for the whole company, in ONE query. This
+// used to be a query per punch — a device holds its entire history in
+// memory (over a thousand records on a two-month-old unit is normal), so a
+// first sync fired that many sequential round-trips and blew the timeout
+// long before it reached the insert, so the sync failed having uploaded
+// nothing, over and over. Re-read at the start of each sync, so a
+// fingerprint_id set in the dashboard a minute ago is picked up.
+async function fetchEmployeesByFingerprint() {
+  const byFingerprint = new Map();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('employees')
+      .select('id, fingerprint_id')
+      .eq('company_id', companyId)
+      .not('fingerprint_id', 'is', null)
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    for (const e of data) byFingerprint.set(String(e.fingerprint_id), e.id);
+    if (data.length < PAGE) break;
+  }
+  return byFingerprint;
 }
 
 // See index.js's withDevice() for why this timeout wrapper exists — a
@@ -89,11 +129,11 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-async function withDevice(device, fn) {
+async function withDevice(device, fn, operationTimeoutMs = 30000) {
   const zk = new ZKLib(device.ip_address, device.port, 10000, 4000);
   await withTimeout(zk.createSocket(), 15000, `${device.name}: connect`);
   try {
-    return await withTimeout(fn(zk), 30000, `${device.name}: operation`);
+    return await withTimeout(fn(zk), operationTimeoutMs, `${device.name}: operation`);
   } finally {
     await withTimeout(zk.disconnect(), 5000, `${device.name}: disconnect`).catch(() => {});
   }
@@ -113,11 +153,30 @@ async function pullDeviceUsers(device) {
   });
 }
 
-async function upsertLogs(device, rawLogs) {
+// One connection, both pulls — a ZKTeco terminal only tolerates one session
+// at a time, so opening a second one right after the first just to fetch
+// users would double how often the device gets connected to.
+async function pullDeviceLogsAndUsers(device) {
+  return withDevice(
+    device,
+    async zk => {
+      const logsResult = await zk.getAttendances();
+      const usersResult = await zk.getUsers();
+      return { rawLogs: logsResult.data || [], rawUsers: usersResult.data || [] };
+    },
+    60000
+  );
+}
+
+// employeeIdByFingerprint can be passed in by a caller that's about to make
+// this same call for upsertUsers() too, so the whole-company fingerprint
+// map is fetched once per sync instead of twice.
+async function upsertLogs(device, rawLogs, employeeIdByFingerprint) {
+  employeeIdByFingerprint = employeeIdByFingerprint || (await fetchEmployeesByFingerprint());
   const rows = [];
   for (const log of rawLogs) {
-    const employee = await fetchEmployeeByFingerprint(log.deviceUserId);
-    if (!employee) {
+    const employeeId = employeeIdByFingerprint.get(String(log.deviceUserId));
+    if (!employeeId) {
       const key = `${device.id}:${log.deviceUserId}`;
       if (!warnedUnmappedFingerprints.has(key)) {
         warnedUnmappedFingerprints.add(key);
@@ -126,7 +185,7 @@ async function upsertLogs(device, rawLogs) {
       continue;
     }
     rows.push({
-      employee_id: employee.id,
+      employee_id: employeeId,
       device_id: device.id,
       punch_time: new Date(log.recordTime).toISOString(),
       punch_type: String(log.type ?? '0'),
@@ -136,20 +195,31 @@ async function upsertLogs(device, rawLogs) {
   }
   if (rows.length === 0) return 0;
 
-  const { data: inserted, error } = await supabase
-    .from('attendance_logs')
-    .upsert(rows, { onConflict: 'employee_id,punch_time', ignoreDuplicates: true })
-    .select();
-  if (error) throw error;
-  return inserted.length;
+  // A first sync can carry the device's whole history; send it in batches
+  // so one request never has to hold thousands of rows.
+  const BATCH = 500;
+  let insertedCount = 0;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const { data: inserted, error } = await supabase
+      .from('attendance_logs')
+      .upsert(rows.slice(i, i + BATCH), { onConflict: 'employee_id,punch_time', ignoreDuplicates: true })
+      .select();
+    if (error) throw error;
+    insertedCount += inserted.length;
+  }
+  return insertedCount;
 }
 
-async function upsertUsers(device, rawUsers) {
+// A device user is only ever matched by fingerprint_id — if one already maps
+// to an existing employee, that row (name, employee_code, etc, set by an
+// admin) is left alone. Only device users with no matching employee yet get
+// a brand-new employees row, so this is safe to run repeatedly.
+async function upsertUsers(device, rawUsers, employeeIdByFingerprint) {
+  employeeIdByFingerprint = employeeIdByFingerprint || (await fetchEmployeesByFingerprint());
   let added = 0;
   for (const u of rawUsers) {
     const fingerprintId = String(u.userId);
-    const existing = await fetchEmployeeByFingerprint(fingerprintId);
-    if (existing) continue;
+    if (employeeIdByFingerprint.has(fingerprintId)) continue;
     const { error } = await supabase.from('employees').insert({
       employee_code: `ZK-${device.id.slice(0, 8)}-${fingerprintId}`,
       name: u.name || `Device user ${fingerprintId}`,
@@ -163,13 +233,28 @@ async function upsertUsers(device, rawUsers) {
   return { total: rawUsers.length, added };
 }
 
+// node-zklib rejects with plain objects ({ err, ip }) as often as with real
+// Errors, so err.message is frequently undefined.
+function describeError(err) {
+  if (!err) return 'unknown error';
+  if (typeof err === 'string') return err;
+  if (err.message) return err.message;
+  if (err.err) return describeError(err.err);
+  if (err.code) return `${err.code}${err.address ? ` (${err.address}:${err.port ?? ''})` : ''}`;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 // Every write to `devices` status/last_sync went through unchecked before —
 // a failed write (a network blip, an RLS surprise) vanished with no log and
 // no way to tell the status column had gone stale for a reason other than
 // the device itself.
 async function markDeviceStatus(deviceId, fields) {
   const { error } = await supabase.from('devices').update(fields).eq('id', deviceId);
-  if (error) console.error(`[lan-bridge] could not update device status:`, error.message);
+  if (error) console.error('[lan-bridge] could not update device status:', error.message);
 }
 
 async function syncDevice(device) {
@@ -182,9 +267,34 @@ async function syncDevice(device) {
 
   busyDeviceIds.add(device.id);
   try {
-    const rawLogs = await pullDeviceLogs(device);
-    const count = await withTimeout(upsertLogs(device, rawLogs), 30000, `${device.name}: upsertLogs`);
+    // Pulls the device's current enrolled-user list too, but only once per
+    // USERS_POLL_INTERVAL_MS rather than every single cycle — see that
+    // constant's comment. Punches (rawLogs) are still pulled every poll, so
+    // a fingerprint enrolled directly on the device gets its own employees
+    // row on its own within a couple of minutes, without anyone having to
+    // click "Sync Users" on the dashboard.
+    const dueForUsers = Date.now() - (lastUsersPullAt.get(device.id) || 0) >= USERS_POLL_INTERVAL_MS;
+    const { rawLogs, rawUsers } = dueForUsers
+      ? await pullDeviceLogsAndUsers(device)
+      : { rawLogs: await pullDeviceLogs(device), rawUsers: null };
+
+    const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+    const count = await withTimeout(
+      upsertLogs(device, rawLogs, employeeIdByFingerprint),
+      UPSERT_TIMEOUT_MS,
+      `${device.name}: upsertLogs`
+    );
+    let added = 0;
+    if (rawUsers) {
+      ({ added } = await withTimeout(
+        upsertUsers(device, rawUsers, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertUsers`
+      ));
+      lastUsersPullAt.set(device.id, Date.now());
+    }
     if (count > 0) console.log(`[lan-bridge] ${device.name}: synced ${count} new punch(es)`);
+    if (added > 0) console.log(`[lan-bridge] ${device.name}: added ${added} new employee(s) from device enrollment`);
     failureCounts.set(device.id, 0);
     nextRetryAt.delete(device.id);
     await markDeviceStatus(device.id, { last_sync: new Date().toISOString(), status: 'online' });
@@ -195,9 +305,9 @@ async function syncDevice(device) {
     failureCounts.set(device.id, failures);
     const backoff = Math.min(MAX_BACKOFF_MS, SYNC_INTERVAL_MS * 2 ** failures);
     nextRetryAt.set(device.id, Date.now() + backoff);
-    console.error(`[lan-bridge] ${device.name} sync failed (attempt ${failures}), next retry in ${Math.round(backoff / 1000)}s:`, err.message);
+    console.error(`[lan-bridge] ${device.name} sync failed (attempt ${failures}), next retry in ${Math.round(backoff / 1000)}s:`, describeError(err));
     await markDeviceStatus(device.id, { status: 'offline' });
-    status.lastError = `${device.name}: ${err.message}`;
+    status.lastError = `${device.name}: ${describeError(err)}`;
   } finally {
     busyDeviceIds.delete(device.id);
   }
@@ -236,12 +346,25 @@ async function processSyncEvent(event) {
     let summary;
     if (event.sync_type === 'users') {
       const rawUsers = await pullDeviceUsers(device);
-      const { total, added } = await withTimeout(upsertUsers(device, rawUsers), 30000, `${device.name}: upsertUsers`);
+      const { total, added } = await withTimeout(upsertUsers(device, rawUsers), UPSERT_TIMEOUT_MS, `${device.name}: upsertUsers`);
       summary = `${total} user(s) on device, ${added} new employee(s) added`;
     } else {
-      const rawLogs = await pullDeviceLogs(device);
-      const count = await withTimeout(upsertLogs(device, rawLogs), 30000, `${device.name}: upsertLogs`);
-      summary = `${rawLogs.length} record(s) on device, ${count} matched to an employee`;
+      // Pulls users alongside logs here too (previously logs only) — a
+      // newly-enrolled fingerprint shouldn't need a separate "Sync Users"
+      // click just because someone hit "Sync Log" first.
+      const { rawLogs, rawUsers } = await pullDeviceLogsAndUsers(device);
+      const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+      const count = await withTimeout(
+        upsertLogs(device, rawLogs, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertLogs`
+      );
+      const { added } = await withTimeout(
+        upsertUsers(device, rawUsers, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertUsers`
+      );
+      summary = `${rawLogs.length} record(s) on device, ${count} matched to an employee` + (added > 0 ? `, ${added} new employee(s) added` : '');
     }
     console.log(`[lan-bridge] ${device.name} ${event.sync_type} sync: ${summary}`);
     await supabase
@@ -252,10 +375,10 @@ async function processSyncEvent(event) {
     nextRetryAt.delete(device.id);
     await markDeviceStatus(device.id, { last_sync: new Date().toISOString(), status: 'online' });
   } catch (err) {
-    console.error(`[lan-bridge] ${device.name} ${event.sync_type} sync failed:`, err.message);
+    console.error(`[lan-bridge] ${device.name} ${event.sync_type} sync failed:`, describeError(err));
     await supabase
       .from('device_sync_events')
-      .update({ status: 'failed', completed_at: new Date().toISOString(), error: err.message })
+      .update({ status: 'failed', completed_at: new Date().toISOString(), error: describeError(err) })
       .eq('id', event.id);
     const failures = (failureCounts.get(device.id) || 0) + 1;
     failureCounts.set(device.id, failures);

@@ -39,6 +39,18 @@ const MAX_BACKOFF_MS = 10 * 60 * 1000;
 // make one round-trip per 500 punches.
 const UPSERT_TIMEOUT_MS = Number(process.env.UPSERT_TIMEOUT_MS || 120000);
 
+// getUsers() pulls the device's *entire* enrolled-fingerprint list (template
+// data included) over the same slow ZK link as getAttendances() — doing that
+// on every single automatic poll (as often as every 15s, SYNC_INTERVAL_MS)
+// made each cycle noticeably heavier for no real benefit, since enrollment
+// doesn't happen anywhere near that often. The periodic poll now only pulls
+// the user list once per this interval; punches still sync every
+// SYNC_INTERVAL_MS regardless. On-demand syncs (click-to-sync, the dashboard's
+// Sync Log/Sync Users buttons) are one-off, not a tight loop, so they always
+// pull both and ignore this.
+const USERS_POLL_INTERVAL_MS = Number(process.env.USERS_POLL_INTERVAL_MS || 2 * 60 * 1000);
+const lastUsersPullAt = new Map();
+
 // Set by sync.bat (or any .env) when the device's real LAN address differs
 // from the one registered on the dashboard's Devices page — a device that
 // got a new DHCP lease, or was registered with a typo. The dashboard row is
@@ -232,8 +244,11 @@ async function pullDeviceLogsAndUsers(device) {
   );
 }
 
-async function upsertLogs(device, rawLogs) {
-  const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+// employeeIdByFingerprint can be passed in by a caller that's about to make
+// this same call for upsertUsers() too (syncDevice's automatic poll), so the
+// whole-company fingerprint map is fetched once per cycle instead of twice.
+async function upsertLogs(device, rawLogs, employeeIdByFingerprint) {
+  employeeIdByFingerprint = employeeIdByFingerprint || (await fetchEmployeesByFingerprint());
   const rows = [];
   for (const log of rawLogs) {
     const employeeId = employeeIdByFingerprint.get(String(log.deviceUserId));
@@ -281,8 +296,8 @@ async function upsertLogs(device, rawLogs) {
 // to an existing employee, that row (name, employee_code, etc, set by an
 // admin) is left alone. Only device users with no matching employee yet get
 // a brand-new employees row, so this is safe to run repeatedly.
-async function upsertUsers(device, rawUsers) {
-  const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+async function upsertUsers(device, rawUsers, employeeIdByFingerprint) {
+  employeeIdByFingerprint = employeeIdByFingerprint || (await fetchEmployeesByFingerprint());
   let added = 0;
   for (const u of rawUsers) {
     const fingerprintId = String(u.userId);
@@ -336,18 +351,33 @@ async function syncDevice(device) {
 
   busyDeviceIds.add(device.id);
   try {
-    // Pulls both logs and the device's current enrolled-user list on every
-    // automatic poll now, not just punches — so a fingerprint enrolled
-    // directly on the device gets its own employees row on its own,
-    // without anyone having to click "Sync Users" on the dashboard first.
-    const { rawLogs, rawUsers } = await pullDeviceLogsAndUsers(device);
+    // Pulls the device's current enrolled-user list too, but only once per
+    // USERS_POLL_INTERVAL_MS rather than every single cycle — see that
+    // constant's comment. Punches (rawLogs) are still pulled every poll.
+    const dueForUsers = Date.now() - (lastUsersPullAt.get(device.id) || 0) >= USERS_POLL_INTERVAL_MS;
+    const { rawLogs, rawUsers } = dueForUsers
+      ? await pullDeviceLogsAndUsers(device)
+      : { rawLogs: await pullDeviceLogs(device), rawUsers: null };
     // upsertLogs()/upsertUsers() make their own Supabase calls with no
     // timeout of their own — a stalled connection here (this machine's
     // network has been observed dropping out for stretches) would wedge
     // busyDeviceIds exactly like the unbounded ZK call did before
     // withDevice() got its own timeout. Same fix, same reason.
-    const count = await withTimeout(upsertLogs(device, rawLogs), UPSERT_TIMEOUT_MS, `${device.name}: upsertLogs`);
-    const { added } = await withTimeout(upsertUsers(device, rawUsers), UPSERT_TIMEOUT_MS, `${device.name}: upsertUsers`);
+    const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+    const count = await withTimeout(
+      upsertLogs(device, rawLogs, employeeIdByFingerprint),
+      UPSERT_TIMEOUT_MS,
+      `${device.name}: upsertLogs`
+    );
+    let added = 0;
+    if (rawUsers) {
+      ({ added } = await withTimeout(
+        upsertUsers(device, rawUsers, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertUsers`
+      ));
+      lastUsersPullAt.set(device.id, Date.now());
+    }
     if (count > 0) console.log(`[${device.name}] synced ${count} new punch(es)`);
     if (added > 0) console.log(`[${device.name}] added ${added} new employee(s) from device enrollment`);
     failureCounts.set(device.id, 0);
@@ -405,9 +435,25 @@ async function processSyncEvent(event) {
       const { total, added } = await withTimeout(upsertUsers(device, rawUsers), UPSERT_TIMEOUT_MS, `${device.name}: upsertUsers`);
       summary = `${total} user(s) on device, ${added} new employee(s) added`;
     } else {
-      const rawLogs = await pullDeviceLogs(device);
-      const count = await withTimeout(upsertLogs(device, rawLogs), UPSERT_TIMEOUT_MS, `${device.name}: upsertLogs`);
-      summary = `${rawLogs.length} record(s) on device, ${count} matched to an employee`;
+      // Pulls users alongside logs here too (previously logs only), for the
+      // same reason as the click-to-sync path above: a newly-enrolled
+      // fingerprint shouldn't need a separate "Sync Users" click just
+      // because someone hit "Sync Log" first.
+      const { rawLogs, rawUsers } = await pullDeviceLogsAndUsers(device);
+      const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+      const count = await withTimeout(
+        upsertLogs(device, rawLogs, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertLogs`
+      );
+      const { added } = await withTimeout(
+        upsertUsers(device, rawUsers, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertUsers`
+      );
+      summary =
+        `${rawLogs.length} record(s) on device, ${count} matched to an employee` +
+        (added > 0 ? `, ${added} new employee(s) added` : '');
     }
     console.log(`[${device.name}] ${event.sync_type} sync: ${summary}`);
     await supabase
@@ -452,9 +498,27 @@ async function main() {
     for (const device of devices) {
       console.log(`[${device.name}] connecting to ${device.ip_address}:${device.port} ...`);
       try {
-        const rawLogs = await pullDeviceLogs(device);
-        const count = await withTimeout(upsertLogs(device, rawLogs), UPSERT_TIMEOUT_MS, `${device.name}: upsertLogs`);
-        console.log(`[${device.name}] ${rawLogs.length} record(s) on the device, ${count} new punch(es) uploaded.`);
+        // Pulls users too, not just logs — a device bridged for the first
+        // time commonly already has fingerprints enrolled on it directly
+        // (never entered in the admin UI), and this one-off run used to be
+        // the one path that silently dropped their punches (unmapped
+        // fingerprint, warned once, skipped) instead of creating them.
+        const { rawLogs, rawUsers } = await pullDeviceLogsAndUsers(device);
+        const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+        const count = await withTimeout(
+          upsertLogs(device, rawLogs, employeeIdByFingerprint),
+          UPSERT_TIMEOUT_MS,
+          `${device.name}: upsertLogs`
+        );
+        const { added } = await withTimeout(
+          upsertUsers(device, rawUsers, employeeIdByFingerprint),
+          UPSERT_TIMEOUT_MS,
+          `${device.name}: upsertUsers`
+        );
+        console.log(
+          `[${device.name}] ${rawLogs.length} record(s) on the device, ${count} new punch(es) uploaded` +
+            (added > 0 ? `, ${added} new employee(s) added from device enrollment.` : '.')
+        );
         await markDeviceStatus(device.id, { last_sync: new Date().toISOString(), status: 'online' });
       } catch (err) {
         failed += 1;
