@@ -6,7 +6,7 @@ import AppShell from '@/components/AppShell';
 import { useConfirm } from '@/components/ConfirmDialog';
 import type { Branch, BranchDepartment, Department } from '@/lib/types';
 
-const EMPTY_FORM = { name: '', branch_code: '', latitude: '', longitude: '', radius_meters: 150 };
+const EMPTY_FORM = { name: '', branch_code: '', radius_meters: 150 };
 
 type EmployeeScope = { branch_id: string | null; department: string | null };
 
@@ -21,8 +21,6 @@ export default function BranchesPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [locating, setLocating] = useState(false);
-  const [locateError, setLocateError] = useState<string | null>(null);
 
   const [showDeptForm, setShowDeptForm] = useState(false);
   const [deptName, setDeptName] = useState('');
@@ -56,7 +54,6 @@ export default function BranchesPage() {
     setEditing(null);
     setForm(EMPTY_FORM);
     setFormError(null);
-    setLocateError(null);
     setShowForm(true);
   }
 
@@ -65,50 +62,19 @@ export default function BranchesPage() {
     setForm({
       name: b.name,
       branch_code: b.branch_code,
-      latitude: String(b.latitude),
-      longitude: String(b.longitude),
       radius_meters: b.radius_meters,
     });
     setFormError(null);
-    setLocateError(null);
     setShowForm(true);
-  }
-
-  function useCurrentLocation() {
-    if (!navigator.geolocation) {
-      setLocateError('This browser does not support location access.');
-      return;
-    }
-    setLocating(true);
-    setLocateError(null);
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        setLocating(false);
-        setForm(f => ({ ...f, latitude: String(pos.coords.latitude), longitude: String(pos.coords.longitude) }));
-      },
-      err => {
-        setLocating(false);
-        setLocateError(err.message);
-      },
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
   }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
-    const lat = Number(form.latitude);
-    const lng = Number(form.longitude);
-    if (!form.latitude || !form.longitude || Number.isNaN(lat) || Number.isNaN(lng)) {
-      setFormError('Set the branch location — use "Use my current location" while standing there, or enter coordinates manually.');
-      return;
-    }
     setSaving(true);
     const payload = {
       name: form.name,
       branch_code: form.branch_code,
-      latitude: lat,
-      longitude: lng,
       radius_meters: form.radius_meters,
     };
     const { error } = editing
@@ -234,9 +200,11 @@ export default function BranchesPage() {
             <div key={b.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="mb-1 font-semibold text-ink">{b.name}</h3>
               <p className="mb-3 text-xs text-slate-400">{b.branch_code}</p>
-              <p className="text-sm text-slate-600">
-                📍 {b.latitude.toFixed(5)}, {b.longitude.toFixed(5)}
-              </p>
+              {b.latitude != null && b.longitude != null && (
+                <p className="text-sm text-slate-600">
+                  📍 {b.latitude.toFixed(5)}, {b.longitude.toFixed(5)}
+                </p>
+              )}
               <p className="text-sm text-slate-600">↔ {b.radius_meters}m radius</p>
 
               <div className="mt-3 border-t border-slate-100 pt-3">
@@ -319,38 +287,6 @@ export default function BranchesPage() {
               onChange={e => setForm(f => ({ ...f, branch_code: e.target.value }))}
               className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
-
-            <button
-              type="button"
-              onClick={useCurrentLocation}
-              disabled={locating}
-              className="mb-3 w-full rounded-lg border border-accent py-2 text-sm font-semibold text-accent disabled:opacity-60"
-            >
-              {locating ? 'Getting location…' : '📍 Use my current location'}
-            </button>
-            {locateError && <p className="mb-3 text-xs text-critical">{locateError}</p>}
-            <p className="mb-3 text-xs text-slate-400">Stand at the branch/office before tapping this.</p>
-
-            <div className="mb-3 grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Latitude</label>
-                <input
-                  required
-                  value={form.latitude}
-                  onChange={e => setForm(f => ({ ...f, latitude: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Longitude</label>
-                <input
-                  required
-                  value={form.longitude}
-                  onChange={e => setForm(f => ({ ...f, longitude: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
 
             <label className="mb-1 block text-xs font-medium text-slate-600">Radius (meters)</label>
             <input

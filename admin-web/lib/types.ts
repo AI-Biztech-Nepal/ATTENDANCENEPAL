@@ -2,8 +2,8 @@ export type Branch = {
   id: string;
   name: string;
   branch_code: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   radius_meters: number;
 };
 
