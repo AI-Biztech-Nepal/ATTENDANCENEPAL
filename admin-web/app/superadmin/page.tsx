@@ -343,24 +343,6 @@ export default function SuperadminDashboardPage() {
 
         <div className="flex flex-col gap-4">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <h2 className="mb-3 text-sm font-semibold text-ink">System Overview</h2>
-            <ul className="space-y-2.5 text-sm">
-              <li className="flex items-center justify-between">
-                <span className="text-slate-500">Total Users</span>
-                <span className="font-semibold text-ink">{stats ? stats.totalUsers : '—'}</span>
-              </li>
-              <li className="flex items-center justify-between">
-                <span className="text-slate-500">Total Employees</span>
-                <span className="font-semibold text-ink">{stats ? stats.totalEmployees : '—'}</span>
-              </li>
-              <li className="flex items-center justify-between">
-                <span className="text-slate-500">Registered Devices</span>
-                <span className="font-semibold text-ink">{stats ? stats.totalDevices : '—'}</span>
-              </li>
-            </ul>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <h2 className="mb-3 text-sm font-semibold text-ink">User Roles (platform-wide)</h2>
             {roleBreakdown.length === 0 ? (
               <p className="text-sm text-slate-400">No users yet.</p>
