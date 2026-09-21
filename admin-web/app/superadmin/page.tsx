@@ -391,6 +391,7 @@ export default function SuperadminDashboardPage() {
                   <li key={a.companyId}>
                     <button
                       onClick={() => setSelectedCompanyId(a.companyId)}
+                      title={`Last punch: ${new Date(a.lastPunchAt).toLocaleString()}`}
                       className="flex w-full items-center justify-between gap-2 text-left text-sm hover:text-accent"
                     >
                       <span className="truncate font-medium text-ink">{a.companyName}</span>
