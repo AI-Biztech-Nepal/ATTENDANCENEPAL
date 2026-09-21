@@ -25,6 +25,20 @@ type Stats = {
   totalDevices: number;
   roleCounts: { admin: number; hr: number; employee: number };
 };
+type RecentActivity = { companyId: string; companyName: string; lastPunchAt: string };
+
+const RECENT_ACTIVITY_POLL_MS = 15000;
+
+function formatRelativeTime(iso: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 const AVATAR_COLORS = [
   'bg-violet-50 text-violet-600',
@@ -47,6 +61,7 @@ export default function SuperadminDashboardPage() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'name' | 'employees'>('newest');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[] | null>(null);
 
   async function loadDashboard() {
     const { data } = await supabase.auth.getSession();
@@ -69,6 +84,27 @@ export default function SuperadminDashboardPage() {
 
   useEffect(() => {
     loadDashboard();
+  }, []);
+
+  // Polled, not a Realtime subscription: "superadmin" is a server-side email
+  // allowlist (see requireSuperadmin), not a role any RLS policy grants
+  // cross-tenant SELECT to — a client-side .channel() subscription against
+  // attendance_logs would only ever see this admin's own company's rows (if
+  // any), same as every other RLS-scoped table. Only the service-role API
+  // route can see across every company, so live-ness here comes from
+  // refetching it on an interval instead.
+  useEffect(() => {
+    async function loadRecentActivity() {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) return;
+      const res = await fetch('/api/superadmin/recent-activity', { headers: { Authorization: `Bearer ${token}` } });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) setRecentActivity(body.companies);
+    }
+    loadRecentActivity();
+    const id = setInterval(loadRecentActivity, RECENT_ACTIVITY_POLL_MS);
+    return () => clearInterval(id);
   }, []);
 
   const filtered = useMemo(() => {
@@ -269,6 +305,35 @@ export default function SuperadminDashboardPage() {
                   ))}
                 </ul>
               </>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-good" />
+              </span>
+              <h2 className="text-sm font-semibold text-ink">Live Activity</h2>
+            </div>
+            {recentActivity === null ? (
+              <p className="text-sm text-slate-400">Loading…</p>
+            ) : recentActivity.length === 0 ? (
+              <p className="text-sm text-slate-400">No punches recorded yet.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {recentActivity.map(a => (
+                  <li key={a.companyId}>
+                    <button
+                      onClick={() => setSelectedCompanyId(a.companyId)}
+                      className="flex w-full items-center justify-between gap-2 text-left text-sm hover:text-accent"
+                    >
+                      <span className="truncate font-medium text-ink">{a.companyName}</span>
+                      <span className="shrink-0 text-xs text-slate-500">{formatRelativeTime(a.lastPunchAt)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 
