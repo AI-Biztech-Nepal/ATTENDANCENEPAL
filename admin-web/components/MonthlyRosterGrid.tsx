@@ -9,7 +9,7 @@ import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import { buildPaintOptions, departmentOf, UNSET, WEEK_OFF_VALUE } from '@/lib/shiftPalette';
+import { buildPaintOptions, departmentOf, UNSET, WEEK_OFF_VALUE, type PaintOption } from '@/lib/shiftPalette';
 import type { Employee, Shift } from '@/lib/types';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -442,6 +442,7 @@ export default function MonthlyRosterGrid() {
                     setCell={setCell}
                     brush={brush}
                     cellClass={cellClass}
+                    paintByValue={paintByValue}
                     pending={pending}
                     hoursFor={hoursFor}
                     copiedEmployeeId={copiedEmployeeId}
@@ -544,6 +545,7 @@ function MonthlyGroupRows({
   setCell,
   brush,
   cellClass,
+  paintByValue,
   pending,
   hoursFor,
   copiedEmployeeId,
@@ -561,6 +563,7 @@ function MonthlyGroupRows({
   setCell: (employeeId: string, date: string, value: string) => void;
   brush: string;
   cellClass: (value: string, dirty: boolean) => string;
+  paintByValue: Map<string, PaintOption>;
   pending: Record<string, string>;
   hoursFor: (employeeId: string) => number;
   copiedEmployeeId: string | null;
@@ -606,10 +609,14 @@ function MonthlyGroupRows({
                     <button
                       type="button"
                       onClick={() => setCell(emp.id, date, brush)}
-                      title={`Paint ${emp.name} on ${date} with the selected brush`}
+                      title={
+                        value === UNSET
+                          ? `Paint ${emp.name} on ${date} with the selected brush`
+                          : `${paintByValue.get(value)?.label}${paintByValue.get(value)?.sub ? ` (${paintByValue.get(value)!.sub})` : ''} — click to paint over it`
+                      }
                       className={`h-8 w-9 rounded-md border text-[10px] font-bold shadow-sm transition-transform hover:-translate-y-px hover:shadow ${cellClass(value, dirty)}`}
                     >
-                      {value === UNSET ? '—' : null}
+                      {value === UNSET ? '—' : paintByValue.get(value)?.abbr}
                     </button>
                   </td>
                 );

@@ -11,12 +11,28 @@ export const WEEK_OFF_VALUE = 'week-off';
 export type PaintOption = {
   value: string;
   label: string;
+  /** 2-3 letter stand-in for `label` — the Monthly grid's cells are too
+   * narrow (up to 31 to a row) for a full shift name, unlike the Weekly
+   * grid's 7 wider columns, which show `label` itself, truncated. */
+  abbr: string;
   /** "" for Week Off / Clear, "09:00–17:00" for a real shift. */
   sub: string;
   bg: string;
   text: string;
   dot: string;
 };
+
+/** "Day & Night Duty" -> "D&N", "Night Duty" -> "ND", "Day Duty" -> "DD" —
+ * the initial of each word (an "&" keeps its own initial as itself), so two
+ * differently-named shifts a company defines are still visually distinct in
+ * a cell too narrow for their full names. */
+function abbreviate(name: string): string {
+  const letters = name
+    .split(/\s+/)
+    .map(w => (w === '&' ? '&' : w.charAt(0).toUpperCase()))
+    .join('');
+  return letters.slice(0, 3) || name.slice(0, 3).toUpperCase();
+}
 
 /** A small rotating set of Tailwind color pairs for shift-template brushes
  * and cells — distinct from the app's semantic accent/good/warning/critical
@@ -40,13 +56,14 @@ const PALETTE = [
  * template-only (employee_id === null). */
 export function buildPaintOptions(templateShifts: Shift[]): PaintOption[] {
   return [
-    { value: WEEK_OFF_VALUE, label: 'Week Off', sub: '', bg: 'bg-warning-bg', text: 'text-warning-text', dot: 'bg-warning' },
-    { value: UNSET, label: 'Clear', sub: '', bg: 'bg-white', text: 'text-slate-500', dot: '' },
+    { value: WEEK_OFF_VALUE, label: 'Week Off', abbr: 'Off', sub: '', bg: 'bg-warning-bg', text: 'text-warning-text', dot: 'bg-warning' },
+    { value: UNSET, label: 'Clear', abbr: '', sub: '', bg: 'bg-white', text: 'text-slate-500', dot: '' },
     ...templateShifts.map((s, i) => {
       const c = PALETTE[i % PALETTE.length];
       return {
         value: s.id,
         label: s.name,
+        abbr: abbreviate(s.name),
         sub: `${s.start_time.slice(0, 5)}–${s.end_time.slice(0, 5)}`,
         bg: c.bg,
         text: c.text,

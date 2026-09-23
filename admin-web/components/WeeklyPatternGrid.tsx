@@ -8,7 +8,7 @@ import PasteWeeklyRosterDialog from '@/components/PasteWeeklyRosterDialog';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { todayAnchor } from '@/lib/calendar';
-import { buildPaintOptions, departmentOf, UNSET, WEEK_OFF_VALUE } from '@/lib/shiftPalette';
+import { buildPaintOptions, departmentOf, UNSET, WEEK_OFF_VALUE, type PaintOption } from '@/lib/shiftPalette';
 import type { Employee, Shift } from '@/lib/types';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -343,6 +343,7 @@ export default function WeeklyPatternGrid() {
                     setCell={setCell}
                     brush={brush}
                     cellClass={cellClass}
+                    paintByValue={paintByValue}
                     pending={pending}
                     hoursFor={hoursFor}
                     copiedEmployeeId={copiedEmployeeId}
@@ -387,6 +388,7 @@ function GroupRows({
   setCell,
   brush,
   cellClass,
+  paintByValue,
   pending,
   hoursFor,
   copiedEmployeeId,
@@ -403,6 +405,7 @@ function GroupRows({
   setCell: (employeeId: string, weekday: number, value: string) => void;
   brush: string;
   cellClass: (value: string, dirty: boolean) => string;
+  paintByValue: Map<string, PaintOption>;
   pending: Record<string, string>;
   hoursFor: (employeeId: string) => number;
   copiedEmployeeId: string | null;
@@ -448,10 +451,23 @@ function GroupRows({
                     <button
                       type="button"
                       onClick={() => setCell(emp.id, wd, brush)}
-                      title={`Paint ${emp.name}'s ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][wd]} with the selected brush`}
-                      className={`h-9 w-full rounded-md border text-xs font-semibold shadow-sm transition-transform hover:-translate-y-px hover:shadow ${cellClass(value, dirty)}`}
+                      title={
+                        value === UNSET
+                          ? `Paint ${emp.name}'s ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][wd]} with the selected brush`
+                          : `${paintByValue.get(value)?.label}${paintByValue.get(value)?.sub ? ` (${paintByValue.get(value)!.sub})` : ''} — click to paint over it`
+                      }
+                      className={`flex h-9 w-full flex-col items-center justify-center gap-0 truncate rounded-md border px-1 text-xs font-semibold leading-tight shadow-sm transition-transform hover:-translate-y-px hover:shadow ${cellClass(value, dirty)}`}
                     >
-                      {value === UNSET ? '—' : null}
+                      {value === UNSET ? (
+                        '—'
+                      ) : (
+                        <>
+                          <span className="w-full truncate">{paintByValue.get(value)?.label}</span>
+                          {paintByValue.get(value)?.sub && (
+                            <span className="w-full truncate text-[9px] font-normal opacity-70">{paintByValue.get(value)!.sub}</span>
+                          )}
+                        </>
+                      )}
                     </button>
                   </td>
                 );
