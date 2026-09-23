@@ -33,7 +33,7 @@ const { createClient } = require('@supabase/supabase-js');
 
 const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS || 15 * 1000);
 const SYNC_REQUEST_POLL_MS = Number(process.env.SYNC_REQUEST_POLL_MS || 15000);
-const MAX_BACKOFF_MS = 10 * 60 * 1000;
+const MAX_BACKOFF_MS = 2 * 60 * 1000;
 // Uploading a device's whole stored history on a first sync is a lot more
 // than the 30s this used to allow — the batched upsert below still has to
 // make one round-trip per 500 punches.
@@ -355,7 +355,10 @@ async function syncDevice(device) {
     return;
   }
   const retryAt = nextRetryAt.get(device.id);
-  if (retryAt && Date.now() < retryAt) return;
+  if (retryAt && Date.now() < retryAt) {
+    console.log(`[${device.name}] backing off after a failed sync, next attempt in ${Math.ceil((retryAt - Date.now()) / 1000)}s`);
+    return;
+  }
 
   busyDeviceIds.add(device.id);
   try {
