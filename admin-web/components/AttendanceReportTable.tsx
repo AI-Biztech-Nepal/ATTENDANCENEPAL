@@ -24,6 +24,7 @@ import {
   punchMinuteOfDay,
   resolveShiftForDate,
   type DailyShiftByDate,
+  type ResolvedShift,
 } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import { fetchLeavePolicy, leavePolicyActive } from '@/lib/leaveBalance';
@@ -66,7 +67,28 @@ type Row = {
   earlyMinutes: number;
   lateDepartureMinutes: number;
   overtime: number;
+  /** The day's resolved shift and the employee's exemption, kept so a staged
+   * correction can be previewed with the same math as a live day. */
+  resolvedShift: ResolvedShift;
+  attendanceExempt: boolean;
 };
+
+/** A correction made in Correction mode but not written yet. Edits and deletes
+ * are held here, previewed in the table, and only reach the database when the
+ * admin clicks Save changes (saveAllChanges). `requestId` is set once an
+ * edit's correction request row exists, so a retry after a failed apply
+ * doesn't insert a second one. */
+type PendingChange =
+  | {
+      kind: 'edit';
+      row: Row;
+      form: { checkIn: string; checkOut: string; checkOutNextDay: boolean; reason: string; deviceId: string };
+      inTs: string;
+      outTs: string;
+      requestId?: string;
+      error?: string;
+    }
+  | { kind: 'delete'; row: Row; error?: string };
 
 /** Decimal hours -> "Xh Ym". */
 function fmtHrs(hours: number) {
@@ -135,6 +157,56 @@ function EditablePunch({ onClick, children }: { onClick: () => void; children: R
       </svg>
     </button>
   );
+}
+
+/** The value a staged change replaces, shown struck through under the new
+ * one. Screen only. */
+function WasValue({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="block text-[10px] font-normal text-slate-400 print:hidden">
+      was <span className="line-through">{children}</span>
+    </span>
+  );
+}
+
+/** How a row reads once its staged change is saved: the same numbers the
+ * live-punch branch of `rows` computes, from the corrected times. The server
+ * recalculates for real on save (approve_attendance_correction()). */
+function previewRow(r: Row, change: PendingChange, deviceName: string | null): Row {
+  if (change.kind === 'delete') {
+    return {
+      ...r,
+      checkIn: null,
+      checkOut: null,
+      hours: 0,
+      overtime: 0,
+      lateMinutes: 0,
+      earlyArrivalMinutes: 0,
+      earlyMinutes: 0,
+      lateDepartureMinutes: 0,
+      status: r.shiftName === 'Week Off' ? 'Week Off' : 'Absent',
+      device: 'Deleted by admin',
+    };
+  }
+  const logs = [
+    { punch_time: change.inTs, punch_type: '0' },
+    { punch_time: change.outTs, punch_type: '1' },
+  ] as AttendanceLog[];
+  const live = computeDayStatusForResolvedShift(logs, r.resolvedShift);
+  const exempt = r.attendanceExempt;
+  return {
+    ...r,
+    checkIn: change.inTs,
+    checkOut: change.outTs,
+    hours: live.totalMinutes / 60,
+    overtime: live.overtimeMinutes / 60,
+    status: live.isLate && !exempt ? 'Late' : 'Present',
+    lateMinutes: exempt ? 0 : live.lateMinutes,
+    earlyArrivalMinutes: exempt ? 0 : live.earlyArrivalMinutes,
+    earlyMinutes: exempt ? 0 : live.earlyMinutes,
+    lateDepartureMinutes: exempt ? 0 : live.lateDepartureMinutes,
+    device: deviceName ?? r.device,
+  };
 }
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
@@ -278,8 +350,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
   // Correction mode: an admin-only view toggle. Off = the standard report;
   // on = a "Fix" chip in the empty punch cell of any past one-punch day,
-  // opening a direct correction that applies immediately (no approval — see
-  // saveCorrection). `refreshTick` re-pulls the day's data after one lands.
+  // opening a direct correction (no approval step). A correction is staged in
+  // `pending`, not written — see saveAllChanges(). `refreshTick` re-pulls the
+  // day's data after a save lands.
   const [correctionMode, setCorrectionMode] = useSessionState('attendanceReport:correctionMode', false, {
     isValid: v => typeof v === 'boolean',
   });
@@ -290,10 +363,16 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   // built on work_date, so such a duty was always rejected as "check-out
   // before check-in", or saved as a few minutes' work.
   const [fixForm, setFixForm] = useState({ checkIn: '', checkOut: '', checkOutNextDay: false, reason: '', deviceId: '' });
-  const [fixSaving, setFixSaving] = useState(false);
   const [fixError, setFixError] = useState<string | null>(null);
-  // The dialog's Delete asks once more, inline, before removing the day.
-  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Staged corrections, keyed by Row.key — nothing here is in the database
+  // until Save changes. `guardAction` is a filter/date/mode change held back
+  // while there are unsaved changes, until the admin saves or discards them.
+  const [pending, setPending] = useState<Map<string, PendingChange>>(new Map());
+  const [savingAll, setSavingAll] = useState(false);
+  const [saveProgress, setSaveProgress] = useState(0);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [guardAction, setGuardAction] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     supabase
@@ -433,7 +512,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         const shiftEnd = isWeekOff(resolved) ? null : resolved.end_time.slice(0, 5);
         const shiftTime = shiftStart && shiftEnd ? `${shiftStart}–${shiftEnd}` : null;
         const shiftLabel = shiftTime ? `${shiftName} (${shiftTime})` : shiftName;
-        const rowBase = { employeeId: emp.id, shiftStart, shiftEnd };
+        const rowBase = { employeeId: emp.id, shiftStart, shiftEnd, resolvedShift: resolved, attendanceExempt: !!emp.attendance_exempt };
 
         // Early-arrival / late-departure aren't stored on the summary row —
         // derive them live from check_in/check_out against the shift.
@@ -555,13 +634,26 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       });
   }, [scopedEmployees, summaries, logs, devices, shifts, from, to, status, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
 
+  // `rows` as they'll read once the staged changes are saved — what the table
+  // shows. `rows` itself stays the saved state (the Excel export writes it).
+  const shownRows = useMemo(
+    () =>
+      rows.map(r => {
+        const change = pending.get(r.key);
+        if (!change) return r;
+        const deviceName = change.kind === 'edit' && change.form.deviceId ? (devices.find(d => d.id === change.form.deviceId)?.name ?? null) : null;
+        return previewRow(r, change, deviceName);
+      }),
+    [rows, pending, devices]
+  );
+
   const totals = useMemo(() => {
-    const workHours = rows.reduce((sum, r) => sum + r.hours, 0);
-    const overtimeHours = rows.reduce((sum, r) => sum + r.overtime, 0);
-    const presentDays = rows.filter(r => r.checkIn).length;
-    const absentDays = rows.filter(r => r.status === 'Absent').length;
+    const workHours = shownRows.reduce((sum, r) => sum + r.hours, 0);
+    const overtimeHours = shownRows.reduce((sum, r) => sum + r.overtime, 0);
+    const presentDays = shownRows.filter(r => r.checkIn).length;
+    const absentDays = shownRows.filter(r => r.status === 'Absent').length;
     return { workHours, overtimeHours, presentDays, absentDays };
-  }, [rows]);
+  }, [shownRows]);
 
   // In Correction mode two kinds of past day are correctable:
   //
@@ -601,12 +693,18 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     return b === 'in' || b === 'out';
   }
 
-  const incompleteCount = useMemo(() => rows.filter(missedPunch).length, [rows, reportToday]);
+  const incompleteCount = useMemo(() => shownRows.filter(missedPunch).length, [shownRows, reportToday]);
 
   function openCorrection(r: Row) {
-    if (!correctable(r)) return;
+    if (!correctable(r) || savingAll) return;
     setFixError(null);
-    setConfirmDelete(false);
+    // Reopening a day with a staged edit picks up where the admin left it.
+    const staged = pending.get(r.key);
+    if (staged?.kind === 'edit') {
+      setFixForm(staged.form);
+      setFixRow(r);
+      return;
+    }
     const overnight = !!(r.shiftStart && r.shiftEnd && r.shiftEnd <= r.shiftStart);
     // A tap-out-only overnight duty: the one punch on record is dated the
     // NEXT morning, so it is really this duty's check-out — the check-in was
@@ -635,12 +733,23 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     setFixRow(r);
   }
 
-  // A direct admin correction: create the request row and immediately apply
-  // it through the same approve_attendance_correction() the Corrections page
-  // runs on an employee's request — recalculates the day's hours/late/early/
-  // overtime and locks it (manually_corrected) against the nightly recompute.
-  // No pending state, no second person: the reviewer is the admin doing it.
-  async function saveCorrection() {
+  function stageChange(change: PendingChange) {
+    setPending(p => new Map(p).set(change.row.key, change));
+    setSavedNotice(null);
+    setFixRow(null);
+  }
+
+  function undoChange(key: string) {
+    setPending(p => {
+      const next = new Map(p);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  // The dialog's "Add to changes": validates the times and stages the edit.
+  // Nothing is written until Save changes — see writeChange().
+  function saveCorrection() {
     if (!fixRow) return;
     setFixError(null);
     if (!fixForm.checkIn || !fixForm.checkOut) {
@@ -660,72 +769,134 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       );
       return;
     }
-    setFixSaving(true);
-    const { data: inserted, error: insertError } = await supabase
-      .from('attendance_correction_requests')
-      .insert({
-        employee_id: fixRow.employeeId,
-        work_date: fixRow.date,
-        requested_check_in: inTs,
-        requested_check_out: outTs,
-        reason: fixForm.reason.trim() || null,
-        device_id: fixForm.deviceId || null,
-      })
-      .select('id')
-      .single();
-    if (insertError || !inserted) {
-      setFixSaving(false);
-      setFixError(insertError?.message ?? 'Could not save the correction.');
-      return;
-    }
-    const { error: applyError } = await supabase.rpc('approve_attendance_correction', { p_request_id: inserted.id });
-    setFixSaving(false);
-    if (applyError) {
-      setFixError(`Saved, but applying it failed: ${applyError.message}`);
-      return;
-    }
-    setFixRow(null);
-    setRefreshTick(t => t + 1);
+    stageChange({ kind: 'edit', row: fixRow, form: fixForm, inTs, outTs });
   }
 
-  // Delete: the day is saved as a locked (manually_corrected) row with no
-  // times — see isDeletedDay() in lib/shift.ts. The punches themselves are not
-  // removed: the device would only sync them back, and they stay visible in
-  // the day's punch history. compute_payroll_summaries() never touches a
-  // corrected row, so the deletion holds. company_id is stamped by the
-  // table's insert trigger.
-  async function deleteAttendance() {
+  // The dialog's Delete: stages the day's removal, undoable from its row
+  // until Save changes.
+  function deleteAttendance() {
     if (!fixRow) return;
-    setFixSaving(true);
-    setFixError(null);
-    const { error: deleteError } = await supabase.from('payroll_summaries').upsert(
-      {
-        employee_id: fixRow.employeeId,
-        work_date: fixRow.date,
-        shift_name: fixRow.shiftName,
-        check_in: null,
-        check_out: null,
-        total_hours: 0,
-        is_late: false,
-        late_minutes: 0,
-        is_early_departure: false,
-        early_departure_minutes: 0,
-        overtime_hours: 0,
-        manually_corrected: true,
-        device_id: null,
-        computed_at: new Date().toISOString(),
-      },
-      { onConflict: 'employee_id,work_date' }
-    );
-    setFixSaving(false);
-    if (deleteError) {
-      setFixError(`Could not delete: ${deleteError.message}`);
-      return;
-    }
-    setConfirmDelete(false);
-    setFixRow(null);
-    setRefreshTick(t => t + 1);
+    stageChange({ kind: 'delete', row: fixRow });
   }
+
+  /** Writes one staged change. Returns the change with `error` set if it
+   * failed (kept staged for another try), or null once it's saved.
+   *
+   * An edit is a direct admin correction: create the request row and
+   * immediately apply it through the same approve_attendance_correction() the
+   * Corrections page runs on an employee's request — recalculates the day's
+   * hours/late/early/overtime and locks it (manually_corrected) against the
+   * nightly recompute. No second person: the reviewer is the admin doing it.
+   *
+   * A delete saves the day as a locked (manually_corrected) row with no
+   * times — see isDeletedDay() in lib/shift.ts. The punches themselves are
+   * not removed: the device would only sync them back, and they stay visible
+   * in the day's punch history. compute_payroll_summaries() never touches a
+   * corrected row, so the deletion holds. company_id is stamped by the
+   * table's insert trigger. */
+  async function writeChange(change: PendingChange): Promise<PendingChange | null> {
+    const r = change.row;
+    if (change.kind === 'delete') {
+      const { error } = await supabase.from('payroll_summaries').upsert(
+        {
+          employee_id: r.employeeId,
+          work_date: r.date,
+          shift_name: r.shiftName,
+          check_in: null,
+          check_out: null,
+          total_hours: 0,
+          is_late: false,
+          late_minutes: 0,
+          is_early_departure: false,
+          early_departure_minutes: 0,
+          overtime_hours: 0,
+          manually_corrected: true,
+          device_id: null,
+          computed_at: new Date().toISOString(),
+        },
+        { onConflict: 'employee_id,work_date' }
+      );
+      return error ? { ...change, error: `Could not delete: ${error.message}` } : null;
+    }
+    let requestId = change.requestId;
+    if (!requestId) {
+      const { data: inserted, error: insertError } = await supabase
+        .from('attendance_correction_requests')
+        .insert({
+          employee_id: r.employeeId,
+          work_date: r.date,
+          requested_check_in: change.inTs,
+          requested_check_out: change.outTs,
+          reason: change.form.reason.trim() || null,
+          device_id: change.form.deviceId || null,
+        })
+        .select('id')
+        .single();
+      if (insertError || !inserted) return { ...change, error: insertError?.message ?? 'Could not save the correction.' };
+      requestId = inserted.id as string;
+    }
+    const { error: applyError } = await supabase.rpc('approve_attendance_correction', { p_request_id: requestId });
+    return applyError ? { ...change, requestId, error: `Saved, but applying it failed: ${applyError.message}` } : null;
+  }
+
+  // Save changes: writes every staged change, oldest date first (an overnight
+  // correction can own the next morning's punch). Failures stay staged with
+  // their reason on the row; the rest are cleared. True when all saved.
+  async function saveAllChanges(): Promise<boolean> {
+    const changes = [...pending.values()].sort((a, b) => a.row.date.localeCompare(b.row.date));
+    setSavingAll(true);
+    setSavedNotice(null);
+    const failed = new Map<string, PendingChange>();
+    for (let i = 0; i < changes.length; i++) {
+      setSaveProgress(i + 1);
+      const result = await writeChange(changes[i]);
+      if (result) failed.set(result.row.key, result);
+    }
+    const saved = changes.length - failed.size;
+    setPending(failed);
+    setSavingAll(false);
+    if (saved > 0) setRefreshTick(t => t + 1);
+    if (failed.size === 0) setSavedNotice(`${saved} change${saved === 1 ? '' : 's'} saved`);
+    return failed.size === 0;
+  }
+
+  /** Runs a filter, date or mode change — or holds it behind the "Save your
+   * changes first?" prompt while there are unsaved changes. */
+  function guarded(action: () => void) {
+    if (pending.size === 0) action();
+    else setGuardAction(() => action);
+  }
+
+  useEffect(() => {
+    if (!savedNotice) return;
+    const t = setTimeout(() => setSavedNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [savedNotice]);
+
+  // Leaving the page asks too: the browser's own prompt for a reload or
+  // close, a confirm for an in-app link (caught before Next's router sees the
+  // click).
+  useEffect(() => {
+    if (pending.size === 0) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    const onLinkClick = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!a || a.target === '_blank' || a.hasAttribute('download')) return;
+      if (!window.confirm('You have unsaved attendance changes. Leave this page and lose them?')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('click', onLinkClick, true);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('click', onLinkClick, true);
+    };
+  }, [pending.size]);
 
   function exportCsv() {
     const header = [
@@ -786,7 +957,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <PersonIcon className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-accent" />
                 <select
                   value={employeeId}
-                  onChange={e => setEmployeeId(e.target.value)}
+                  onChange={e => {
+                    const v = e.target.value;
+                    guarded(() => setEmployeeId(v));
+                  }}
                   className="min-w-[10rem] rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-2.5 text-xs shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 >
                   <option value="all">All Employees</option>
@@ -798,7 +972,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 </select>
               </div>
               {employeeId !== 'all' && (
-                <button onClick={() => setEmployeeId('all')} className="text-[11px] font-medium text-accent hover:underline">
+                <button onClick={() => guarded(() => setEmployeeId('all'))} className="text-[11px] font-medium text-accent hover:underline">
                   Clear
                 </button>
               )}
@@ -811,7 +985,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               <StatusIcon className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-accent" />
               <select
                 value={status}
-                onChange={e => setStatus(e.target.value as typeof status)}
+                onChange={e => {
+                  const v = e.target.value as typeof status;
+                  guarded(() => setStatus(v));
+                }}
                 className="rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-2.5 text-xs shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
               >
                 <option value="All">All Logs</option>
@@ -834,10 +1011,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 22 Shrawan 2083"); at the old w-48 the picker's own `truncate`
                 cut the second one off to "22 Bhadra 2083 – 22 …". */}
             <div className="w-[21rem]">
-              <DateRangePicker from={from} to={to} onChange={(f, t) => {
+              <DateRangePicker from={from} to={to} onChange={(f, t) => guarded(() => {
                 setFrom(f);
                 setTo(t);
-              }} />
+              })} />
             </div>
           </div>
 
@@ -845,7 +1022,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               chip on every past one-punch day for a direct admin correction. */}
           <button
             type="button"
-            onClick={() => setCorrectionMode(v => !v)}
+            onClick={() => guarded(() => setCorrectionMode(v => !v))}
             title={
               correctionMode
                 ? 'Correction mode on — click a Fix chip to correct a missed punch, or to add attendance on an Absent / Week Off day'
@@ -920,7 +1097,11 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => {
+            {rows.map((saved, i) => {
+              // `r` is the row as it reads with its staged change (if any);
+              // `saved` is what's in the database, shown struck through.
+              const r = shownRows[i];
+              const change = pending.get(saved.key);
               const canFix = correctionMode && correctable(r);
               const blank = canFix ? blankPunch(r) : null;
               // Amber only for a likely missed punch. An Absent / Week Off day
@@ -939,7 +1120,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               return (
               <tr
                 key={r.key}
-                className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}
+                className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''} ${change?.kind === 'edit' ? 'bg-info-bg/50 print:bg-transparent' : change?.kind === 'delete' ? 'bg-critical-bg/40 print:bg-transparent' : ''}`}
                 style={isFirstRowForEmployee ? { breakBefore: 'page' } : undefined}
               >
                 {/* Numeric date (22/05/2083) rather than the spelled-out
@@ -947,7 +1128,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                     row and the range is already named in the header, so the
                     words only cost width. The Day column beside it is what
                     makes a date scannable in practice. */}
-                <td className={`w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
+                <td className={`w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''} ${change?.kind === 'edit' ? 'border-l-2 border-l-info print:border-l' : change?.kind === 'delete' ? 'border-l-2 border-l-critical print:border-l' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
                 <td className="whitespace-nowrap px-2 py-1 font-medium text-ink print:border print:border-slate-400 print:px-2 print:py-1">{r.employeeName}</td>
@@ -961,29 +1142,32 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   {!canFix ? (
                     <CheckInCell row={r} />
                   ) : blank === 'in' ? (
-                    <FixChip onClick={() => openCorrection(r)} />
+                    <FixChip onClick={() => openCorrection(saved)} />
                   ) : (
-                    <EditablePunch onClick={() => openCorrection(r)}>
+                    <EditablePunch onClick={() => openCorrection(saved)}>
                       <CheckInCell row={r} />
                     </EditablePunch>
                   )}
+                  {change && fmtPunch(saved.checkIn) !== fmtPunch(r.checkIn) && <WasValue>{fmtPunch(saved.checkIn)}</WasValue>}
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckOutCell row={r} />
                   ) : blank === 'out' ? (
-                    <FixChip onClick={() => openCorrection(r)} />
+                    <FixChip onClick={() => openCorrection(saved)} />
                   ) : (
-                    <EditablePunch onClick={() => openCorrection(r)}>
+                    <EditablePunch onClick={() => openCorrection(saved)}>
                       <CheckOutCell row={r} />
                     </EditablePunch>
                   )}
+                  {change && fmtPunch(saved.checkOut) !== fmtPunch(r.checkOut) && <WasValue>{fmtPunch(saved.checkOut)}</WasValue>}
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-[10px] print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   <LateEarlyCell row={r} />
                 </td>
                 <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.hours)}
+                  {change && fmtHrs(saved.hours) !== fmtHrs(r.hours) && <WasValue>{fmtHrs(saved.hours)}</WasValue>}
                 </td>
                 <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.overtime)}
@@ -991,15 +1175,30 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className="whitespace-nowrap px-2 py-1 print:w-20 print:border print:border-slate-400 print:px-1 print:py-1">
                   <span className="print:hidden">{statusBadge(r)}</span>
                   <span className="hidden print:inline print:text-ink">{r.status}</span>
+                  {change && saved.status !== r.status && <WasValue>{saved.status}</WasValue>}
                 </td>
                 <td className="whitespace-nowrap print-wrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-[8px] print:text-ink">
                   {canFix ? (
-                    <EditablePunch onClick={() => openCorrection(r)}>
+                    <EditablePunch onClick={() => openCorrection(saved)}>
                       <span>{r.device}</span>
                     </EditablePunch>
                   ) : (
                     r.device
                   )}
+                  {change && (
+                    <button
+                      type="button"
+                      onClick={() => undoChange(saved.key)}
+                      disabled={savingAll}
+                      title={change.kind === 'delete' ? 'Keep this day — undo the deletion' : 'Undo this change'}
+                      className={`ml-2 rounded px-1 text-[11px] font-semibold hover:underline disabled:opacity-50 print:hidden ${
+                        change.kind === 'delete' ? 'text-critical-text' : 'text-info-text'
+                      }`}
+                    >
+                      Undo
+                    </button>
+                  )}
+                  {change?.error && <span className="block whitespace-normal text-[10px] text-critical-text print:hidden">{change.error}</span>}
                 </td>
               </tr>
               );
@@ -1046,18 +1245,96 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         </div>
       </div>
 
+      {/* Nothing staged in Correction mode is written until this bar's Save
+          changes — see saveAllChanges(). */}
+      {pending.size > 0 && (
+        <div
+          role="region"
+          aria-label="Unsaved changes"
+          className={`sticky bottom-4 z-30 mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-ink py-3 pl-4 pr-3 shadow-lg print:hidden ${
+            !savingAll && [...pending.values()].some(c => c.error) ? 'ring-2 ring-critical' : ''
+          }`}
+        >
+          <div className="min-w-0 flex-1">
+            {savingAll ? (
+              <>
+                <div className="text-sm font-semibold text-white">
+                  Saving {saveProgress} of {pending.size}…
+                </div>
+                <div className="text-xs text-slate-300">Keep this page open until it finishes.</div>
+              </>
+            ) : [...pending.values()].some(c => c.error) ? (
+              <>
+                <div className="text-sm font-semibold text-white">
+                  {pending.size} change{pending.size === 1 ? '' : 's'} not saved
+                </div>
+                <div className="text-xs text-red-200">
+                  The reason is shown on each row. Fix or undo it there, then save again.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-sm font-semibold text-white">
+                  {pending.size} unsaved change{pending.size === 1 ? '' : 's'}
+                </div>
+                <div className="text-xs text-slate-300">
+                  {(() => {
+                    const deletes = [...pending.values()].filter(c => c.kind === 'delete').length;
+                    const edits = pending.size - deletes;
+                    const parts = [edits && `${edits} corrected`, deletes && `${deletes} deleted`].filter(Boolean).join(', ');
+                    return `${parts}. Nothing is recorded until you save — hours and pay recalculate then.`;
+                  })()}
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setPending(new Map())}
+            disabled={savingAll}
+            className="h-10 rounded-lg border border-slate-600 px-4 text-sm font-medium text-slate-200 hover:bg-white/10 disabled:opacity-50"
+          >
+            Discard all
+          </button>
+          <button
+            type="button"
+            onClick={saveAllChanges}
+            disabled={savingAll}
+            className="flex h-10 items-center gap-2 rounded-lg bg-good-text px-5 text-sm font-semibold text-white hover:bg-accent disabled:opacity-70"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+            {savingAll ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      )}
+
+      {savedNotice && (
+        <div role="status" className="sticky bottom-4 z-30 mx-auto mt-3 flex w-fit items-center gap-2.5 rounded-xl border border-accent/30 bg-white px-4 py-3 shadow-lg print:hidden">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-light text-good-text">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </span>
+          <span className="text-sm font-semibold text-ink">{savedNotice}</span>
+          <span className="text-xs text-slate-500">Hours and pay have been recalculated.</span>
+        </div>
+      )}
+
       {fixRow && (
         <div
           className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 sm:p-8 print:hidden"
-          onClick={() => !fixSaving && setFixRow(null)}
+          onClick={() => setFixRow(null)}
         >
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-ink">
               {!fixRow.checkIn && !fixRow.checkOut ? 'Add attendance for this day' : 'Correct this day'}
             </h3>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              An admin edit — it applies straight away, no approval step. The day&apos;s hours, late/early and overtime
-              recalculate on save and the day is locked so the nightly recompute won&apos;t undo it.
+              An admin edit, no approval step. It shows in the report as an unsaved change — nothing is recorded until
+              you click <strong className="text-ink">Save changes</strong>. Then the day&apos;s hours, late/early and
+              overtime recalculate and the day is locked so the nightly recompute won&apos;t undo it.
             </p>
             {/* A no-punch day changes pay, not just a record: an Absent day
                 starts earning, and a Week Off day is priced by
@@ -1182,45 +1459,19 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
             {fixError && <p className="mt-3 text-sm text-critical">{fixError}</p>}
 
-            {confirmDelete && (
-              <div className="mt-4 rounded-lg border border-critical/30 bg-critical-bg px-3 py-3 text-xs leading-relaxed text-critical-text">
-                <p>
-                  Delete <strong>{fixRow.employeeName}</strong>&apos;s attendance on{' '}
-                  <strong>{formatDdMmYyyy(fixRow.date, system)}</strong>? The day will show as{' '}
-                  <strong>{fixRow.shiftName === 'Week Off' ? 'Week Off' : 'Absent'}</strong>. The device punches stay in the history
-                  but are ignored for this day. A device sync or the nightly recalculation won&apos;t bring them back. To undo,
-                  add the attendance again.
-                </p>
-                <div className="mt-2.5 flex justify-end gap-2">
-                  <button
-                    onClick={() => setConfirmDelete(false)}
-                    disabled={fixSaving}
-                    className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-white/60 disabled:opacity-60"
-                  >
-                    Keep it
-                  </button>
-                  <button
-                    onClick={deleteAttendance}
-                    disabled={fixSaving}
-                    className="rounded-md bg-critical px-3 py-1.5 text-xs font-semibold text-white hover:bg-critical/90 disabled:opacity-60"
-                  >
-                    {fixSaving ? 'Deleting…' : 'Delete attendance'}
-                  </button>
-                </div>
-              </div>
-            )}
-
             <div className="mt-5 flex items-center justify-between gap-2">
-              {fixRow.checkIn || fixRow.checkOut ? (
+              {/* One click is enough: Delete only stages the removal. The row
+                  shows it struck through with an Undo until Save changes. */}
+              {(fixRow.checkIn || fixRow.checkOut) && pending.get(fixRow.key)?.kind !== 'delete' ? (
                 <button
-                  onClick={() => setConfirmDelete(true)}
-                  disabled={fixSaving || confirmDelete}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-critical-text hover:bg-critical-bg disabled:opacity-50"
+                  onClick={deleteAttendance}
+                  title={`The day will show as ${fixRow.shiftName === 'Week Off' ? 'Week Off' : 'Absent'}. The device punches stay in the history but are ignored for this day. Undo it from the row, or it's recorded when you save.`}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-critical-text hover:bg-critical-bg"
                 >
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
                   </svg>
-                  Delete
+                  Mark for deletion
                 </button>
               ) : (
                 <span className="text-[11px] text-slate-400">Recorded as corrected by you</span>
@@ -1228,19 +1479,72 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               <div className="flex gap-2">
                 <button
                   onClick={() => setFixRow(null)}
-                  disabled={fixSaving}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={saveCorrection}
-                  disabled={fixSaving}
-                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90"
                 >
-                  {fixSaving ? 'Saving…' : 'Save'}
+                  Add to changes
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* A filter, date or mode change while changes are unsaved — held in
+          guardAction until the admin picks one of these. */}
+      {guardAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4 print:hidden" onClick={() => !savingAll && setGuardAction(null)}>
+          <div role="alertdialog" aria-labelledby="unsaved-title" className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg" onClick={e => e.stopPropagation()}>
+            <h3 id="unsaved-title" className="text-lg font-semibold text-ink">Save your changes first?</h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-600">
+              You have <strong className="text-ink">{pending.size} unsaved change{pending.size === 1 ? '' : 's'}</strong> in this
+              report. Changing the employee, status or date range, or turning off Correction mode, will lose them.
+            </p>
+            <ul className="mt-3 list-disc rounded-lg bg-slate-50 py-2 pl-7 pr-3 text-xs leading-relaxed text-slate-600">
+              {[...pending.values()]
+                .sort((a, b) => a.row.date.localeCompare(b.row.date))
+                .map(c => (
+                  <li key={c.row.key}>
+                    {formatDdMmYyyy(c.row.date, system)} · {c.row.employeeName}:{' '}
+                    {c.kind === 'delete' ? 'attendance deleted' : `${c.form.checkIn} – ${c.form.checkOut}${c.form.checkOutNextDay ? ' (next day)' : ''}`}
+                  </li>
+                ))}
+            </ul>
+            <div className="mt-5 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setPending(new Map());
+                  guardAction();
+                  setGuardAction(null);
+                }}
+                disabled={savingAll}
+                className="mr-auto rounded-lg px-3 py-2 text-sm font-medium text-critical-text hover:bg-critical-bg disabled:opacity-50"
+              >
+                Discard
+              </button>
+              <button
+                onClick={() => setGuardAction(null)}
+                disabled={savingAll}
+                className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-50"
+              >
+                Keep editing
+              </button>
+              <button
+                onClick={async () => {
+                  const action = guardAction;
+                  if (await saveAllChanges()) action();
+                  setGuardAction(null);
+                }}
+                disabled={savingAll}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
+              >
+                {savingAll ? 'Saving…' : 'Save changes'}
+              </button>
             </div>
           </div>
         </div>
