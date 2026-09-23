@@ -282,10 +282,10 @@ export default function MonthlyRosterGrid() {
             </button>
           </div>
           <HorizontalScrollButtons targetRef={scrollRef} step={700} />
-          <div ref={scrollRef} className="overflow-x-auto rounded-xl border border-slate-200">
+          <div ref={scrollRef} className="max-h-[65vh] overflow-auto rounded-xl border border-slate-200">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 font-medium">Employee</th>
                   {monthCells.map(cell => (
                     <th key={cell.adKey} className={`whitespace-nowrap px-1 py-2.5 text-center font-medium ${cell.adKey === today ? 'bg-accent/10 text-accent' : ''}`}>
