@@ -33,11 +33,31 @@ const { createClient } = require('@supabase/supabase-js');
 
 const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS || 15 * 1000);
 const SYNC_REQUEST_POLL_MS = Number(process.env.SYNC_REQUEST_POLL_MS || 15000);
-const MAX_BACKOFF_MS = 10 * 60 * 1000;
+const MAX_BACKOFF_MS = 2 * 60 * 1000;
 // Uploading a device's whole stored history on a first sync is a lot more
 // than the 30s this used to allow — the batched upsert below still has to
 // make one round-trip per 500 punches.
 const UPSERT_TIMEOUT_MS = Number(process.env.UPSERT_TIMEOUT_MS || 120000);
+
+// getUsers() pulls the device's *entire* enrolled-fingerprint list (template
+// data included) over the same slow ZK link as getAttendances() — doing that
+// on every single automatic poll (as often as every 15s, SYNC_INTERVAL_MS)
+// made each cycle noticeably heavier for no real benefit, since enrollment
+// doesn't happen anywhere near that often. The periodic poll now only pulls
+// the user list once per this interval; punches still sync every
+// SYNC_INTERVAL_MS regardless. On-demand syncs (click-to-sync, the dashboard's
+// Sync Log/Sync Users buttons) are one-off, not a tight loop, so they always
+// pull both and ignore this.
+//
+// Originally defaulted to 2 minutes, which is exactly long enough that
+// testing a fresh enrollment looks broken — nothing shows up, no error, and
+// only a restart (which resets lastUsersPullAt and forces an immediate pull)
+// makes it appear. That's indistinguishable from a real bug to anyone who
+// doesn't know this throttle exists, which is everyone setting this up for
+// the first time. Restarting to "fix" a bridge that was actually just about
+// to update on its own is now a permanently closed chapter.
+const USERS_POLL_INTERVAL_MS = Number(process.env.USERS_POLL_INTERVAL_MS || 30 * 1000);
+const lastUsersPullAt = new Map();
 
 // Set by sync.bat (or any .env) when the device's real LAN address differs
 // from the one registered on the dashboard's Devices page — a device that
@@ -184,11 +204,11 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-async function withDevice(device, fn) {
+async function withDevice(device, fn, operationTimeoutMs = Number(process.env.DEVICE_TIMEOUT_MS || 30000)) {
   const zk = new ZKLib(device.ip_address, device.port, 10000, 4000);
   await withTimeout(zk.createSocket(), 15000, `${device.name}: connect`);
   try {
-    return await withTimeout(fn(zk), 30000, `${device.name}: operation`);
+    return await withTimeout(fn(zk), operationTimeoutMs, `${device.name}: operation`);
   } finally {
     // Best-effort and separately capped — a hung disconnect must never block
     // releasing the busyDeviceIds lock either. Its own failure is swallowed;
@@ -211,8 +231,32 @@ async function pullDeviceUsers(device) {
   });
 }
 
-async function upsertLogs(device, rawLogs) {
-  const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+// Used by the automatic periodic poll (syncDevice) so a newly-enrolled
+// fingerprint gets its own employees row without anyone having to click
+// "Sync Users" on the dashboard — one connection, both pulls, since a
+// ZKTeco terminal only tolerates one session at a time and opening a
+// second one right after the first just to fetch users would double how
+// often the device gets connected to on every single poll. A higher
+// timeout than the single-purpose pulls' default 30s: a device with a
+// large stored history can genuinely take a while just for getAttendances,
+// and this call has to wait on getUsers() too, on top of that.
+async function pullDeviceLogsAndUsers(device) {
+  return withDevice(
+    device,
+    async zk => {
+      const logsResult = await zk.getAttendances();
+      const usersResult = await zk.getUsers();
+      return { rawLogs: logsResult.data || [], rawUsers: usersResult.data || [] };
+    },
+    Number(process.env.DEVICE_TIMEOUT_MS || 600000)
+  );
+}
+
+// employeeIdByFingerprint can be passed in by a caller that's about to make
+// this same call for upsertUsers() too (syncDevice's automatic poll), so the
+// whole-company fingerprint map is fetched once per cycle instead of twice.
+async function upsertLogs(device, rawLogs, employeeIdByFingerprint) {
+  employeeIdByFingerprint = employeeIdByFingerprint || (await fetchEmployeesByFingerprint());
   const rows = [];
   for (const log of rawLogs) {
     const employeeId = employeeIdByFingerprint.get(String(log.deviceUserId));
@@ -260,12 +304,12 @@ async function upsertLogs(device, rawLogs) {
 // to an existing employee, that row (name, employee_code, etc, set by an
 // admin) is left alone. Only device users with no matching employee yet get
 // a brand-new employees row, so this is safe to run repeatedly.
-async function upsertUsers(device, rawUsers) {
+async function upsertUsers(device, rawUsers, employeeIdByFingerprint) {
+  employeeIdByFingerprint = employeeIdByFingerprint || (await fetchEmployeesByFingerprint());
   let added = 0;
   for (const u of rawUsers) {
     const fingerprintId = String(u.userId);
-    const existing = await fetchEmployeeByFingerprint(fingerprintId);
-    if (existing) continue;
+    if (employeeIdByFingerprint.has(fingerprintId)) continue;
     const { error } = await supabase.from('employees').insert({
       employee_code: `ZK-${device.id.slice(0, 8)}-${fingerprintId}`,
       name: u.name || `Device user ${fingerprintId}`,
@@ -311,18 +355,42 @@ async function syncDevice(device) {
     return;
   }
   const retryAt = nextRetryAt.get(device.id);
-  if (retryAt && Date.now() < retryAt) return;
+  if (retryAt && Date.now() < retryAt) {
+    console.log(`[${device.name}] backing off after a failed sync, next attempt in ${Math.ceil((retryAt - Date.now()) / 1000)}s`);
+    return;
+  }
 
   busyDeviceIds.add(device.id);
   try {
-    const rawLogs = await pullDeviceLogs(device);
-    // upsertLogs() makes its own per-row Supabase calls (fetchEmployeeByFingerprint
-    // for each punch, then the upsert itself) with no timeout of their own — a
-    // stalled connection here (this machine's network has been observed dropping
-    // out for stretches) would wedge busyDeviceIds exactly like the unbounded ZK
-    // call did before withDevice() got its own timeout. Same fix, same reason.
-    const count = await withTimeout(upsertLogs(device, rawLogs), UPSERT_TIMEOUT_MS, `${device.name}: upsertLogs`);
+    // Pulls the device's current enrolled-user list too, but only once per
+    // USERS_POLL_INTERVAL_MS rather than every single cycle — see that
+    // constant's comment. Punches (rawLogs) are still pulled every poll.
+    const dueForUsers = Date.now() - (lastUsersPullAt.get(device.id) || 0) >= USERS_POLL_INTERVAL_MS;
+    const { rawLogs, rawUsers } = dueForUsers
+      ? await pullDeviceLogsAndUsers(device)
+      : { rawLogs: await pullDeviceLogs(device), rawUsers: null };
+    // upsertLogs()/upsertUsers() make their own Supabase calls with no
+    // timeout of their own — a stalled connection here (this machine's
+    // network has been observed dropping out for stretches) would wedge
+    // busyDeviceIds exactly like the unbounded ZK call did before
+    // withDevice() got its own timeout. Same fix, same reason.
+    const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+    const count = await withTimeout(
+      upsertLogs(device, rawLogs, employeeIdByFingerprint),
+      UPSERT_TIMEOUT_MS,
+      `${device.name}: upsertLogs`
+    );
+    let added = 0;
+    if (rawUsers) {
+      ({ added } = await withTimeout(
+        upsertUsers(device, rawUsers, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertUsers`
+      ));
+      lastUsersPullAt.set(device.id, Date.now());
+    }
     if (count > 0) console.log(`[${device.name}] synced ${count} new punch(es)`);
+    if (added > 0) console.log(`[${device.name}] added ${added} new employee(s) from device enrollment`);
     failureCounts.set(device.id, 0);
     nextRetryAt.delete(device.id);
     await markDeviceStatus(device.id, { last_sync: new Date().toISOString(), status: 'online' });
@@ -378,9 +446,25 @@ async function processSyncEvent(event) {
       const { total, added } = await withTimeout(upsertUsers(device, rawUsers), UPSERT_TIMEOUT_MS, `${device.name}: upsertUsers`);
       summary = `${total} user(s) on device, ${added} new employee(s) added`;
     } else {
-      const rawLogs = await pullDeviceLogs(device);
-      const count = await withTimeout(upsertLogs(device, rawLogs), UPSERT_TIMEOUT_MS, `${device.name}: upsertLogs`);
-      summary = `${rawLogs.length} record(s) on device, ${count} matched to an employee`;
+      // Pulls users alongside logs here too (previously logs only), for the
+      // same reason as the click-to-sync path above: a newly-enrolled
+      // fingerprint shouldn't need a separate "Sync Users" click just
+      // because someone hit "Sync Log" first.
+      const { rawLogs, rawUsers } = await pullDeviceLogsAndUsers(device);
+      const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+      const count = await withTimeout(
+        upsertLogs(device, rawLogs, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertLogs`
+      );
+      const { added } = await withTimeout(
+        upsertUsers(device, rawUsers, employeeIdByFingerprint),
+        UPSERT_TIMEOUT_MS,
+        `${device.name}: upsertUsers`
+      );
+      summary =
+        `${rawLogs.length} record(s) on device, ${count} matched to an employee` +
+        (added > 0 ? `, ${added} new employee(s) added` : '');
     }
     console.log(`[${device.name}] ${event.sync_type} sync: ${summary}`);
     await supabase
@@ -425,9 +509,27 @@ async function main() {
     for (const device of devices) {
       console.log(`[${device.name}] connecting to ${device.ip_address}:${device.port} ...`);
       try {
-        const rawLogs = await pullDeviceLogs(device);
-        const count = await withTimeout(upsertLogs(device, rawLogs), UPSERT_TIMEOUT_MS, `${device.name}: upsertLogs`);
-        console.log(`[${device.name}] ${rawLogs.length} record(s) on the device, ${count} new punch(es) uploaded.`);
+        // Pulls users too, not just logs — a device bridged for the first
+        // time commonly already has fingerprints enrolled on it directly
+        // (never entered in the admin UI), and this one-off run used to be
+        // the one path that silently dropped their punches (unmapped
+        // fingerprint, warned once, skipped) instead of creating them.
+        const { rawLogs, rawUsers } = await pullDeviceLogsAndUsers(device);
+        const employeeIdByFingerprint = await fetchEmployeesByFingerprint();
+        const count = await withTimeout(
+          upsertLogs(device, rawLogs, employeeIdByFingerprint),
+          UPSERT_TIMEOUT_MS,
+          `${device.name}: upsertLogs`
+        );
+        const { added } = await withTimeout(
+          upsertUsers(device, rawUsers, employeeIdByFingerprint),
+          UPSERT_TIMEOUT_MS,
+          `${device.name}: upsertUsers`
+        );
+        console.log(
+          `[${device.name}] ${rawLogs.length} record(s) on the device, ${count} new punch(es) uploaded` +
+            (added > 0 ? `, ${added} new employee(s) added from device enrollment.` : '.')
+        );
         await markDeviceStatus(device.id, { last_sync: new Date().toISOString(), status: 'online' });
       } catch (err) {
         failed += 1;

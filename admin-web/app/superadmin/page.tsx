@@ -25,6 +25,20 @@ type Stats = {
   totalDevices: number;
   roleCounts: { admin: number; hr: number; employee: number };
 };
+type RecentActivity = { companyId: string; companyName: string; lastPunchAt: string };
+
+const RECENT_ACTIVITY_POLL_MS = 15000;
+
+function formatRelativeTime(iso: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 const AVATAR_COLORS = [
   'bg-violet-50 text-violet-600',
@@ -47,6 +61,8 @@ export default function SuperadminDashboardPage() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'name' | 'employees'>('newest');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[] | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'tile'>('grid');
 
   async function loadDashboard() {
     const { data } = await supabase.auth.getSession();
@@ -69,6 +85,27 @@ export default function SuperadminDashboardPage() {
 
   useEffect(() => {
     loadDashboard();
+  }, []);
+
+  // Polled, not a Realtime subscription: "superadmin" is a server-side email
+  // allowlist (see requireSuperadmin), not a role any RLS policy grants
+  // cross-tenant SELECT to — a client-side .channel() subscription against
+  // attendance_logs would only ever see this admin's own company's rows (if
+  // any), same as every other RLS-scoped table. Only the service-role API
+  // route can see across every company, so live-ness here comes from
+  // refetching it on an interval instead.
+  useEffect(() => {
+    async function loadRecentActivity() {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) return;
+      const res = await fetch('/api/superadmin/recent-activity', { headers: { Authorization: `Bearer ${token}` } });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) setRecentActivity(body.companies);
+    }
+    loadRecentActivity();
+    const id = setInterval(loadRecentActivity, RECENT_ACTIVITY_POLL_MS);
+    return () => clearInterval(id);
   }, []);
 
   const filtered = useMemo(() => {
@@ -146,6 +183,26 @@ export default function SuperadminDashboardPage() {
                 <option value="name">Name (A–Z)</option>
                 <option value="employees">Employees (most first)</option>
               </select>
+              <div className="flex shrink-0 rounded-lg border border-slate-200 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  title="Grid view"
+                  aria-pressed={viewMode === 'grid'}
+                  className={`rounded-md p-1.5 ${viewMode === 'grid' ? 'bg-accent text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <GridIcon className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('tile')}
+                  title="Tile view"
+                  aria-pressed={viewMode === 'tile'}
+                  className={`rounded-md p-1.5 ${viewMode === 'tile' ? 'bg-accent text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                >
+                  <ListIcon className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -153,67 +210,129 @@ export default function SuperadminDashboardPage() {
           {companies?.length === 0 && <p className="text-sm text-slate-400">No companies yet.</p>}
           {companies && companies.length > 0 && filtered.length === 0 && <p className="text-sm text-slate-400">No companies match your search.</p>}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((c, i) => (
-              <div
-                key={c.id}
-                onClick={() => setSelectedCompanyId(c.id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setSelectedCompanyId(c.id);
-                  }
-                }}
-                className="min-w-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-accent hover:shadow-md"
-              >
-                <div className="mb-3 flex min-w-0 items-center gap-3">
-                  <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}>
-                    {c.name.slice(0, 2).toUpperCase()}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate text-base font-semibold text-ink">{c.name}</span>
-                      {c.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
+          {viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((c, i) => (
+                <div
+                  key={c.id}
+                  onClick={() => setSelectedCompanyId(c.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedCompanyId(c.id);
+                    }
+                  }}
+                  className="min-w-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-accent hover:shadow-md"
+                >
+                  <div className="mb-3 flex min-w-0 items-center gap-3">
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}>
+                      {c.name.slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-base font-semibold text-ink">{c.name}</span>
+                        {c.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
+                      </div>
+                      <div className="truncate text-xs text-slate-500">Signed up {new Date(c.createdAt).toLocaleDateString()}</div>
                     </div>
-                    <div className="truncate text-xs text-slate-500">Signed up {new Date(c.createdAt).toLocaleDateString()}</div>
                   </div>
-                </div>
 
-                <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 py-2.5 text-center">
-                  <div>
-                    <div className="text-sm font-bold text-ink">{c.userCount}</div>
-                    <div className="text-[11px] text-slate-500">Users</div>
+                  <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 py-2.5 text-center">
+                    <div>
+                      <div className="text-sm font-bold text-ink">{c.userCount}</div>
+                      <div className="text-[11px] text-slate-500">Users</div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-ink">{c.employeeCount}</div>
+                      <div className="text-[11px] text-slate-500">Employees</div>
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-ink">{c.deviceCount}</div>
+                      <div className="text-[11px] text-slate-500">Devices</div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="text-sm font-bold text-ink">{c.employeeCount}</div>
-                    <div className="text-[11px] text-slate-500">Employees</div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold text-ink">{c.deviceCount}</div>
-                    <div className="text-[11px] text-slate-500">Devices</div>
-                  </div>
-                </div>
 
-                <div className="border-t border-slate-100 pt-3">
-                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Admin / HR users</div>
-                  {c.adminUsers.length === 0 ? (
-                    <p className="text-xs text-slate-400">None found.</p>
-                  ) : (
-                    <ul className="space-y-1.5">
-                      {c.adminUsers.map(u => (
-                        <li key={u.id} className="min-w-0 text-sm">
-                          <div className="truncate font-medium text-ink">{u.name}</div>
-                          <div className="truncate text-xs text-slate-500">{u.email}</div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  <div className="border-t border-slate-100 pt-3">
+                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Admin / HR users</div>
+                    {c.adminUsers.length === 0 ? (
+                      <p className="text-xs text-slate-400">None found.</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {c.adminUsers.map(u => (
+                          <li key={u.id} className="min-w-0 text-sm">
+                            <div className="truncate font-medium text-ink">{u.name}</div>
+                            <div className="truncate text-xs text-slate-500">{u.email}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {filtered.map((c, i) => (
+                <div
+                  key={c.id}
+                  onClick={() => setSelectedCompanyId(c.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedCompanyId(c.id);
+                    }
+                  }}
+                  className="flex min-w-0 cursor-pointer flex-col gap-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-accent hover:shadow-md sm:flex-row sm:items-center sm:gap-5"
+                >
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}
+                    >
+                      {c.name.slice(0, 2).toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-sm font-semibold text-ink">{c.name}</span>
+                        {c.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
+                      </div>
+                      <div className="truncate text-xs text-slate-500">Signed up {new Date(c.createdAt).toLocaleDateString()}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-4 sm:gap-6">
+                    <div className="text-center">
+                      <div className="text-sm font-bold text-ink">{c.userCount}</div>
+                      <div className="text-[11px] text-slate-500">Users</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-sm font-bold text-ink">{c.employeeCount}</div>
+                      <div className="text-[11px] text-slate-500">Employees</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-sm font-bold text-ink">{c.deviceCount}</div>
+                      <div className="text-[11px] text-slate-500">Devices</div>
+                    </div>
+                  </div>
+
+                  <div className="min-w-0 shrink-0 border-t border-slate-100 pt-3 sm:w-48 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
+                    <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">Admin / HR</div>
+                    {c.adminUsers.length === 0 ? (
+                      <p className="text-xs text-slate-400">None found.</p>
+                    ) : (
+                      <p className="truncate text-sm font-medium text-ink">
+                        {c.adminUsers[0].name}
+                        {c.adminUsers.length > 1 && <span className="text-xs font-normal text-slate-500"> +{c.adminUsers.length - 1} more</span>}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {filtered.length > 0 && (
             <p className="mt-4 text-xs text-slate-500">
@@ -223,24 +342,6 @@ export default function SuperadminDashboardPage() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <h2 className="mb-3 text-sm font-semibold text-ink">System Overview</h2>
-            <ul className="space-y-2.5 text-sm">
-              <li className="flex items-center justify-between">
-                <span className="text-slate-500">Total Users</span>
-                <span className="font-semibold text-ink">{stats ? stats.totalUsers : '—'}</span>
-              </li>
-              <li className="flex items-center justify-between">
-                <span className="text-slate-500">Total Employees</span>
-                <span className="font-semibold text-ink">{stats ? stats.totalEmployees : '—'}</span>
-              </li>
-              <li className="flex items-center justify-between">
-                <span className="text-slate-500">Registered Devices</span>
-                <span className="font-semibold text-ink">{stats ? stats.totalDevices : '—'}</span>
-              </li>
-            </ul>
-          </div>
-
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <h2 className="mb-3 text-sm font-semibold text-ink">User Roles (platform-wide)</h2>
             {roleBreakdown.length === 0 ? (
@@ -269,6 +370,36 @@ export default function SuperadminDashboardPage() {
                   ))}
                 </ul>
               </>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-good" />
+              </span>
+              <h2 className="text-sm font-semibold text-ink">Live Activity</h2>
+            </div>
+            {recentActivity === null ? (
+              <p className="text-sm text-slate-400">Loading…</p>
+            ) : recentActivity.length === 0 ? (
+              <p className="text-sm text-slate-400">No punches recorded yet.</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {recentActivity.map(a => (
+                  <li key={a.companyId}>
+                    <button
+                      onClick={() => setSelectedCompanyId(a.companyId)}
+                      title={`Last punch: ${new Date(a.lastPunchAt).toLocaleString()}`}
+                      className="flex w-full items-center justify-between gap-2 text-left text-sm hover:text-accent"
+                    >
+                      <span className="truncate font-medium text-ink">{a.companyName}</span>
+                      <span className="shrink-0 text-xs text-slate-500">{formatRelativeTime(a.lastPunchAt)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
 
@@ -331,6 +462,25 @@ function DeviceIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
       <rect x="6" y="6" width="12" height="12" rx="2" />
       <path strokeLinecap="round" d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+    </svg>
+  );
+}
+function GridIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
+      <rect x="3" y="3" width="8" height="8" rx="1.5" />
+      <rect x="13" y="3" width="8" height="8" rx="1.5" />
+      <rect x="3" y="13" width="8" height="8" rx="1.5" />
+      <rect x="13" y="13" width="8" height="8" rx="1.5" />
+    </svg>
+  );
+}
+function ListIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
+      <rect x="3" y="4" width="18" height="4.5" rx="1.5" />
+      <rect x="3" y="10.5" width="18" height="4.5" rx="1.5" />
+      <rect x="3" y="17" width="18" height="4.5" rx="1.5" />
     </svg>
   );
 }

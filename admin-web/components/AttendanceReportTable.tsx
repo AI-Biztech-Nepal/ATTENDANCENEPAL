@@ -762,7 +762,14 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       r.status,
       r.device,
     ]);
-    downloadExcel(`attendance_${from}_to_${to}.csv`, header, lines);
+    // lines is built from rows in the same order (rows is sorted by
+    // enrollId — see the .sort() above — so each employee's whole date
+    // range is one contiguous block), same page-break-per-employee logic
+    // as the printed table's <tr break-before>.
+    const pageBreakBeforeRowIndexes = rows
+      .map((r, i) => (i > 0 && rows[i - 1].employeeId !== r.employeeId ? i : -1))
+      .filter(i => i >= 0);
+    downloadExcel(`attendance_${from}_to_${to}.csv`, header, lines, pageBreakBeforeRowIndexes);
   }
 
   return (
@@ -913,15 +920,28 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => {
+            {rows.map((r, i) => {
               const canFix = correctionMode && correctable(r);
               const blank = canFix ? blankPunch(r) : null;
               // Amber only for a likely missed punch. An Absent / Week Off day
               // is an ordinary state: its –:– cells stay plain and are edited
               // like any recorded time, via the hover pencil.
               const flagged = canFix && missedPunch(r);
+              // rows is sorted by enrollId (see the .sort() above), so every
+              // employee's whole date range is one contiguous block — this is
+              // that block's first row. Printing "All Employees" for a month
+              // otherwise lets a page break fall in the middle of someone's
+              // days, splitting one person's data across two pages with no
+              // visual boundary; forcing a break here keeps every printed
+              // page's content confined to a single employee. Skipped for the
+              // very first row so it doesn't waste a blank leading page.
+              const isFirstRowForEmployee = i > 0 && rows[i - 1].employeeId !== r.employeeId;
               return (
-              <tr key={r.key} className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}>
+              <tr
+                key={r.key}
+                className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''}`}
+                style={isFirstRowForEmployee ? { breakBefore: 'page' } : undefined}
+              >
                 {/* Numeric date (22/05/2083) rather than the spelled-out
                     "22 Bhadra 2083" — the month name is the same on every
                     row and the range is already named in the header, so the

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 
 /** A real .xlsx, not CSV — CSV-in-Excel on Windows mangled the en-dash in
  * shift labels (Excel guesses ANSI encoding without a UTF-8 BOM) and left
@@ -10,8 +11,27 @@ import * as XLSX from 'xlsx';
  * Security note: `xlsx` (SheetJS) has open advisories, but they're all in
  * the *parsing* path (XLSX.read/readFile on an untrusted file). This module
  * only ever builds and writes a workbook from our own data — it never
- * parses one — so that code path is never reached here. */
-export function downloadExcel(filename: string, headers: string[], rows: (string | number)[][]) {
+ * parses one — so that code path is never reached here.
+ *
+ * `pageBreakBeforeRowIndexes` (0-based into `rows`, e.g. "the first row of
+ * each new employee's block") inserts real manual page breaks into the
+ * printed Excel output — something the free `xlsx` (SheetJS) build has no
+ * documented API for. Every OTHER caller omits this and is byte-for-byte
+ * unaffected: the whole jszip patch path is skipped, same XLSX.writeFile()
+ * call as before. When it IS passed, the row-break XML (<rowBreaks>) is
+ * spliced into xl/worksheets/sheet1.xml immediately after </sheetData> —
+ * verified against real ECMA-376 CT_Worksheet element order, and this is
+ * safe for every current/possible caller (all of which pass a flat
+ * headers+rows table with no merged cells, hyperlinks, or autofilter — the
+ * only things that would legitimately need to sit between sheetData and
+ * rowBreaks) — then the patched zip is re-saved by hand instead of via
+ * XLSX.writeFile(), which has no patch/re-zip hook of its own. */
+export async function downloadExcel(
+  filename: string,
+  headers: string[],
+  rows: (string | number)[][],
+  pageBreakBeforeRowIndexes?: number[]
+) {
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   // Size each column to its widest cell (header or data) so nothing renders
   // as Excel's "####" too-narrow-for-a-date placeholder. Capped so one long
@@ -22,7 +42,42 @@ export function downloadExcel(filename: string, headers: string[], rows: (string
   });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-  XLSX.writeFile(wb, filename.replace(/\.csv$/i, '') + '.xlsx');
+  const outName = filename.replace(/\.csv$/i, '') + '.xlsx';
+
+  const breaksAfterHeaderRow = (pageBreakBeforeRowIndexes ?? [])
+    // Never break before the very first data row — that would just waste a
+    // blank leading page, same reasoning as the print CSS's own version of
+    // this.
+    .filter(i => i > 0);
+  if (breaksAfterHeaderRow.length === 0) {
+    XLSX.writeFile(wb, outName);
+    return;
+  }
+
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  const zip = await JSZip.loadAsync(buf);
+  const sheetPath = 'xl/worksheets/sheet1.xml';
+  const sheetFile = zip.file(sheetPath);
+  const xml = sheetFile ? await sheetFile.async('string') : null;
+  if (xml && xml.includes('</sheetData>')) {
+    // aoa_to_sheet([headers, ...rows]) puts headers on row 1 (1-based), so
+    // rows[i] lands on Excel row i+2. A break BEFORE that row is a <brk>
+    // AFTER the row before it: id = (i+2) - 1.
+    const brks = breaksAfterHeaderRow.map(i => `<brk id="${i + 1}" max="16383" man="1"/>`).join('');
+    const rowBreaksXml = `<rowBreaks count="${breaksAfterHeaderRow.length}" manualBreakCount="${breaksAfterHeaderRow.length}">${brks}</rowBreaks>`;
+    zip.file(sheetPath, xml.replace('</sheetData>', '</sheetData>' + rowBreaksXml));
+  }
+  // If sheet1.xml wasn't found or didn't look like we expected, the zip is
+  // re-saved unpatched below rather than thrown away — a plain file with no
+  // page breaks is a far better failure mode than no download at all.
+
+  const patched = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(patched);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = outName;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /** Print button doubles as "Save as PDF" — every browser's print dialog
