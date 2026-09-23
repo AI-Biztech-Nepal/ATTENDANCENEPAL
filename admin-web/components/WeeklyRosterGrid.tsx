@@ -27,11 +27,6 @@ function shortDate(date: string) {
   return `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 }
 
-function shortBsDate(date: string) {
-  const [y, m, d] = date.split('-').map(Number);
-  return NepaliDate.fromAD(new Date(y, m - 1, d)).format('D/M');
-}
-
 /** The Sun-Sat week structure itself always stays AD (see weekRange's own
  * comment — the duty roster is filled in real calendar weeks regardless of
  * display system), but the label shown to the user should still follow the
@@ -511,17 +506,6 @@ export default function WeeklyRosterGrid({
                   {week.dates.map((date, i) => (
                     <th key={date} className={`whitespace-nowrap px-1.5 py-2.5 text-center font-medium ${date === today ? 'bg-accent/10 text-accent' : ''}`}>
                       {WEEKDAY_LABELS[i]}
-                      <div className="text-[10px] font-normal normal-case text-slate-400">
-                        {system === 'AD' ? (
-                          <>
-                            {shortDate(date)} <span className="text-slate-300">·</span> {shortBsDate(date)}
-                          </>
-                        ) : (
-                          <>
-                            {shortBsDate(date)} <span className="text-slate-300">·</span> {shortDate(date)}
-                          </>
-                        )}
-                      </div>
                     </th>
                   ))}
                   <th className="whitespace-nowrap px-2 py-2.5 font-medium"></th>
