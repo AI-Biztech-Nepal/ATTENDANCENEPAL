@@ -271,6 +271,8 @@ function openSettingsWindow() {
     width: 420,
     height: 560,
     resizable: false,
+    show: false,
+    backgroundColor: '#0f172a',
     title: 'Device Bridge Settings',
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
@@ -282,6 +284,10 @@ function openSettingsWindow() {
   });
   settingsWindow.setMenu(null);
   settingsWindow.loadFile(path.join(__dirname, 'settings.html'));
+  // Created hidden and shown only once the document has painted: a visible
+  // window told to load afterwards renders a half-finished frame, and with
+  // resizable:false there is no way for the user to force a clean repaint.
+  settingsWindow.once('ready-to-show', () => settingsWindow.show());
   settingsWindow.on('closed', () => {
     settingsWindow = null;
   });
