@@ -129,7 +129,7 @@ function withTimeout(promise, ms, label) {
   ]);
 }
 
-async function withDevice(device, fn, operationTimeoutMs = 30000) {
+async function withDevice(device, fn, operationTimeoutMs = 120000) {
   const zk = new ZKLib(device.ip_address, device.port, 10000, 4000);
   await withTimeout(zk.createSocket(), 15000, `${device.name}: connect`);
   try {
@@ -164,7 +164,7 @@ async function pullDeviceLogsAndUsers(device) {
       const usersResult = await zk.getUsers();
       return { rawLogs: logsResult.data || [], rawUsers: usersResult.data || [] };
     },
-    60000
+    600000
   );
 }
 
