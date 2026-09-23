@@ -5,9 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import AppShell from '@/components/AppShell';
 import Badge from '@/components/Badge';
-import WeeklyRosterGrid from '@/components/WeeklyRosterGrid';
 import WeeklyPatternGrid from '@/components/WeeklyPatternGrid';
 import MonthlyRosterGrid from '@/components/MonthlyRosterGrid';
+import RosterModeSwitch from '@/components/RosterModeSwitch';
 import { useConfirm } from '@/components/ConfirmDialog';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import type { Employee, Shift } from '@/lib/types';
@@ -15,15 +15,6 @@ import { resolveShift, formatShiftHours } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, type RosterMode } from '@/lib/weekOff';
 
 const EMPTY_FORM = { name: '', type: 'fixed' as Shift['type'], start_time: '09:00', end_time: '18:00', grace_minutes: 10, department: '' };
-
-// Icon + plain-language line under each tab so it's clear what to click
-// without already knowing this app's terms — "Weekly" vs "Monthly" alone
-// doesn't say what either screen actually lets you do.
-const TABS: { key: 'templates' | 'roster' | 'monthly'; icon: string; label: string; description: string }[] = [
-  { key: 'templates', icon: '🕐', label: 'Shift Templates', description: 'Set up the shift types you use (e.g. Day Duty, Night Duty) with their start and end times.' },
-  { key: 'roster', icon: '📅', label: 'Weekly Roster', description: 'Plan one week at a time — pick which shift (or Week Off) each employee works, day by day.' },
-  { key: 'monthly', icon: '🗓️', label: 'Monthly Roster', description: 'Plan a whole month at once — the same day-by-day picks as Weekly Roster, without paging week to week.' },
-];
 
 /** Plain 24-hour HH:MM input — native <input type="time"> renders AM/PM on
  * some Windows/Chrome locale combos regardless of the `lang` attribute. */
@@ -74,7 +65,10 @@ function ShiftsView() {
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const initialTabParam = searchParams.get('tab');
-  const initialTab = initialTabParam === 'roster' ? 'roster' : initialTabParam === 'monthly' ? 'monthly' : 'templates';
+  // 'monthly' is a legacy link value (from before Weekly/Monthly merged into
+  // one "roster in use" view) — still honored so an old bookmark or email
+  // link lands on the roster view instead of Templates.
+  const initialView = initialTabParam === 'roster' || initialTabParam === 'monthly' ? 'roster' : 'templates';
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [rosterEmployeeIds, setRosterEmployeeIds] = useState<Set<string>>(new Set());
@@ -84,7 +78,7 @@ function ShiftsView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<'templates' | 'roster' | 'monthly'>(initialTab);
+  const [view, setView] = useState<'templates' | 'roster'>(initialView);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [rosterMode, setRosterMode] = useState<RosterMode>('monthly');
 
@@ -236,22 +230,33 @@ function ShiftsView() {
   return (
     <AppShell title="Shift Roster Management">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex gap-1 rounded-lg border border-slate-200 bg-white p-1 text-sm font-semibold shadow-sm">
-          {TABS.map(t => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-2 transition-colors ${
-                tab === t.key ? 'bg-accent text-white' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              <span aria-hidden>{t.icon}</span>
-              {t.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Its own bubble: what template a shift IS. Separate from the
+              "Roster in use" bubble beside it, which decides which of the
+              two roster views actually drives real attendance/payroll —
+              two different questions that used to be mixed into one row of
+              tabs (a "Weekly Roster" tab that quietly showed exact-date
+              picks whenever the company was in Monthly mode). */}
+          <button
+            type="button"
+            onClick={() => setView('templates')}
+            className={`flex items-center gap-1.5 rounded-lg border p-1 px-3 py-2 text-sm font-semibold shadow-sm transition-colors ${
+              view === 'templates' ? 'border-accent bg-accent text-white' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <span aria-hidden>🕐</span>
+            Shift Templates
+          </button>
+          {/* Clicking anywhere in here shows the roster view immediately;
+              RosterModeSwitch itself only asks to confirm (and only then
+              changes companies.roster_mode) when the click actually picks
+              the roster that ISN'T already in use. */}
+          <div onClickCapture={() => setView('roster')}>
+            <RosterModeSwitch companyId={companyId} mode={rosterMode} onChange={setRosterMode} />
+          </div>
         </div>
         <div className="flex items-center gap-3">
-          {tab === 'templates' && (
+          {view === 'templates' && (
             <button
               onClick={() => {
                 setForm(EMPTY_FORM);
@@ -265,16 +270,12 @@ function ShiftsView() {
           )}
         </div>
       </div>
-      <p className="mb-5 text-sm text-slate-500">{TABS.find(t => t.key === tab)?.description}</p>
+      {view === 'templates' && (
+        <p className="mb-5 text-sm text-slate-500">Set up the shift types you use (e.g. Day Duty, Night Duty) with their start and end times.</p>
+      )}
 
-      {tab === 'roster' ? (
-        rosterMode === 'weekly' ? (
-          <WeeklyPatternGrid companyId={companyId} rosterMode={rosterMode} onRosterModeChange={setRosterMode} />
-        ) : (
-          <WeeklyRosterGrid companyId={companyId} rosterMode={rosterMode} onRosterModeChange={setRosterMode} />
-        )
-      ) : tab === 'monthly' ? (
-        <MonthlyRosterGrid companyId={companyId} rosterMode={rosterMode} onRosterModeChange={setRosterMode} />
+      {view === 'roster' ? (
+        rosterMode === 'weekly' ? <WeeklyPatternGrid /> : <MonthlyRosterGrid />
       ) : (
         <>
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -351,10 +352,10 @@ function ShiftsView() {
                 <span className="min-w-0 truncate text-sm font-medium text-ink">{emp.name}</span>
                 {onRoster ? (
                   <button
-                    onClick={() => setTab('roster')}
+                    onClick={() => setView('roster')}
                     className="shrink-0 rounded-lg border border-accent/20 bg-accent/5 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/10"
                   >
-                    Custom — Weekly Roster
+                    Custom — {rosterMode === 'weekly' ? 'Weekly' : 'Monthly'} Roster
                   </button>
                 ) : (
                   <div className="w-48 shrink-0">

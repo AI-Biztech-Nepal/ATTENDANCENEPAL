@@ -3,58 +3,58 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/Avatar';
-import RosterModeSwitch from '@/components/RosterModeSwitch';
+import DepartmentDropdown from '@/components/DepartmentDropdown';
+import PasteWeeklyRosterDialog from '@/components/PasteWeeklyRosterDialog';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { useConfirm } from '@/components/ConfirmDialog';
+import { todayAnchor } from '@/lib/calendar';
+import { buildPaintOptions, departmentOf, UNSET, WEEK_OFF_VALUE } from '@/lib/shiftPalette';
 import type { Employee, Shift } from '@/lib/types';
-import type { RosterMode } from '@/lib/weekOff';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-/** Same UNSET / Week-Off sentinel convention as WeeklyRosterGrid /
- * MonthlyRosterGrid, just keyed by weekday (0-6) instead of an exact date —
- * see employee_weekly_pattern's design (20260818100000_employee_weekly_pattern.sql). */
-const UNSET = 'unset';
-const WEEK_OFF_VALUE = 'week-off';
 
 type PatternRow = { employee_id: string; weekday: number; shift_id: string | null };
 
-/** The weekly-mode roster editor: one row per employee, Sun-Sat columns, no
- * date navigation — a pick here applies to every coming week automatically
- * (see resolveShiftForDate() in lib/shift.ts), so unlike WeeklyRosterGrid
- * there's no "copy this week to the rest of the month" button and no week
- * paging; the pattern already covers every future week on its own. */
-export default function WeeklyPatternGrid({
-  companyId,
-  rosterMode,
-  onRosterModeChange,
-}: {
-  companyId: string | null;
-  rosterMode: RosterMode;
-  onRosterModeChange: (mode: RosterMode) => void;
-}) {
+/** The weekly-mode roster editor: one row per employee, Sun-Sat columns —
+ * click a brush above, then click a day to paint it, instead of opening a
+ * dropdown per cell. Grouped by department (when a company actually uses
+ * more than one), searchable, with per-row copy/paste and a Save-changes
+ * bar so nothing writes until you save — matching the Attendance Report's
+ * own staged-edit pattern. */
+export default function WeeklyPatternGrid() {
   const confirm = useConfirm();
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [patternRows, setPatternRows] = useState<PatternRow[]>([]);
   const [loading, setLoading] = useState(true);
-  // "employeeId|weekday" -> a real shift_id, WEEK_OFF_VALUE, or UNSET —
-  // staged here until Save is clicked, not written on every pick.
   const [pending, setPending] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // Clipboard-style copy/paste between employees: Copy marks a source
-  // employee, then Paste on any other employee's row writes that source's
-  // whole Sun-Sat pattern onto them immediately — no modal, no separate
-  // Save step. Stays set across multiple pastes so one Copy can go out to
-  // several employees one click at a time.
   const [copiedEmployeeId, setCopiedEmployeeId] = useState<string | null>(null);
   const [pastingEmployeeId, setPastingEmployeeId] = useState<string | null>(null);
   const [pasteError, setPasteError] = useState<string | null>(null);
 
+  const [brush, setBrush] = useState<string>(WEEK_OFF_VALUE);
+  const [query, setQuery] = useState('');
+  const [dept, setDept] = useState('all');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [pasteDialogOpen, setPasteDialogOpen] = useState(false);
+
   const templateShifts = useMemo(() => shifts.filter(s => s.employee_id === null), [shifts]);
   const shiftById = useMemo(() => new Map(templateShifts.map(s => [s.id, s])), [templateShifts]);
+  const paintOptions = useMemo(() => buildPaintOptions(templateShifts), [templateShifts]);
+  const paintByValue = useMemo(() => new Map(paintOptions.map(o => [o.value, o])), [paintOptions]);
   const weekdays = [0, 1, 2, 3, 4, 5, 6];
+
+  // A brush the last-loaded shift list no longer has (a template got
+  // deleted while it was selected) falls back to Week Off rather than
+  // painting an id that no longer exists.
+  useEffect(() => {
+    if (templateShifts.length > 0 && brush !== WEEK_OFF_VALUE && brush !== UNSET && !shiftById.has(brush)) {
+      setBrush(WEEK_OFF_VALUE);
+    }
+  }, [templateShifts, shiftById, brush]);
 
   function reload() {
     setLoading(true);
@@ -83,14 +83,6 @@ export default function WeeklyPatternGrid({
     setPending(p => ({ ...p, [`${employeeId}|${weekday}`]: value }));
   }
 
-  // Writes the copied employee's whole Sun-Sat pattern onto `targetId`
-  // straight to Supabase — but only after an explicit confirm, so nothing
-  // changes without the admin actually saying so. Only a source weekday
-  // that actually has a pick (not —) writes anything, leaving whatever's
-  // already on that target weekday alone. Also drops any of the target's
-  // own still-unsaved manual picks on the weekdays just written, so the
-  // grid doesn't keep showing a stale pending value that no longer matches
-  // what Paste just saved underneath it.
   async function pasteToEmployee(targetId: string) {
     if (!copiedEmployeeId || copiedEmployeeId === targetId) return;
     const sourceName = employees.find(e => e.id === copiedEmployeeId)?.name ?? 'the copied employee';
@@ -166,51 +158,145 @@ export default function WeeklyPatternGrid({
     reload();
   }
 
-  function cellTone(value: string, dirty: boolean) {
-    if (dirty) return 'border-accent bg-accent/10 text-ink font-medium';
-    if (value === WEEK_OFF_VALUE) return 'border-warning/30 bg-warning-bg text-warning-text font-semibold';
-    if (value === UNSET) return 'border-slate-200 text-slate-400';
-    return 'border-accent/30 bg-accent/5 text-ink font-medium';
+  // Department grouping only earns its keep once a company actually has
+  // more than one — a single-department (or department-less) company gets
+  // a flat list instead of a dropdown and collapsible header that would
+  // always show exactly one, always-open group.
+  const departmentNames = useMemo(() => {
+    const set = new Set(employees.map(departmentOf));
+    return [...set].sort((a, b) => (a === 'Unassigned' ? 1 : b === 'Unassigned' ? -1 : a.localeCompare(b)));
+  }, [employees]);
+  const useDepartments = departmentNames.length > 1;
+
+  const q = query.trim().toLowerCase();
+  const visible = useMemo(
+    () => employees.filter(e => (!useDepartments || dept === 'all' || departmentOf(e) === dept) && (!q || e.name.toLowerCase().includes(q))),
+    [employees, useDepartments, dept, q]
+  );
+
+  const deptOptions = useMemo(
+    () => [
+      { value: 'all', label: 'All departments', count: employees.length },
+      ...departmentNames.map(name => ({ value: name, label: name, count: employees.filter(e => departmentOf(e) === name).length })),
+    ],
+    [departmentNames, employees]
+  );
+
+  function hoursFor(employeeId: string): number {
+    return weekdays.reduce((sum, wd) => {
+      const v = currentValue(employeeId, wd);
+      if (v === UNSET || v === WEEK_OFF_VALUE) return sum;
+      const shift = shiftById.get(v);
+      if (!shift) return sum;
+      const [sh, sm] = shift.start_time.split(':').map(Number);
+      const [eh, em] = shift.end_time.split(':').map(Number);
+      let minutes = eh * 60 + em - (sh * 60 + sm);
+      if (minutes <= 0) minutes += 24 * 60; // overnight shift
+      return sum + minutes / 60;
+    }, 0);
+  }
+
+  const groups = useMemo(() => {
+    if (!useDepartments) return [{ name: null as string | null, rows: visible }];
+    return departmentNames
+      .map(name => ({ name, rows: visible.filter(e => departmentOf(e) === name) }))
+      .filter(g => g.rows.length > 0);
+  }, [useDepartments, departmentNames, visible]);
+
+  function cellClass(value: string, dirty: boolean) {
+    const opt = paintByValue.get(value);
+    const base = value === UNSET ? 'border-dashed border-slate-200 text-slate-400' : `border-transparent ${opt?.bg ?? 'bg-slate-100'} ${opt?.text ?? 'text-ink'}`;
+    return `${base} ${dirty ? 'ring-2 ring-accent ring-offset-1' : ''}`;
   }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-good-bg via-good-bg/40 to-transparent px-4 py-3 sm:px-6">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-100 px-4 py-3.5 sm:px-6">
         <div>
-          <span className="text-sm font-semibold text-ink">Recurring Weekly Pattern</span>
-          <p className="text-xs text-slate-500">Set once — applies to every coming week automatically.</p>
+          <span className="text-sm font-semibold text-ink">Weekly Roster</span>
+          <p className="text-xs text-slate-500">One Sun–Sat pattern that repeats every week.</p>
         </div>
-        <RosterModeSwitch companyId={companyId} mode={rosterMode} onChange={onRosterModeChange} />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search employees"
+              className="h-9 w-48 rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+            />
+          </div>
+          {useDepartments && <DepartmentDropdown options={deptOptions} value={dept} onChange={setDept} />}
+          <button
+            type="button"
+            onClick={() => setPasteDialogOpen(true)}
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-accent px-3 text-sm font-semibold text-accent shadow-sm hover:bg-accent/5"
+          >
+            <CopyIcon className="h-3.5 w-3.5" />
+            Copy to Monthly Roster
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-2.5 sm:px-6">
+        <span className="text-xs font-semibold text-slate-500">Paint with</span>
+        <div role="radiogroup" aria-label="Shift to paint" className="flex flex-wrap gap-1.5">
+          {paintOptions.map(o => {
+            const active = brush === o.value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setBrush(o.value)}
+                title={o.sub}
+                className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                  active ? 'border-ink bg-ink text-white shadow-sm' : `border-slate-200 bg-white text-slate-600 hover:border-slate-300`
+                }`}
+              >
+                {o.dot && <span className={`h-2 w-2 shrink-0 rounded-full ${active ? 'bg-white' : o.dot}`} />}
+                {o.label}
+                {o.sub && <span className="font-normal opacity-70">{o.sub}</span>}
+              </button>
+            );
+          })}
+        </div>
+        <span className="ml-auto hidden text-xs text-slate-400 sm:inline">
+          Click a day to paint it with <strong className="text-ink">{paintByValue.get(brush)?.label}</strong>
+        </span>
       </div>
 
       {pendingCount > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-accent/20 bg-accent/5 px-4 py-3 sm:px-6">
-          <span className="text-sm font-medium text-ink">
-            {pendingCount} unsaved change{pendingCount === 1 ? '' : 's'}
-          </span>
-          <div className="flex gap-2">
-            <button onClick={() => setPending({})} className="rounded-lg px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100">
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="rounded-lg bg-accent px-4 py-1.5 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
-            >
-              {saving ? 'Saving…' : 'Save changes'}
-            </button>
+        <div className="sticky bottom-4 z-30 mx-4 mt-3 flex items-center gap-4 rounded-xl bg-ink px-4 py-3 shadow-lg sm:mx-6">
+          <div className="flex-grow">
+            <div className="text-sm font-semibold text-white">
+              {pendingCount} unsaved change{pendingCount === 1 ? '' : 's'}
+            </div>
+            <div className="text-xs text-slate-300">Nothing is recorded until you save.</div>
           </div>
+          <button onClick={() => setPending({})} className="rounded-lg border border-slate-600 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-white/10">
+            Discard
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="rounded-lg bg-good px-4 py-2 text-sm font-semibold text-white hover:bg-good/90 disabled:opacity-60"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
         </div>
       )}
 
       {copiedEmployeeId && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-good/20 bg-good-bg px-4 py-2.5 text-sm sm:px-6">
           <span className="font-medium text-good-text">
-            📋 Copied {employees.find(e => e.id === copiedEmployeeId)?.name ?? 'an employee'}&apos;s pattern — click{' '}
-            <strong>📋 Paste</strong> on any other employee below to apply it. Saves immediately, as many times as you like.
+            Copied {employees.find(e => e.id === copiedEmployeeId)?.name ?? 'an employee'}&apos;s pattern — click the paste
+            icon on any other row to apply it. Saves immediately, as many times as you like.
           </span>
           <button onClick={() => setCopiedEmployeeId(null)} className="shrink-0 text-xs font-medium text-slate-600 hover:underline">
-            ✕ Clear
+            Clear
           </button>
         </div>
       )}
@@ -232,7 +318,7 @@ export default function WeeklyPatternGrid({
           <>
           <HorizontalScrollButtons targetRef={tableScrollRef} />
           <div ref={tableScrollRef} className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[820px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 font-medium">Employee</th>
@@ -241,80 +327,38 @@ export default function WeeklyPatternGrid({
                       {WEEKDAY_LABELS[wd]}
                     </th>
                   ))}
+                  <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium">Hours/wk</th>
                   <th className="whitespace-nowrap px-2 py-2.5 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
-                {employees.map((emp, i) => {
-                  const rowBg = i % 2 === 1 ? 'bg-slate-50' : 'bg-white';
-                  return (
-                    <tr key={emp.id} className="border-b border-slate-100 last:border-0">
-                      <td className={`sticky left-0 z-10 whitespace-nowrap px-3 py-2 ${rowBg}`}>
-                        <div className="flex items-center gap-2">
-                          <Avatar name={emp.name} photoUrl={emp.profile_photo_url} className="h-14 w-14 text-base" />
-                          <span className="truncate font-medium text-ink">{emp.name}</span>
-                        </div>
-                      </td>
-                      {weekdays.map(wd => {
-                        const value = currentValue(emp.id, wd);
-                        const dirty = `${emp.id}|${wd}` in pending;
-                        return (
-                          <td key={wd} className={`px-1 py-1.5 text-center ${rowBg}`}>
-                            <select
-                              value={value}
-                              onChange={e => setCell(emp.id, wd, e.target.value)}
-                              title={shiftById.get(value)?.name}
-                              className={`w-full rounded-md border px-1 py-1 text-xs shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-accent/30 ${cellTone(
-                                value,
-                                dirty
-                              )}`}
-                            >
-                              <option value={UNSET}>—</option>
-                              <option value={WEEK_OFF_VALUE}>Week Off</option>
-                              {templateShifts.map(s => (
-                                <option key={s.id} value={s.id}>
-                                  {s.name} ({s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)})
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                        );
-                      })}
-                      <td className={`whitespace-nowrap px-2 py-1.5 text-center ${rowBg}`}>
-                        {copiedEmployeeId === emp.id ? (
-                          <button
-                            type="button"
-                            onClick={() => setCopiedEmployeeId(null)}
-                            title="This employee's pattern is copied — click to clear"
-                            className="shrink-0 whitespace-nowrap rounded-md border border-good/30 bg-good-bg px-1.5 py-1 text-[10px] font-semibold text-good-text"
-                          >
-                            📋 Copied ✓
-                          </button>
-                        ) : copiedEmployeeId ? (
-                          <button
-                            type="button"
-                            onClick={() => pasteToEmployee(emp.id)}
-                            disabled={pastingEmployeeId === emp.id}
-                            title={`Paste ${employees.find(e => e.id === copiedEmployeeId)?.name ?? "the copied employee"}'s pattern onto ${emp.name} — saves immediately`}
-                            className="shrink-0 whitespace-nowrap rounded-md border border-accent/40 bg-accent/5 px-1.5 py-1 text-[10px] font-semibold text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {pastingEmployeeId === emp.id ? 'Pasting…' : '📋 Paste'}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setCopiedEmployeeId(emp.id)}
-                            disabled={!weekdays.some(wd => currentValue(emp.id, wd) !== UNSET)}
-                            title="Copy this employee's whole pattern — then click Paste on another employee"
-                            className="shrink-0 whitespace-nowrap rounded-md border border-slate-200 px-1.5 py-1 text-[10px] font-semibold text-slate-500 hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            📋 Copy
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {groups.map(group => (
+                  <GroupRows
+                    key={group.name ?? '__all'}
+                    group={group}
+                    collapsed={!!(group.name && collapsed[group.name])}
+                    onToggle={() => group.name && setCollapsed(c => ({ ...c, [group.name!]: !c[group.name!] }))}
+                    weekdays={weekdays}
+                    currentValue={currentValue}
+                    setCell={setCell}
+                    brush={brush}
+                    cellClass={cellClass}
+                    pending={pending}
+                    hoursFor={hoursFor}
+                    copiedEmployeeId={copiedEmployeeId}
+                    pastingEmployeeId={pastingEmployeeId}
+                    onCopy={id => setCopiedEmployeeId(id)}
+                    onPaste={pasteToEmployee}
+                    onClearCopy={() => setCopiedEmployeeId(null)}
+                  />
+                ))}
+                {visible.length === 0 && (
+                  <tr>
+                    <td colSpan={weekdays.length + 3} className="px-4 py-8 text-center text-sm text-slate-400">
+                      No one matches “{query}”.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -324,6 +368,174 @@ export default function WeeklyPatternGrid({
         {saveError && <p className="mt-3 text-sm text-critical">Could not save: {saveError}</p>}
       </div>
 
+      <PasteWeeklyRosterDialog
+        open={pasteDialogOpen}
+        onClose={() => setPasteDialogOpen(false)}
+        initialAnchor={todayAnchor()}
+        onPasted={() => setPasteDialogOpen(false)}
+      />
     </div>
+  );
+}
+
+function GroupRows({
+  group,
+  collapsed,
+  onToggle,
+  weekdays,
+  currentValue,
+  setCell,
+  brush,
+  cellClass,
+  pending,
+  hoursFor,
+  copiedEmployeeId,
+  pastingEmployeeId,
+  onCopy,
+  onPaste,
+  onClearCopy,
+}: {
+  group: { name: string | null; rows: Employee[] };
+  collapsed: boolean;
+  onToggle: () => void;
+  weekdays: number[];
+  currentValue: (employeeId: string, weekday: number) => string;
+  setCell: (employeeId: string, weekday: number, value: string) => void;
+  brush: string;
+  cellClass: (value: string, dirty: boolean) => string;
+  pending: Record<string, string>;
+  hoursFor: (employeeId: string) => number;
+  copiedEmployeeId: string | null;
+  pastingEmployeeId: string | null;
+  onCopy: (id: string) => void;
+  onPaste: (id: string) => void;
+  onClearCopy: () => void;
+}) {
+  const colSpan = weekdays.length + 3;
+  return (
+    <>
+      {group.name && (
+        <tr>
+          <td colSpan={colSpan} className="border-b border-t border-slate-100 bg-slate-50 p-0">
+            <button type="button" onClick={onToggle} className="flex w-full items-center gap-2 px-3 py-2 text-left">
+              <ChevronIcon className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+              <span className="text-sm font-bold text-ink">{group.name}</span>
+              <span className="text-xs text-slate-500">
+                {group.rows.length} {group.rows.length === 1 ? 'person' : 'people'}
+              </span>
+            </button>
+          </td>
+        </tr>
+      )}
+      {!collapsed &&
+        group.rows.map((emp, i) => {
+          const rowBg = i % 2 === 1 ? 'bg-slate-50/60' : 'bg-white';
+          const hrs = hoursFor(emp.id);
+          const isCopySource = copiedEmployeeId === emp.id;
+          return (
+            <tr key={emp.id} className="border-b border-slate-100 last:border-0">
+              <td className={`sticky left-0 z-10 whitespace-nowrap px-3 py-2 ${rowBg}`}>
+                <div className="flex items-center gap-2">
+                  <Avatar name={emp.name} photoUrl={emp.profile_photo_url} className="h-10 w-10 text-sm" />
+                  <span className="truncate font-medium text-ink">{emp.name}</span>
+                </div>
+              </td>
+              {weekdays.map(wd => {
+                const value = currentValue(emp.id, wd);
+                const dirty = `${emp.id}|${wd}` in pending;
+                return (
+                  <td key={wd} className={`px-1 py-1.5 text-center ${rowBg}`}>
+                    <button
+                      type="button"
+                      onClick={() => setCell(emp.id, wd, brush)}
+                      title={`Paint ${emp.name}'s ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][wd]} with the selected brush`}
+                      className={`h-9 w-full rounded-md border text-xs font-semibold shadow-sm transition-transform hover:-translate-y-px hover:shadow ${cellClass(value, dirty)}`}
+                    >
+                      {value === UNSET ? '—' : null}
+                    </button>
+                  </td>
+                );
+              })}
+              <td className={`whitespace-nowrap px-3 py-1.5 text-right text-sm font-semibold text-ink ${rowBg}`}>
+                {hrs > 0 ? `${hrs % 1 === 0 ? hrs : hrs.toFixed(1)}h` : '—'}
+              </td>
+              <td className={`whitespace-nowrap px-2 py-1.5 text-center ${rowBg}`}>
+                {isCopySource ? (
+                  <button
+                    type="button"
+                    onClick={onClearCopy}
+                    title="This employee's pattern is copied — click to clear"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-good/40 bg-good-bg text-good-text"
+                  >
+                    <CheckIcon className="h-3.5 w-3.5" />
+                  </button>
+                ) : copiedEmployeeId ? (
+                  <button
+                    type="button"
+                    onClick={() => onPaste(emp.id)}
+                    disabled={pastingEmployeeId === emp.id}
+                    title="Paste the copied pattern onto this employee"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-accent/40 bg-accent/5 text-accent hover:bg-accent/10 disabled:opacity-50"
+                  >
+                    <PasteIcon className="h-3.5 w-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onCopy(emp.id)}
+                    title="Copy this employee's whole week"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-400 hover:border-accent/40 hover:text-accent"
+                  >
+                    <CopyIcon className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+    </>
+  );
+}
+
+function SearchIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+function CopyIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+    </svg>
+  );
+}
+
+function PasteIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M9 4h6v3H9z" />
+      <path d="M15 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
   );
 }
