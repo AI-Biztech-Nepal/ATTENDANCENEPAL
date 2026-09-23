@@ -1,12 +1,13 @@
 {
   "name": "attendance-nepal-desktop",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "description": "Attendance Nepal admin dashboard as a Windows desktop app",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win"
+    "build": "electron-builder --win",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
@@ -16,7 +17,8 @@
   },
   "devDependencies": {
     "electron": "^31.3.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "patch-package": "^8.0.1"
   },
   "build": {
     "appId": "com.attendancenepal.desktop",
@@ -33,7 +35,8 @@
       "settings-renderer.js",
       "package.json",
       "build/icon.png",
-      "build/icon.ico"
+      "build/icon.ico",
+      "patches/**"
     ],
     "win": {
       "target": [
