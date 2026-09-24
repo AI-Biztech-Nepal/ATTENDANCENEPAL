@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Badge from '@/components/Badge';
+import { useConfirm } from '@/components/ConfirmDialog';
 import DateRangePicker from '@/components/DateRangePicker';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
@@ -314,6 +315,7 @@ function statusBadge(r: Row) {
 
 export default function AttendanceReportTable({ initialEmployeeId }: { initialEmployeeId?: string | null }) {
   const { system } = useCalendarSystem();
+  const confirm = useConfirm();
   const tableScrollRef = useRef<HTMLDivElement>(null);
   // Dates, status, employee and Correction mode are remembered for this
   // browser tab, so a refresh picks up where you were (lib/useSessionState).
@@ -357,6 +359,15 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     isValid: v => typeof v === 'boolean',
   });
   const [refreshTick, setRefreshTick] = useState(0);
+  // Recalculate: re-runs compute_payroll_summaries() for every day in the
+  // shown range (see recalculateRange() below) — the only way to bring an
+  // already-computed past day's hours/late/early up to date after fixing a
+  // shift's own times or a roster assignment, since that never happens on
+  // its own (compute_payroll_summaries() only touches yesterday/today, and
+  // nothing re-runs it retroactively when a shift definition changes).
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalcProgress, setRecalcProgress] = useState<{ done: number; total: number } | null>(null);
+  const [recalcNotice, setRecalcNotice] = useState<string | null>(null);
   const [fixRow, setFixRow] = useState<Row | null>(null);
   // checkOutNextDay: the check-out falls on the morning after work_date — an
   // overnight / 24-hour duty (09:00 -> 08:00). Without it both times were
@@ -860,6 +871,58 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     return failed.size === 0;
   }
 
+  // Recalculate: fixing a shift's own times, or which shift an employee is
+  // rostered onto, only changes what a NEW computation would produce — a
+  // date already computed keeps whatever numbers it was given at the time,
+  // forever, until something recomputes that exact date again. Nothing does
+  // that on its own: compute_payroll_summaries() only ever redoes yesterday
+  // and today, not a date from further back, and there's no trigger on the
+  // shifts/roster tables to re-run it. This calls the same RPC the nightly
+  // job runs, once per day in the shown range (capped at today — a future
+  // day has nothing to compute yet), for every employee at once: the RPC
+  // itself isn't scoped to one employee, and recomputing the whole company
+  // for a date is exactly what already happens nightly, so there's nothing
+  // unusual about doing it by hand for a range. A manually_corrected day is
+  // left exactly as it is (compute_payroll_summaries() already skips those
+  // — see the comment on isDeletedDay() in lib/shift.ts).
+  async function recalculateRange() {
+    const days: string[] = [];
+    const cur = new Date(from + 'T00:00:00Z');
+    const end = new Date(to + 'T00:00:00Z');
+    const today = nepalTodayIso();
+    while (cur <= end) {
+      const day = cur.toISOString().slice(0, 10);
+      if (day <= today) days.push(day);
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    if (days.length === 0) return;
+    const proceed = await confirm(
+      `Recalculates hours, late/early, overtime and status for every employee from ${formatDdMmYyyy(days[0], system)} to ` +
+        `${formatDdMmYyyy(days[days.length - 1], system)} (${days.length} day${days.length === 1 ? '' : 's'}), using each ` +
+        `employee's current shift assignment. A day you've corrected by hand is left as it is. This can take a moment for ` +
+        `a long range.`,
+      { title: 'Recalculate this range?', confirmLabel: 'Recalculate' }
+    );
+    if (!proceed) return;
+    setRecalculating(true);
+    setRecalcNotice(null);
+    setRecalcProgress({ done: 0, total: days.length });
+    const failedDays: string[] = [];
+    for (let i = 0; i < days.length; i++) {
+      const { error } = await supabase.rpc('compute_payroll_summaries', { p_work_date: days[i] });
+      if (error) failedDays.push(days[i]);
+      setRecalcProgress({ done: i + 1, total: days.length });
+    }
+    setRecalculating(false);
+    setRecalcProgress(null);
+    setRecalcNotice(
+      failedDays.length > 0
+        ? `Recalculated ${days.length - failedDays.length}/${days.length} days. Failed: ${failedDays.join(', ')}`
+        : `Recalculated ${days.length} day${days.length === 1 ? '' : 's'}.`
+    );
+    setRefreshTick(t => t + 1);
+  }
+
   /** Runs a filter, date or mode change — or holds it behind the "Save your
    * changes first?" prompt while there are unsaved changes. */
   function guarded(action: () => void) {
@@ -872,6 +935,12 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     const t = setTimeout(() => setSavedNotice(null), 4000);
     return () => clearTimeout(t);
   }, [savedNotice]);
+
+  useEffect(() => {
+    if (!recalcNotice) return;
+    const t = setTimeout(() => setRecalcNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [recalcNotice]);
 
   // Leaving the page asks too: the browser's own prompt for a reload or
   // close, a confirm for an in-app link (caught before Next's router sees the
@@ -1056,6 +1125,21 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 }`}
               />
             </span>
+          </button>
+
+          {/* Recalculate — the only way to bring an already-computed past
+              day's hours/late/early up to date after fixing a shift's own
+              times or roster assignment; see recalculateRange() above for
+              why nothing does this on its own. */}
+          <button
+            type="button"
+            onClick={() => guarded(recalculateRange)}
+            disabled={recalculating}
+            title="Recompute hours, late/early, overtime and status for this range from each employee's current shift — use this after changing a shift's times or a roster assignment"
+            className="flex items-center gap-1.5 self-end rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RecalculateIcon className="h-3.5 w-3.5 text-slate-400" />
+            {recalculating ? `Recalculating ${recalcProgress?.done ?? 0}/${recalcProgress?.total ?? 0}…` : 'Recalculate'}
           </button>
 
           <TableExportBar onExportCsv={exportCsv} />
@@ -1322,6 +1406,13 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         </div>
       )}
 
+      {recalcNotice && (
+        <div role="status" className="sticky bottom-4 z-30 mx-auto mt-3 flex w-fit max-w-lg items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg print:hidden">
+          <RecalculateIcon className="h-4 w-4 shrink-0 text-slate-400" />
+          <span className="text-sm font-medium text-ink">{recalcNotice}</span>
+        </div>
+      )}
+
       {fixRow && (
         <div
           className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 sm:p-8 print:hidden"
@@ -1558,6 +1649,17 @@ function CorrectionIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function RecalculateIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M3 12a9 9 0 0 1 15.3-6.4L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-15.3 6.4L3 16" />
+      <path d="M3 21v-5h5" />
     </svg>
   );
 }
