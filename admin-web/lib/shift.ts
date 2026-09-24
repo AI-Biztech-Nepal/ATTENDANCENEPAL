@@ -247,6 +247,48 @@ export function selectDayPunches(logs: AttendanceLog[]): { checkIn: AttendanceLo
   return { checkIn, checkOut: checkOut !== checkIn ? checkOut : null };
 }
 
+function minutesBetween(a: AttendanceLog, b: AttendanceLog): number {
+  return (new Date(b.punch_time).getTime() - new Date(a.punch_time).getTime()) / 60000;
+}
+
+/** Pairs genuine '0' (open) / '1' (close) punches. A '0' with no open pair
+ * starts one; a '1' closes whatever's open and is otherwise ignored — so an
+ * unmatched extra check-in (forgot to punch out, then punched in again)
+ * simply never closes and contributes nothing, rather than being paired with
+ * whatever comes next regardless of its type. */
+function pairByType(sorted: AttendanceLog[]): number {
+  let total = 0;
+  let openIn: AttendanceLog | null = null;
+  for (const p of sorted) {
+    if (p.punch_type === '0') {
+      if (!openIn) openIn = p;
+    } else if (openIn) {
+      total += minutesBetween(openIn, p);
+      openIn = null;
+    }
+  }
+  return Math.round(total);
+}
+
+/** The device doesn't distinguish check-in from check-out at all (every
+ * punch shares the same type — e.g. a terminal with its Punch State setting
+ * off) — the only signal left is chronological order. An EVEN count pairs
+ * cleanly as IN/OUT/IN/OUT (a day with one break shows up as exactly two such
+ * pairs); an ODD count has an unmatched middle punch with no way to tell
+ * whether it's a mis-tap or a break with no recorded return, so it falls back
+ * to the plain first-to-last span instead of guessing. */
+function pairByPosition(sorted: AttendanceLog[]): number {
+  if (sorted.length < 2) return 0;
+  if (sorted.length % 2 !== 0) {
+    return Math.round(minutesBetween(sorted[0], sorted[sorted.length - 1]));
+  }
+  let total = 0;
+  for (let i = 0; i + 1 < sorted.length; i += 2) {
+    total += minutesBetween(sorted[i], sorted[i + 1]);
+  }
+  return Math.round(total);
+}
+
 /** Worked minutes for one day, summed across every check-in/check-out PAIR
  * instead of spanned from the first punch to the last — so a break (punch
  * out, then punch back in later on the same device used for the shift) isn't
@@ -255,23 +297,16 @@ export function selectDayPunches(logs: AttendanceLog[]): { checkIn: AttendanceLo
  * — this needs no new punch type, just pairs up the ordinary check-in/
  * check-out punches restaurant/retail staff already tap for a lunch break.
  *
- * Only trusted by the caller when there's at least one real '1'-type punch
- * to pair against (see calc_payroll_fields' mirror of this on the server) —
- * a day with no properly-typed check-out at all can't be paired, so it falls
- * back to the plain first-in/last-out span exactly as before. */
+ * Prefers pairing by real punch type (pairByType) whenever the device
+ * reports at least one genuine '1' — that's more robust against a stray
+ * unmatched check-in. Falls back to pairing by chronological position
+ * (pairByPosition) only when the device gives no usable type signal at all
+ * (every punch typed the same, e.g. Chiyapur's terminal), since otherwise
+ * every such day would silently keep counting its break as worked time. */
 export function pairedWorkedMinutes(logs: AttendanceLog[]): number {
   const sorted = dedupedInOutPunches(logs);
-  let total = 0;
-  let openIn: AttendanceLog | null = null;
-  for (const p of sorted) {
-    if (p.punch_type === '0') {
-      if (!openIn) openIn = p;
-    } else if (openIn) {
-      total += (new Date(p.punch_time).getTime() - new Date(openIn.punch_time).getTime()) / 60000;
-      openIn = null;
-    }
-  }
-  return Math.round(total);
+  const hasRealCheckout = sorted.some(l => l.punch_type === '1');
+  return hasRealCheckout ? pairByType(sorted) : pairByPosition(sorted);
 }
 
 /** One calendar day's punches -> attendance state for that day. */
@@ -302,16 +337,7 @@ export function computeDayStatus(
 
   const shiftDurationMin =
     shiftEndMin > shiftStartMin ? shiftEndMin - shiftStartMin : 24 * 60 - shiftStartMin + shiftEndMin;
-  // Pair-summed (excludes a break) whenever there's a real check-out punch to
-  // pair against; a day whose only "out" is the sorted[]-fallback in
-  // selectDayPunches (no punch actually typed '1') can't be paired, so it
-  // falls back to the plain span exactly as before.
-  const hasRealCheckout = logs.some(l => l.punch_type === '1');
-  const totalMinutes = hasOut
-    ? hasRealCheckout
-      ? pairedWorkedMinutes(logs)
-      : Math.round((new Date(checkOut!.punch_time).getTime() - new Date(checkIn.punch_time).getTime()) / 60000)
-    : 0;
+  const totalMinutes = hasOut ? pairedWorkedMinutes(logs) : 0;
   const overtimeMinutes = totalMinutes > shiftDurationMin ? totalMinutes - shiftDurationMin : 0;
 
   return {
@@ -365,12 +391,7 @@ export function computeDayStatusForResolvedShift(logs: AttendanceLog[], resolved
   if (isWeekOff(resolved)) {
     const { checkIn, checkOut } = selectDayPunches(logs);
     const hasOut = !!checkOut;
-    const hasRealCheckout = logs.some(l => l.punch_type === '1');
-    const totalMinutes = hasOut
-      ? hasRealCheckout
-        ? pairedWorkedMinutes(logs)
-        : Math.round((new Date(checkOut!.punch_time).getTime() - new Date(checkIn.punch_time).getTime()) / 60000)
-      : 0;
+    const totalMinutes = hasOut ? pairedWorkedMinutes(logs) : 0;
     return {
       hasIn: true,
       hasOut,

@@ -20,10 +20,17 @@
 -- with exactly one pair (the overwhelming common case) this is identical to
 -- the old span, so no other company's numbers change.
 --
--- Only trusted when there's a genuine '1'-typed check-out punch to pair
--- against (v_last_out is not null) -- a day with no properly-typed checkout
--- at all can't be paired, so it keeps the plain span exactly as before. Also
--- not trusted when a Week Off duty's checkout was rescued from the NEXT
+-- Prefers pairing by real punch type (a '0' opens, a '1' closes it) whenever
+-- the device reports at least one genuine '1'. Some terminals never do --
+-- Chiyapur's logs every punch as '0', so there's no type signal at all -- in
+-- which case sum_paired_minutes() falls back to pairing by chronological
+-- POSITION instead: an EVEN punch count alternates IN/OUT/IN/OUT (one break
+-- shows up as exactly two such pairs); an ODD count has an unmatched middle
+-- punch with no way to tell whether it's a mis-tap or a break with no
+-- recorded return, so that falls back further to the plain first-to-last
+-- span, same as before this migration.
+--
+-- Also not trusted when a Week Off duty's checkout was rescued from the NEXT
 -- calendar day (week_off_duty_checkout(), 20260911120000): that punch lies
 -- outside this window's own punch list, so pairing can't account for it --
 -- the plain span (check_out - check_in) is still correct there.
@@ -41,21 +48,40 @@ create or replace function sum_paired_minutes(p_times timestamptz[], p_types tex
 returns integer as $$
 declare
   i integer;
+  n integer;
   open_in timestamptz;
   total numeric := 0;
 begin
   if p_times is null then
     return 0;
   end if;
-  for i in 1 .. array_length(p_times, 1) loop
-    if p_types[i] = '0' then
-      if open_in is null then
-        open_in := p_times[i];
+  n := array_length(p_times, 1);
+
+  if '1' = any(p_types) then
+    -- A '0' with no open pair starts one; a '1' closes whatever's open and
+    -- is otherwise ignored -- an unmatched extra check-in (forgot to punch
+    -- out, then punched in again) simply never closes, rather than being
+    -- paired with whatever comes next regardless of its type.
+    for i in 1 .. n loop
+      if p_types[i] = '0' then
+        if open_in is null then
+          open_in := p_times[i];
+        end if;
+      elsif p_types[i] = '1' and open_in is not null then
+        total := total + extract(epoch from (p_times[i] - open_in)) / 60;
+        open_in := null;
       end if;
-    elsif p_types[i] = '1' and open_in is not null then
-      total := total + extract(epoch from (p_times[i] - open_in)) / 60;
-      open_in := null;
-    end if;
+    end loop;
+    return round(total)::integer;
+  end if;
+
+  -- No usable type signal at all -- chronological position is all that's
+  -- left. See this migration's header for the even/odd reasoning.
+  if n % 2 <> 0 then
+    return round(extract(epoch from (p_times[n] - p_times[1])) / 60)::integer;
+  end if;
+  for i in 1 .. n by 2 loop
+    total := total + extract(epoch from (p_times[i + 1] - p_times[i])) / 60;
   end loop;
   return round(total)::integer;
 end;
@@ -270,11 +296,10 @@ begin
       end if;
 
       -- Worked minutes actually earned between this window's own punches,
-      -- paired up instead of spanned -- see sum_paired_minutes(). Only
-      -- trusted when there was a real check-out punch to pair against
-      -- (v_last_out not null); a day with no properly-typed check-out at all
-      -- falls back to the plain span inside calc_payroll_fields.
-      v_total_minutes := case when v_last_out is not null then sum_paired_minutes(v_times, v_types) else null end;
+      -- paired up instead of spanned -- see sum_paired_minutes() (it falls
+      -- back to positional pairing, then to the plain span, on its own when
+      -- the punches don't carry a usable type).
+      v_total_minutes := sum_paired_minutes(v_times, v_types);
 
       -- A Week Off duty that ran into the next morning: its check-out is the
       -- next day's first punch (week_off_duty_checkout() re-checks that this
@@ -393,7 +418,7 @@ begin
         continue;
       end if;
 
-      v_total_minutes := case when v_last_out is not null then sum_paired_minutes(v_times, v_types) else null end;
+      v_total_minutes := sum_paired_minutes(v_times, v_types);
 
       select * into fields from calc_payroll_fields(emp.id, check_in, check_out, d_scan, v_total_minutes);
 
