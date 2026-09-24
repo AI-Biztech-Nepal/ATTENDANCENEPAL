@@ -1015,7 +1015,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   return (
     <>
       <h1 className="mb-3 hidden text-2xl font-bold text-ink print:block">
-        Attendance Report — {from} to {to}
+        Attendance Report — {formatDdMmYyyy(from, system)} to {formatDdMmYyyy(to, system)}
       </h1>
       <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm print:hidden">
         <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
