@@ -669,12 +669,13 @@ export default function SalaryStructurePage() {
       </div>
 
       <p className="mt-3 text-xs text-slate-400">
-        Net Payable = Basic + Allowance − PF − SSF by Employer − SSF by Employee{showOvertime && ' + Overtime'}. Click a Basic
-        or Allowance figure to edit it for that employee, or click a name to open that employee&apos;s full salary breakdown. PF
-        / SSF by Employer / SSF by Employee{showOvertime && ' / Overtime'} are all company-wide rates. Per-day figures divide the
-        monthly amount by the number of days in {period.label}. The monthly Payroll report reads these figures and is not edited
-        there.
-        {showSsfEmployer && ' SSF by Employer is shown twice — before and after Gross — the same figure both times, counted once in Net Payable.'}
+        Gross = Basic + Allowance{showSsfEmployer && ' + SSF by Employer'}. Net Payable = Basic + Allowance − PF − SSF by
+        Employer − SSF by Employee{showOvertime && ' + Overtime'} either way — SSF by Employer never reaches the employee, so
+        it doesn&apos;t change Net Payable just because it&apos;s folded into Gross. Click a Basic or Allowance figure to edit
+        it for that employee, or click a name to open that employee&apos;s full salary breakdown. PF / SSF by Employer / SSF by
+        Employee{showOvertime && ' / Overtime'} are all company-wide rates. Per-day figures divide the monthly amount by the
+        number of days in {period.label}. The monthly Payroll report reads these figures and is not edited there.
+        {showSsfEmployer && ' SSF by Employer is shown twice — once folded into Gross, and again in its own column — the same figure both times.'}
         {showOvertime &&
           ' The Overtime line is a flat allowance (% of Basic), not the real attendance-based overtime pay the Payroll report calculates from actual hours worked.'}
         {!showOvertime &&

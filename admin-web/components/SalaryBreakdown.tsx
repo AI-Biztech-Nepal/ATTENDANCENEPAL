@@ -18,7 +18,17 @@ export type SalaryFigures = {
  * shows. One place so the list page, the per-employee page and any export
  * never drift apart. Overtime here is a flat allowance (ADDED to Net
  * Payable), not the real attendance-based overtime pay computed elsewhere
- * from actual hours worked — the two are intentionally different numbers. */
+ * from actual hours worked — the two are intentionally different numbers.
+ *
+ * Gross = Basic + Allowance + SSF by Employer — a deliberate company choice
+ * (not the more usual Basic + Allowance alone), so SSF by Employer is folded
+ * into Gross here rather than treated purely as a downstream deduction.
+ * Net Payable is still the employee's real take-home pay and must NOT move
+ * just because Gross's own definition changed — SSF by Employer is never
+ * paid to the employee, so it's computed straight from Basic + Allowance
+ * (never from `gross`, which already has it added in once — deriving net
+ * from gross would subtract it back out and silently cancel the deduction
+ * to zero). */
 export function computeSalaryFigures(
   salary: number | null,
   allowanceRaw: number | null,
@@ -35,8 +45,9 @@ export function computeSalaryFigures(
   const ssfAmt = Math.round((salary * ssf) / 100);
   const tdsAmt = Math.round((salary * tds) / 100);
   const overtimeAmt = Math.round((salary * overtimeRate) / 100);
-  const gross = salary + allowance;
-  return { basic: salary, allowance, gross, pfAmt, ssfAmt, tdsAmt, overtimeAmt, net: gross - pfAmt - ssfAmt - tdsAmt + overtimeAmt };
+  const gross = salary + allowance + ssfAmt;
+  const net = salary + allowance - pfAmt - ssfAmt - tdsAmt + overtimeAmt;
+  return { basic: salary, allowance, gross, pfAmt, ssfAmt, tdsAmt, overtimeAmt, net };
 }
 
 export type BreakdownLine = { label: string; value: number | null; sign?: '+' | '−'; strong?: boolean };

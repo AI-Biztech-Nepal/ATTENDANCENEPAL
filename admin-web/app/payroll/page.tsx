@@ -638,10 +638,14 @@ export default function PayrollPage() {
     const base = netPayableBase(row);
     return base == null ? null : Math.round((base * overtimeAllowanceRate) / 100);
   }
-  // Allowance is added flat here (same as Salary Structure's Gross = Basic +
-  // Allowance), never prorated by attendance and never part of the PF/SSF/
-  // SSF-by-Employee/Overtime-Allowance percentage base above — those stay
-  // Basic-only, exactly like computeSalaryFigures() on Salary Structure.
+  // Allowance is added flat here, never prorated by attendance and never
+  // part of the PF/SSF/SSF-by-Employee/Overtime-Allowance percentage base
+  // above — those stay Basic-only, exactly like computeSalaryFigures() on
+  // Salary Structure. This Net Payable is computed straight from Basic +
+  // Allowance, not from a "gross" intermediate — same reasoning as
+  // computeSalaryFigures(): Salary Structure's Gross now folds in SSF by
+  // Employer for display, but that must never change what Net Payable
+  // itself works out to.
   function netPayable(row: Parameters<typeof netPayableBase>[0] & { allowance: number }): number | null {
     const base = netPayableBase(row);
     if (base == null) return null;
