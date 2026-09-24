@@ -102,6 +102,17 @@ export function holidayCoversGender(scope: HolidayScope | null | undefined, gend
   return s === 'all' || s === gender;
 }
 
+/** Just the company_holidays dates (no weekly recurring day) within a gender
+ * scope — the subset of weekOffDatesInRange() needed to give a holiday its
+ * own 'Holiday' attendance label instead of folding it into 'Week Off'. */
+export function holidayDatesInRange(holidays: HolidayLike[], gender?: Gender | null): Set<string> {
+  const set = new Set<string>();
+  for (const h of holidays) {
+    if (holidayCoversGender(h.applies_to, gender)) set.add(h.holiday_date);
+  }
+  return set;
+}
+
 /** Dates within [start, end] (inclusive, 'YYYY-MM-DD') that are a company-wide
  * Week-off: either the weekly recurring day or a company_holidays row. When
  * `gender` is given, gender-scoped holidays are included only if they cover
@@ -114,10 +125,7 @@ export function weekOffDatesInRange(
   holidays: HolidayLike[],
   gender?: Gender | null
 ): Set<string> {
-  const set = new Set<string>();
-  for (const h of holidays) {
-    if (holidayCoversGender(h.applies_to, gender)) set.add(h.holiday_date);
-  }
+  const set = holidayDatesInRange(holidays, gender);
   if (weeklyOffDay == null) return set;
   const cur = new Date(start + 'T00:00:00Z');
   const endDate = new Date(end + 'T00:00:00Z');
@@ -141,6 +149,16 @@ export function weekOffDatesByGender(
   const base = weekOffDatesInRange(start, end, weeklyOffDay, holidays);
   const male = weekOffDatesInRange(start, end, weeklyOffDay, holidays, 'male');
   const female = weekOffDatesInRange(start, end, weeklyOffDay, holidays, 'female');
+  return gender => (gender === 'male' ? male : gender === 'female' ? female : base);
+}
+
+/** Same per-gender lookup as weekOffDatesByGender(), but holidays only —
+ * used wherever a holiday needs its own 'Holiday' label distinct from an
+ * ordinary 'Week Off'. */
+export function holidayDatesByGender(holidays: HolidayLike[]): (gender: Gender | null | undefined) => Set<string> {
+  const base = holidayDatesInRange(holidays);
+  const male = holidayDatesInRange(holidays, 'male');
+  const female = holidayDatesInRange(holidays, 'female');
   return gender => (gender === 'male' ? male : gender === 'female' ? female : base);
 }
 

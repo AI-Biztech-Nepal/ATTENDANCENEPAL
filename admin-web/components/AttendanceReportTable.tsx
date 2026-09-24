@@ -27,7 +27,7 @@ import {
   type DailyShiftByDate,
   type ResolvedShift,
 } from '@/lib/shift';
-import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, holidayDatesByGender, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
 import { fetchLeavePolicy, leavePolicyActive } from '@/lib/leaveBalance';
 import { useSessionState } from '@/lib/useSessionState';
 import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
@@ -62,7 +62,12 @@ type Row = {
    * can pre-fill its dropdown to whatever was picked last time. */
   deviceId: string | null;
   hours: number;
-  status: 'Present' | 'Late' | 'Absent' | 'Upcoming' | 'Week Off' | 'Leave' | 'Exempt';
+  status: 'Present' | 'Late' | 'Absent' | 'Upcoming' | 'Week Off' | 'Leave' | 'Holiday' | 'Exempt';
+  /** Whether this date is a company holiday (gender-scoped) — used by the
+   * Correction dialog's delete warning to say "Holiday" instead of falling
+   * back to the Shift column's generic "Week Off" name. Set for every row,
+   * whether or not the day ended up punchless. */
+  isHoliday: boolean;
   lateMinutes: number;
   earlyArrivalMinutes: number;
   earlyMinutes: number;
@@ -185,7 +190,7 @@ function previewRow(r: Row, change: PendingChange, deviceName: string | null): R
       earlyArrivalMinutes: 0,
       earlyMinutes: 0,
       lateDepartureMinutes: 0,
-      status: r.shiftName === 'Week Off' ? 'Week Off' : 'Absent',
+      status: r.isHoliday ? 'Holiday' : r.shiftName === 'Week Off' ? 'Week Off' : 'Absent',
       device: 'Deleted by admin',
     };
   }
@@ -306,6 +311,7 @@ function isoDaysAgo(n: number) {
 
 function statusBadge(r: Row) {
   if (r.checkIn) return <Badge tone="good">Present</Badge>;
+  if (r.status === 'Holiday') return <Badge tone="neutral">Holiday</Badge>;
   if (r.status === 'Week Off') return <Badge tone="neutral">Week Off</Badge>;
   if (r.status === 'Leave') return <Badge tone="info">Leave</Badge>;
   if (r.status === 'Upcoming') return <Badge tone="neutral">Upcoming</Badge>;
@@ -322,10 +328,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   // An employee passed in the link wins over the remembered one.
   const [from, setFrom] = useSessionState('attendanceReport:from', isoDaysAgo(0), { isValid: (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) });
   const [to, setTo] = useSessionState('attendanceReport:to', isoDaysAgo(0), { isValid: (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) });
-  const [status, setStatus] = useSessionState<'All' | 'Present' | 'Late' | 'Early' | 'Absent' | 'Week Off' | 'Leave' | 'Exempt'>(
+  const [status, setStatus] = useSessionState<'All' | 'Present' | 'Late' | 'Early' | 'Absent' | 'Week Off' | 'Leave' | 'Holiday' | 'Exempt'>(
     'attendanceReport:status',
     'All',
-    { isValid: v => typeof v === 'string' && ['All', 'Present', 'Late', 'Early', 'Absent', 'Week Off', 'Leave', 'Exempt'].includes(v) }
+    { isValid: v => typeof v === 'string' && ['All', 'Present', 'Late', 'Early', 'Absent', 'Week Off', 'Leave', 'Holiday', 'Exempt'].includes(v) }
   );
   const [employeeId, setEmployeeId] = useSessionState<string>('attendanceReport:employee', initialEmployeeId ?? 'all', {
     enabled: !initialEmployeeId,
@@ -448,6 +454,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   // A per-employee lookup: gender-scoped holidays (e.g. Teej) count only for
   // the employees they cover.
   const weekOffDatesFor = useMemo(() => weekOffDatesByGender(from, to, weeklyOffDay, holidays), [from, to, weeklyOffDay, holidays]);
+  const holidayDatesFor = useMemo(() => holidayDatesByGender(holidays), [holidays]);
   const leaveByEmployee = useMemo(() => leaveDatesByEmployee(leaveRequests), [leaveRequests]);
   const weeklyPattern = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
@@ -503,6 +510,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     for (const day of days) {
       for (const emp of scopedEmployees) {
         const weekOffDateSet = weekOffDatesFor(emp.gender);
+        const isHoliday = holidayDatesFor(emp.gender).has(day);
         // Today's own row can still gain punches (e.g. a checkout) after a
         // payroll_summaries row for it was already computed — that row is
         // never re-run until tomorrow's nightly job, so trusting it here
@@ -541,6 +549,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             employeeName: emp.name,
             device: deviceFor(summary.device_id, dayLogs[0]),
             deviceId: summary.device_id ?? null,
+            isHoliday,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -569,6 +578,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             employeeName: emp.name,
             device: punchSource(dayLogs[0]),
             deviceId: null,
+            isHoliday,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -606,6 +616,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             employeeName: emp.name,
             device: deleted ? 'Deleted by admin' : 'N/A',
             deviceId: null,
+            isHoliday,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -614,16 +625,20 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             hours: 0,
             // A day that hasn't happened yet isn't "Absent" — it just
             // hasn't occurred (only relevant if the picked range runs past
-            // today).
-            status: isOnLeave
-              ? 'Leave'
-              : isOnWeekOff
-                ? 'Week Off'
-                : day > today
-                  ? 'Upcoming'
-                  : emp.attendance_exempt
-                    ? 'Exempt'
-                    : 'Absent',
+            // today). A company holiday overrules every other punchless
+            // label, Leave included — nobody is expected in on a holiday
+            // regardless of their own leave/roster status.
+            status: isHoliday
+              ? 'Holiday'
+              : isOnLeave
+                ? 'Leave'
+                : isOnWeekOff
+                  ? 'Week Off'
+                  : day > today
+                    ? 'Upcoming'
+                    : emp.attendance_exempt
+                      ? 'Exempt'
+                      : 'Absent',
             lateMinutes: 0,
             earlyArrivalMinutes: 0,
             earlyMinutes: 0,
@@ -684,7 +699,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   function correctable(r: Row): boolean {
     if (r.date >= reportToday) return false;
     if (r.status === 'Present' || r.status === 'Late') return !!(r.checkIn || r.checkOut);
-    return (r.status === 'Absent' || r.status === 'Week Off') && !r.checkIn && !r.checkOut;
+    return (r.status === 'Absent' || r.status === 'Week Off' || r.status === 'Holiday') && !r.checkIn && !r.checkOut;
   }
   /** Which end is BLANK — that cell gets the Fix chip instead of a clickable
    * time. 'both' for an Absent / Week Off day with no punches; null when both
@@ -1067,6 +1082,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <option value="Early">Early</option>
                 <option value="Week Off">Week Off</option>
                 <option value="Leave">Leave</option>
+                <option value="Holiday">Holiday</option>
                 <option value="Exempt">Excused</option>
               </select>
             </div>
@@ -1446,6 +1462,20 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 their day off.
               </p>
             )}
+            {fixRow.status === 'Holiday' && weekOffLeaveHours != null && (
+              <p className="mt-3 rounded-lg border border-info/20 bg-info-bg px-3 py-2 text-xs leading-relaxed text-info-text">
+                This is a <strong>holiday</strong>. The hours you enter are <strong>added to the employee&apos;s leave
+                balance</strong> — 1 day for every full {weekOffLeaveHours}h, no half days — not paid as overtime. Use it for
+                someone who genuinely came in on the holiday.
+              </p>
+            )}
+            {fixRow.status === 'Holiday' && weekOffLeaveHours == null && (
+              <p className="mt-3 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-xs leading-relaxed text-warning-text">
+                This is a <strong>holiday</strong>. Nothing is scheduled, so <strong>every hour you enter is counted as
+                overtime</strong> — 09:00 to 17:00 records 8h of overtime. Use it for someone who genuinely came in on
+                the holiday.
+              </p>
+            )}
             {fixRow.status === 'Absent' && (
               <p className="mt-3 rounded-lg border border-info/20 bg-info-bg px-3 py-2 text-xs leading-relaxed text-info-text">
                 This day is marked <strong>absent</strong> with no punches on record. Saving turns it into a worked day,
@@ -1556,7 +1586,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               {(fixRow.checkIn || fixRow.checkOut) && pending.get(fixRow.key)?.kind !== 'delete' ? (
                 <button
                   onClick={deleteAttendance}
-                  title={`The day will show as ${fixRow.shiftName === 'Week Off' ? 'Week Off' : 'Absent'}. The device punches stay in the history but are ignored for this day. Undo it from the row, or it's recorded when you save.`}
+                  title={`The day will show as ${fixRow.isHoliday ? 'Holiday' : fixRow.shiftName === 'Week Off' ? 'Week Off' : 'Absent'}. The device punches stay in the history but are ignored for this day. Undo it from the row, or it's recorded when you save.`}
                   className="inline-flex items-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium text-critical-text hover:bg-critical-bg"
                 >
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">

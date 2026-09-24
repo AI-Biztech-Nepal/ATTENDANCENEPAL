@@ -28,7 +28,7 @@ export type DayDetail = {
    * (left after — overlaps overtime). Both 0 on a punchless day. */
   earlyMinutes: number;
   lateDepartureMinutes: number;
-  status: 'Present' | 'Late' | 'Absent' | 'Upcoming' | 'Week Off' | 'Leave';
+  status: 'Present' | 'Late' | 'Absent' | 'Upcoming' | 'Week Off' | 'Leave' | 'Holiday';
   /** No payroll_summaries row yet (only computed by the nightly job or
    * "Recalculate month" on the Payroll page) — computed live client-side
    * from the raw punches instead of left blank until that job runs. */
@@ -60,7 +60,13 @@ export function buildEmployeeDayRows(
   leaveDates?: Set<string>,
   /** Only populated (by the caller) when the company's roster_mode is
    * 'weekly' — see resolveShiftForDate() in lib/shift.ts. */
-  weeklyPattern?: WeeklyPatternByEmployee
+  weeklyPattern?: WeeklyPatternByEmployee,
+  /** Gender-scoped company_holidays dates (holidayDatesByGender() /
+   * holidayDatesInRange() in lib/weekOff.ts) — a punchless day matching this
+   * is labelled 'Holiday', overruling Leave and Week Off too. Paid the same
+   * as either (already part of weekOffDates for the pay/leave-balance math),
+   * this only changes which label a no-punch day gets. */
+  holidayDates?: Set<string>
 ): DayDetail[] {
   const days: string[] = [];
   const cur = new Date(start + 'T00:00:00Z');
@@ -121,6 +127,14 @@ export function buildEmployeeDayRows(
     // A day an admin deleted has no attendance, whatever punches it had.
     const dayLogs = isDeletedDay(summary) ? [] : (byDate.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
     if (dayLogs.length === 0) {
+      // A company holiday overrules every other punchless label — Leave and
+      // Week Off included — since nobody is expected to attend that day
+      // regardless of an individual's own leave/roster status. Paid the same
+      // as Week Off either way (holidayDates is already part of weekOffDates
+      // for the pay/leave-balance math); this only changes the label.
+      if (holidayDates?.has(day)) {
+        return { date: day, checkIn: null, checkOut: null, hours: 0, overtime: 0, lateMinutes: 0, earlyArrivalMinutes: 0, earlyMinutes: 0, lateDepartureMinutes: 0, status: 'Holiday', paidOff: true };
+      }
       // A company Week-off or approved Leave day is a known, paid day off
       // regardless of whether it's already passed — takes priority over the
       // Upcoming/Absent distinction below. Leave wins the label if both
@@ -217,7 +231,7 @@ export function dailySalaryEarning(
   // the resolved status too. Either way it earns nothing here — the monthly
   // salary is spread over WORKING days only, so a full set of working days
   // already pays the whole Basic.
-  const offDay = opts.isCompanyOffDay || d.status === 'Week Off';
+  const offDay = opts.isCompanyOffDay || d.status === 'Week Off' || d.status === 'Holiday';
   if (offDay) return { base: 0, overtime: 0, total: 0 };
 
   // Approved Leave on a working day is paid like a day present.

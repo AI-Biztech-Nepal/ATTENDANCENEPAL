@@ -14,7 +14,7 @@ import { buildMonth, formatAdDate, formatDdMmYyyy, todayAnchor, type CalendarAnc
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes, nepalTodayIso, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
 import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail, type SalaryMode } from '@/lib/payrollDetail';
-import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, holidayDatesInRange, weekOffDatesInRange } from '@/lib/weekOff';
 import { fetchCompanyPayrollFormat } from '@/lib/payrollFormat';
 import {
   DEFAULT_PAYROLL_REPORT_COLUMNS,
@@ -40,6 +40,7 @@ function fmtHrs(hours: number) {
 
 function statusBadge(d: DayDetail) {
   if (d.checkIn) return <Badge tone="good">Present</Badge>;
+  if (d.status === 'Holiday') return <Badge tone="neutral">Holiday</Badge>;
   if (d.status === 'Week Off') return <Badge tone="neutral">Week Off</Badge>;
   if (d.status === 'Leave') return <Badge tone="info">Leave</Badge>;
   if (d.status === 'Upcoming') return <Badge tone="neutral">Upcoming</Badge>;
@@ -211,6 +212,12 @@ function PayrollEmployeeDetailView() {
     () => weekOffDatesInRange(start, end, weeklyOffDay, holidays, employee?.gender ?? null),
     [start, end, weeklyOffDay, holidays, employee?.gender]
   );
+  // Just the holiday dates (no weekly recurring day), so a punchless holiday
+  // gets its own 'Holiday' label instead of the generic 'Week Off'.
+  const holidayDates = useMemo(
+    () => holidayDatesInRange(holidays, employee?.gender ?? null),
+    [holidays, employee?.gender]
+  );
 
   // Calendar days in the period minus this employee's weekly-offs and
   // holidays — the divisor the Payroll report uses, so the figures here
@@ -247,9 +254,9 @@ function PayrollEmployeeDetailView() {
   const dayRows = useMemo(
     () =>
       employee
-        ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern)
+        ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern, holidayDates)
         : [],
-    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern]
+    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern, holidayDates]
   );
 
   // One day's earned pay, on the same basis (mode + working-days divisor) the
@@ -289,7 +296,7 @@ function PayrollEmployeeDetailView() {
       earlyMinutes += d.earlyMinutes;
       lateDepartureMinutes += d.lateDepartureMinutes;
       if (d.checkIn) presentDays += 1;
-      else if (d.status === 'Week Off' || d.status === 'Leave') paidOffDays += 1;
+      else if (d.status === 'Week Off' || d.status === 'Leave' || d.status === 'Holiday') paidOffDays += 1;
       else if (d.status !== 'Upcoming') absentDays += 1;
       const earning = earningOf(d);
       if (earning) {

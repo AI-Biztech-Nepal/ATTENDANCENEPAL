@@ -8,7 +8,7 @@ import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPerio
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes, nepalTodayIso, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
 import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail, type SalaryMode } from '@/lib/payrollDetail';
-import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, holidayDatesInRange, weekOffDatesInRange } from '@/lib/weekOff';
 import { fetchCompanyPayrollFormat } from '@/lib/payrollFormat';
 
 /** Decimal hours -> "Xh Ym". */
@@ -209,6 +209,15 @@ export default function MyPayrollPage() {
     return set;
   }, [employee?.date_of_joining, employee?.gender, weeklyOffDay, holidays, leaveRequests]);
 
+  // Holiday dates only (no weekly recurring day, no leave) — so a punchless
+  // holiday gets its own 'Holiday' label instead of the generic 'Week Off'
+  // that paidOffDates (week-off + holiday + leave, all folded together for
+  // the pay math) would otherwise give it.
+  const holidayDates = useMemo(
+    () => holidayDatesInRange(holidays, employee?.gender ?? null),
+    [holidays, employee?.gender]
+  );
+
   // employeeId -> work_date -> shift_id, covering this employee's whole
   // employment history so it's valid for both the selected period's rows
   // and the lifetime rows below.
@@ -235,8 +244,10 @@ export default function MyPayrollPage() {
   // version of the same numbers — both read through lib/payrollDetail.ts.
   const dayRows: DayDetail[] = useMemo(
     () =>
-      employee ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, undefined, weeklyPattern) : [],
-    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern]
+      employee
+        ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, undefined, weeklyPattern, holidayDates)
+        : [],
+    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern, holidayDates]
   );
   // Company Week-offs / holidays only (no leave), across the whole employment
   // history — the pay math treats these as non-working days, exactly as the
@@ -282,10 +293,11 @@ export default function MyPayrollPage() {
             dailyShiftByDate,
             paidOffDates,
             undefined,
-            weeklyPattern
+            weeklyPattern,
+            holidayDates
           )
         : [],
-    [employee, shifts, lifetimeSummaries, lifetimeLogs, dailyShiftByDate, paidOffDates, weeklyPattern]
+    [employee, shifts, lifetimeSummaries, lifetimeLogs, dailyShiftByDate, paidOffDates, weeklyPattern, holidayDates]
   );
 
   // Prorates each day against the actual number of days in ITS OWN calendar
@@ -330,7 +342,7 @@ export default function MyPayrollPage() {
     const earlyDays = dayRows.filter(r => r.earlyMinutes > 0).length;
     const presentDays = dayRows.filter(r => r.checkIn).length;
     const absentDays = dayRows.filter(r => r.status === 'Absent').length;
-    const paidOffDays = dayRows.filter(r => r.status === 'Week Off').length;
+    const paidOffDays = dayRows.filter(r => r.status === 'Week Off' || r.status === 'Holiday').length;
     let baseEarning = 0;
     let overtimeEarning = 0;
     for (const r of dayRows) {
@@ -470,6 +482,8 @@ export default function MyPayrollPage() {
                         <td className="truncate px-0.5 py-0.5 font-medium">
                           {row.checkIn ? (
                             <span className="text-good-text">Present</span>
+                          ) : row.status === 'Holiday' ? (
+                            <span className="text-accent">Holiday</span>
                           ) : row.status === 'Week Off' ? (
                             <span className="text-accent">Week Off</span>
                           ) : row.status === 'Absent' ? (
