@@ -223,12 +223,20 @@ export function dedupePunches(sorted: AttendanceLog[]): AttendanceLog[] {
   return kept;
 }
 
-export function selectDayPunches(logs: AttendanceLog[]): { checkIn: AttendanceLog; checkOut: AttendanceLog | null } {
-  const sorted = dedupePunches(
+/** The deduped, chronologically sorted '0'/'1' punches for one day/window —
+ * shared by selectDayPunches() (picks the day's checkIn/checkOut off it) and
+ * pairedWorkedMinutes() (sums every in/out pair off the same list), so the
+ * two can never disagree about which punches exist. */
+function dedupedInOutPunches(logs: AttendanceLog[]): AttendanceLog[] {
+  return dedupePunches(
     logs
       .filter(l => l.punch_type !== '2' && l.punch_type !== '3')
       .sort((a, b) => a.punch_time.localeCompare(b.punch_time))
   );
+}
+
+export function selectDayPunches(logs: AttendanceLog[]): { checkIn: AttendanceLog; checkOut: AttendanceLog | null } {
+  const sorted = dedupedInOutPunches(logs);
   const checkIn = sorted.find(l => l.punch_type === '0') ?? sorted[0];
   const outCandidates = sorted.filter(l => l.punch_type === '1');
   const checkOut = outCandidates.length
@@ -237,6 +245,33 @@ export function selectDayPunches(logs: AttendanceLog[]): { checkIn: AttendanceLo
       ? sorted[sorted.length - 1]
       : null;
   return { checkIn, checkOut: checkOut !== checkIn ? checkOut : null };
+}
+
+/** Worked minutes for one day, summed across every check-in/check-out PAIR
+ * instead of spanned from the first punch to the last — so a break (punch
+ * out, then punch back in later on the same device used for the shift) isn't
+ * counted as time worked. Not the removed break-punch feature (dedicated
+ * Start/End Break punch types, undone in 20260904100000_remove_break_concept
+ * — this needs no new punch type, just pairs up the ordinary check-in/
+ * check-out punches restaurant/retail staff already tap for a lunch break.
+ *
+ * Only trusted by the caller when there's at least one real '1'-type punch
+ * to pair against (see calc_payroll_fields' mirror of this on the server) —
+ * a day with no properly-typed check-out at all can't be paired, so it falls
+ * back to the plain first-in/last-out span exactly as before. */
+export function pairedWorkedMinutes(logs: AttendanceLog[]): number {
+  const sorted = dedupedInOutPunches(logs);
+  let total = 0;
+  let openIn: AttendanceLog | null = null;
+  for (const p of sorted) {
+    if (p.punch_type === '0') {
+      if (!openIn) openIn = p;
+    } else if (openIn) {
+      total += (new Date(p.punch_time).getTime() - new Date(openIn.punch_time).getTime()) / 60000;
+      openIn = null;
+    }
+  }
+  return Math.round(total);
 }
 
 /** One calendar day's punches -> attendance state for that day. */
@@ -267,8 +302,15 @@ export function computeDayStatus(
 
   const shiftDurationMin =
     shiftEndMin > shiftStartMin ? shiftEndMin - shiftStartMin : 24 * 60 - shiftStartMin + shiftEndMin;
+  // Pair-summed (excludes a break) whenever there's a real check-out punch to
+  // pair against; a day whose only "out" is the sorted[]-fallback in
+  // selectDayPunches (no punch actually typed '1') can't be paired, so it
+  // falls back to the plain span exactly as before.
+  const hasRealCheckout = logs.some(l => l.punch_type === '1');
   const totalMinutes = hasOut
-    ? Math.round((new Date(checkOut!.punch_time).getTime() - new Date(checkIn.punch_time).getTime()) / 60000)
+    ? hasRealCheckout
+      ? pairedWorkedMinutes(logs)
+      : Math.round((new Date(checkOut!.punch_time).getTime() - new Date(checkIn.punch_time).getTime()) / 60000)
     : 0;
   const overtimeMinutes = totalMinutes > shiftDurationMin ? totalMinutes - shiftDurationMin : 0;
 
@@ -323,8 +365,11 @@ export function computeDayStatusForResolvedShift(logs: AttendanceLog[], resolved
   if (isWeekOff(resolved)) {
     const { checkIn, checkOut } = selectDayPunches(logs);
     const hasOut = !!checkOut;
+    const hasRealCheckout = logs.some(l => l.punch_type === '1');
     const totalMinutes = hasOut
-      ? Math.round((new Date(checkOut!.punch_time).getTime() - new Date(checkIn.punch_time).getTime()) / 60000)
+      ? hasRealCheckout
+        ? pairedWorkedMinutes(logs)
+        : Math.round((new Date(checkOut!.punch_time).getTime() - new Date(checkIn.punch_time).getTime()) / 60000)
       : 0;
     return {
       hasIn: true,
