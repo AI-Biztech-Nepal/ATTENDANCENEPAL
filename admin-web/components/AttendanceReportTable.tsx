@@ -68,6 +68,11 @@ type Row = {
    * back to the Shift column's generic "Week Off" name. Set for every row,
    * whether or not the day ended up punchless. */
   isHoliday: boolean;
+  /** Raw attendance_logs count for this employee/day — every punch, not
+   * reduced to Check-In/Check-Out like the rest of the row. 2 is the normal
+   * shape (one in, one out); anything higher is a day worth looking at
+   * (a break taken by punching out and back in, or a device double-tap). */
+  punchCount: number;
   lateMinutes: number;
   earlyArrivalMinutes: number;
   earlyMinutes: number;
@@ -550,6 +555,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             device: deviceFor(summary.device_id, dayLogs[0]),
             deviceId: summary.device_id ?? null,
             isHoliday,
+            punchCount: dayLogs.length,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -579,6 +585,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             device: punchSource(dayLogs[0]),
             deviceId: null,
             isHoliday,
+            punchCount: dayLogs.length,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -617,6 +624,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             device: deleted ? 'Deleted by admin' : 'N/A',
             deviceId: null,
             isHoliday,
+            punchCount: dayLogs.length,
             shiftLabel,
             shiftName,
             shiftTime,
@@ -991,6 +999,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       'Shift',
       'Check-In',
       'Check-Out',
+      'Punches',
       'Late In (min)',
       'Early In (min)',
       'Early Out (min)',
@@ -1008,6 +1017,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       r.shiftLabel,
       r.checkIn ? new Date(r.checkIn).toLocaleTimeString([], { hour12: false }) : '',
       r.checkOut ? new Date(r.checkOut).toLocaleTimeString([], { hour12: false }) : '',
+      r.punchCount || '',
       r.lateMinutes || '',
       r.earlyArrivalMinutes || '',
       r.earlyMinutes || '',
@@ -1189,6 +1199,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               <th className="w-px px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Shift</th>
               <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Check-In</th>
               <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Check-Out</th>
+              <th className="w-px whitespace-nowrap px-1.5 py-1.5 text-center font-semibold print:border print:border-slate-400 print:px-1 print:py-1" title="Raw punches this day — 2 is normal (one in, one out); more is worth a look (a break, or a device double-tap)">Punches</th>
               <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Late/Early</th>
               <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Work Hours</th>
               <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Overtime</th>
@@ -1261,6 +1272,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                     </EditablePunch>
                   )}
                   {change && fmtPunch(saved.checkOut) !== fmtPunch(r.checkOut) && <WasValue>{fmtPunch(saved.checkOut)}</WasValue>}
+                </td>
+                <td className={`w-px whitespace-nowrap px-1.5 py-1 text-center tabular-nums print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${r.punchCount > 2 ? 'font-semibold text-warning-text' : 'text-slate-600'}`}>
+                  {r.punchCount || '–'}
                 </td>
                 <td className="w-px whitespace-nowrap px-1.5 py-1 text-[10px] print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
                   <LateEarlyCell row={r} />
