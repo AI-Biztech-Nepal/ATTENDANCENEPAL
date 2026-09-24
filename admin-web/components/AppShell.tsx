@@ -54,11 +54,17 @@ export default function AppShell({ title, children }: { title: string; children:
   }
 
   return (
-    <div className="flex h-screen overflow-hidden print:h-auto print:overflow-visible">
+    // `print:block` on both wrappers is what stops printed reports losing their
+    // last records: Chrome clips a table that spans a page break inside a
+    // display:flex ancestor (the rows after the break are cut off mid-row and
+    // the TOTAL row never prints). Plain block flow paginates normally, and
+    // the layout is otherwise identical on paper — the sidebar/top bar that
+    // needed the flex row are print:hidden anyway.
+    <div className="flex h-screen overflow-hidden print:block print:h-auto print:overflow-visible">
       <div className="print:hidden">
         <Sidebar role={role} drawerOpen={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)} />
       </div>
-      <div className="flex flex-1 flex-col overflow-hidden print:overflow-visible">
+      <div className="flex flex-1 flex-col overflow-hidden print:block print:overflow-visible">
         <div className="print:hidden">
           <TopBar title={title} onOpenMenu={() => setDrawerOpen(true)} adminName={adminName} role={role} />
         </div>
