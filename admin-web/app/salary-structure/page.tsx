@@ -170,8 +170,13 @@ export default function SalaryStructurePage() {
   const showSsfEmployer = reportCols.ssfEmployer;
   const showSsfEmployee = reportCols.ssfEmployee;
   const effectiveOvertime = showOvertime ? overtime : 0;
+  // SSF by Employer appears twice — once here, right after Allowance (at the
+  // admin's request, to match how they read the figure before Gross), and
+  // again in its usual spot after Gross. Both read the same ssfAmt/rate, so
+  // they always agree; the toggle in the columns menu shows or hides both
+  // together. Counted twice in structureColCount below.
   const structureColCount =
-    6 + (showPf ? 1 : 0) + (showSsfEmployer ? 1 : 0) + (showSsfEmployee ? 1 : 0) + (showOvertime ? 1 : 0);
+    6 + (showPf ? 1 : 0) + (showSsfEmployer ? 2 : 0) + (showSsfEmployee ? 1 : 0) + (showOvertime ? 1 : 0);
 
   /** Monthly figure -> the number shown, scaled to the active view. */
   function shown(n: number | null | undefined): string {
@@ -380,6 +385,7 @@ export default function SalaryStructurePage() {
       'Employee',
       `Basic${suffix}`,
       `Allowance${suffix}`,
+      ...(showSsfEmployer ? [`SSF by Employer (${ssf}%)${suffix}`] : []),
       `Gross${suffix}`,
       ...(showPf ? [`PF (${pf}%)${suffix}`] : []),
       ...(showSsfEmployer ? [`SSF by Employer (${ssf}%)${suffix}`] : []),
@@ -393,6 +399,7 @@ export default function SalaryStructurePage() {
       r.e.name,
       cell(r.basic),
       r.allowance ? cell(r.allowance) : '',
+      ...(showSsfEmployer ? [cell(r.ssfAmt)] : []),
       cell(r.gross),
       ...(showPf ? [cell(r.pfAmt)] : []),
       ...(showSsfEmployer ? [cell(r.ssfAmt)] : []),
@@ -405,9 +412,11 @@ export default function SalaryStructurePage() {
 
   // Plain function returning JSX, not a nested component — a `<RateHeader/>`
   // component type would get a fresh identity each render and remount its
-  // input, dropping focus mid-type.
+  // input, dropping focus mid-type. Right-aligned (items-end) so the label
+  // and rate input line up with the right-aligned figures in the column
+  // below, instead of sitting flush left over right-aligned numbers.
   const rateHeader = (label: string, value: string, onChange: (v: string) => void) => (
-    <div className="flex flex-col items-start gap-1">
+    <div className="flex flex-col items-end gap-1">
       <span>{label}</span>
       <span className="flex items-center gap-1 normal-case tracking-normal print:hidden">
         <input
@@ -559,28 +568,35 @@ export default function SalaryStructurePage() {
           <table className="w-full text-right text-[12.5px] tabular-nums">
             <thead>
               <tr className="sticky top-0 z-10 border-y border-slate-200 bg-slate-50 align-bottom text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
-                <th className="sticky left-0 z-20 w-16 whitespace-nowrap bg-slate-50 px-2.5 py-2 text-left">ID</th>
+                <th className="sticky left-0 z-20 w-16 whitespace-nowrap bg-slate-50 px-2.5 py-2 text-center">ID</th>
                 <th className="sticky left-16 z-20 whitespace-nowrap border-r border-slate-300 bg-slate-50 px-2.5 py-2 text-left shadow-[10px_0_10px_-6px_rgba(15,23,42,0.22)] print:shadow-none">
                   Employee
                 </th>
-                <th className="whitespace-nowrap px-2.5 py-2 text-left">Basic</th>
-                <th className="whitespace-nowrap px-2.5 py-2 text-left">Allowance</th>
-                <th className="whitespace-nowrap px-2.5 py-2 text-left">Gross</th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-right">Basic</th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-right">Allowance</th>
+                {/* SSF by Employer, repeated here right after Allowance (and
+                    again after Gross, its usual spot) — both read the same
+                    rate/amount and the columns menu shows or hides them
+                    together. */}
+                {showSsfEmployer && (
+                  <th className="whitespace-nowrap px-2.5 py-2 text-right">{rateHeader('SSF by Employer', ssfDraft, setSsfDraft)}</th>
+                )}
+                <th className="whitespace-nowrap px-2.5 py-2 text-right">Gross</th>
                 {showPf && (
-                  <th className="whitespace-nowrap px-2.5 py-2 text-left">{rateHeader('PF', pfDraft, setPfDraft)}</th>
+                  <th className="whitespace-nowrap px-2.5 py-2 text-right">{rateHeader('PF', pfDraft, setPfDraft)}</th>
                 )}
                 {showSsfEmployer && (
-                  <th className="whitespace-nowrap px-2.5 py-2 text-left">{rateHeader('SSF by Employer', ssfDraft, setSsfDraft)}</th>
+                  <th className="whitespace-nowrap px-2.5 py-2 text-right">{rateHeader('SSF by Employer', ssfDraft, setSsfDraft)}</th>
                 )}
                 {showSsfEmployee && (
-                  <th className="whitespace-nowrap px-2.5 py-2 text-left">{rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}</th>
+                  <th className="whitespace-nowrap px-2.5 py-2 text-right">{rateHeader('SSF by Employee', tdsDraft, setTdsDraft)}</th>
                 )}
                 {showOvertime && (
-                  <th className="whitespace-nowrap px-2.5 py-2 text-left">
+                  <th className="whitespace-nowrap px-2.5 py-2 text-right">
                     {rateHeader('Overtime', overtimeDraft, setOvertimeDraft)}
                   </th>
                 )}
-                <th className="whitespace-nowrap px-2.5 py-2 text-left">Net Payable</th>
+                <th className="whitespace-nowrap px-2.5 py-2 text-right">Net Payable</th>
               </tr>
             </thead>
             <tbody>
@@ -605,6 +621,7 @@ export default function SalaryStructurePage() {
                     </td>
                     {amountCell(e.id, 'salary', basic)}
                     {amountCell(e.id, 'allowance', allowance)}
+                    {showSsfEmployer && <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700">{shown(ssfAmt)}</td>}
                     <td className="whitespace-nowrap px-2.5 py-1.5 text-right font-medium tabular-nums text-ink">{shown(gross)}</td>
                     {showPf && <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700">{shown(pfAmt)}</td>}
                     {showSsfEmployer && <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700">{shown(ssfAmt)}</td>}
@@ -635,6 +652,7 @@ export default function SalaryStructurePage() {
                   </td>
                   <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.basic)}</td>
                   <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.allowance)}</td>
+                  {showSsfEmployer && <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.ssfAmt)}</td>}
                   <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.gross)}</td>
                   {showPf && <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.pfAmt)}</td>}
                   {showSsfEmployer && <td className="whitespace-nowrap px-2.5 py-2.5 text-right tabular-nums">{shown(totals.ssfAmt)}</td>}
@@ -656,6 +674,7 @@ export default function SalaryStructurePage() {
         / SSF by Employer / SSF by Employee{showOvertime && ' / Overtime'} are all company-wide rates. Per-day figures divide the
         monthly amount by the number of days in {period.label}. The monthly Payroll report reads these figures and is not edited
         there.
+        {showSsfEmployer && ' SSF by Employer is shown twice — before and after Gross — the same figure both times, counted once in Net Payable.'}
         {showOvertime &&
           ' The Overtime line is a flat allowance (% of Basic), not the real attendance-based overtime pay the Payroll report calculates from actual hours worked.'}
         {!showOvertime &&
