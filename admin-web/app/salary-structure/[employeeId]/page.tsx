@@ -69,23 +69,28 @@ function SalaryStructureEmployeeView() {
   const [config, setConfig] = useState({ weeklyOffDay: null as number | null, otHoursPerDay: 8, otMultiplier: 1.5 });
   const [loading, setLoading] = useState(true);
 
-  // Whether attendance-based overtime pay counts toward the adjustment — the
-  // company-wide "Overtime" switch in the Salary Structure column menu, kept
-  // live via the same `storage` event every other payroll surface listens to.
-  const [otOn, setOtOn] = useState(true);
+  // The Salary Structure column menu's switches — whether attendance-based
+  // overtime pay counts toward the adjustment below (otOn), and whether PF
+  // is actually deducted from Net Payable (showPf: a company with no PF
+  // scheme hides the column there AND must see the same Net Payable here,
+  // not a PF-deducted one this page alone forgot to gate). Kept live via the
+  // same `storage` event every other payroll surface listens to.
+  const [reportCols, setReportCols] = useState(DEFAULT_PAYROLL_REPORT_COLUMNS);
   useEffect(() => {
-    setOtOn(loadPayrollReportColumns().overtime);
+    setReportCols(loadPayrollReportColumns());
     function onStorage(e: StorageEvent) {
       if (e.key !== PAYROLL_REPORT_COLUMNS_KEY) return;
       try {
-        setOtOn(e.newValue ? normalizePayrollReportColumns(JSON.parse(e.newValue)).overtime : DEFAULT_PAYROLL_REPORT_COLUMNS.overtime);
+        setReportCols(e.newValue ? normalizePayrollReportColumns(JSON.parse(e.newValue)) : DEFAULT_PAYROLL_REPORT_COLUMNS);
       } catch {
-        setOtOn(DEFAULT_PAYROLL_REPORT_COLUMNS.overtime);
+        setReportCols(DEFAULT_PAYROLL_REPORT_COLUMNS);
       }
     }
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
+  const otOn = reportCols.overtime;
+  const showPf = reportCols.pf;
 
   // Attendance inputs for the period — same set the Payroll detail page
   // loads, used here only to derive the absence / late / overtime adjustment.
@@ -142,10 +147,16 @@ function SalaryStructureEmployeeView() {
 
   const { pf, ssf, tds, overtime } = rates;
   const { weeklyOffDay, otHoursPerDay, otMultiplier } = config;
+  // Matches Salary Structure's own effectivePf/effectiveOvertime: a rate
+  // whose column is toggled off there must also drop out of Net Payable
+  // here, not just this page's own copy of the column — the same employee
+  // should never show two different Net Payables on the two pages.
+  const effectivePf = showPf ? pf : 0;
+  const effectiveOvertime = otOn ? overtime : 0;
 
   const figures = useMemo(
-    () => computeSalaryFigures(employee?.salary ?? null, employee?.allowance ?? null, pf, ssf, tds, overtime),
-    [employee, pf, ssf, tds, overtime]
+    () => computeSalaryFigures(employee?.salary ?? null, employee?.allowance ?? null, effectivePf, ssf, tds, effectiveOvertime),
+    [employee, effectivePf, ssf, tds, effectiveOvertime]
   );
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {

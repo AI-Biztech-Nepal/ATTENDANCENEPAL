@@ -14,10 +14,14 @@ export type PayrollReportColumns = {
   totalHours: boolean;
   overtime: boolean;
   lateEarly: boolean;
-  // Contribution columns on the Salary Structure table. Hiding one takes it
-  // out of the table and its printed / Excel copy; it does NOT change Net
-  // Payable, which still deducts the amount. They exist for companies that
-  // run a rate at 0 and do not want a column of zeroes.
+  // Contribution columns on the Salary Structure table. `ssfEmployer` /
+  // `ssfEmployee` are display-only: hiding one takes it out of the table and
+  // its printed / Excel copy, but Net Payable still deducts the amount — for
+  // a company that runs the rate at 0 and doesn't want a column of zeroes.
+  // `pf` is NOT display-only, like `overtime`/`paidLeave` below: a company
+  // with no PF scheme turns this off and PF stops being deducted from Net
+  // Payable everywhere (Salary Structure, the employee breakdown page, the
+  // Payroll report) — not just hidden from view.
   pf: boolean;
   ssfEmployer: boolean;
   ssfEmployee: boolean;

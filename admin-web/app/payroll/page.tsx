@@ -622,7 +622,11 @@ export default function PayrollPage() {
     if (calculated == null) return null;
     return calculated + (overtimeSalary(row) ?? 0);
   }
+  // Off (a company with no PF scheme) means PF is out of Net Payable, not
+  // just off the printed table — matches computeSalaryFigures() on Salary
+  // Structure/effectivePf, which the same reasoning already applies to.
   function pfDeduction(row: Parameters<typeof netPayableBase>[0]): number | null {
+    if (!visibleCols.pf) return 0;
     const base = netPayableBase(row);
     return base == null ? null : Math.round((base * pfRate) / 100);
   }

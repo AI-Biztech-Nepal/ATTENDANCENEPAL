@@ -164,12 +164,14 @@ export default function SalaryStructurePage() {
   // is hidden here AND left out of Net Payable, matching the report's
   // "not shown means not counted" rule for overtime.
   const showOvertime = reportCols.overtime;
-  // PF / SSF hiding is display-only — Net Payable still deducts them, unlike
-  // Overtime, whose switch also takes the allowance out of the maths.
+  // SSF hiding is display-only — Net Payable still deducts it. PF's switch
+  // behaves like Overtime's: off takes PF out of Net Payable too, for a
+  // company with no PF scheme, not just off the printed table.
   const showPf = reportCols.pf;
   const showSsfEmployer = reportCols.ssfEmployer;
   const showSsfEmployee = reportCols.ssfEmployee;
   const effectiveOvertime = showOvertime ? overtime : 0;
+  const effectivePf = showPf ? pf : 0;
   // SSF by Employer appears twice — once here, right after Allowance (at the
   // admin's request, to match how they read the figure before Gross), and
   // again in its usual spot after Gross. Both read the same ssfAmt/rate, so
@@ -192,8 +194,8 @@ export default function SalaryStructurePage() {
           ? true
           : [e.name, e.designation, e.employee_code].filter(Boolean).some(v => (v as string).toLowerCase().includes(term))
       )
-      .map(e => ({ e, ...computeSalaryFigures(e.salary, e.allowance, pf, ssf, tds, effectiveOvertime) }));
-  }, [employees, search, pf, ssf, tds, effectiveOvertime]);
+      .map(e => ({ e, ...computeSalaryFigures(e.salary, e.allowance, effectivePf, ssf, tds, effectiveOvertime) }));
+  }, [employees, search, effectivePf, ssf, tds, effectiveOvertime]);
 
   type StructureRow = (typeof rows)[number];
 
@@ -453,7 +455,7 @@ export default function SalaryStructurePage() {
       onToggle={toggleReportCol}
       options={STRUCTURE_COLUMN_OPTIONS}
       title="Salary Structure columns"
-      description="Hides the column here and in the printed / Excel copy. Net Payable still deducts PF and SSF either way — hide them when a rate is 0 and the column is a row of zeroes. Overtime is the company-wide switch for overtime pay: turning it off drops the allowance from Net Payable and the Payroll report, and stops every employee's breakdown page counting attendance-based overtime."
+      description="Hides the column here and in the printed / Excel copy. SSF by Employer / SSF by Employee stay deducted from Net Payable either way — hide one when its rate is 0 and the column is a row of zeroes. PF and Overtime are different: turning PF off means the company has no PF scheme, so it drops out of Net Payable everywhere (Salary Structure, the employee breakdown page, the Payroll report), not just this table; Overtime's switch works the same way for its allowance."
     />
   ) : null;
 
@@ -669,12 +671,14 @@ export default function SalaryStructurePage() {
       </div>
 
       <p className="mt-3 text-xs text-slate-400">
-        Gross = Basic + Allowance{showSsfEmployer && ' + SSF by Employer'}. Net Payable = Basic + Allowance − PF − SSF by
-        Employer − SSF by Employee{showOvertime && ' + Overtime'} either way — SSF by Employer never reaches the employee, so
-        it doesn&apos;t change Net Payable just because it&apos;s folded into Gross. Click a Basic or Allowance figure to edit
-        it for that employee, or click a name to open that employee&apos;s full salary breakdown. PF / SSF by Employer / SSF by
-        Employee{showOvertime && ' / Overtime'} are all company-wide rates. Per-day figures divide the monthly amount by the
-        number of days in {period.label}. The monthly Payroll report reads these figures and is not edited there.
+        Gross = Basic + Allowance{showSsfEmployer && ' + SSF by Employer'}. Net Payable = Basic + Allowance{showPf && ' − PF'} −
+        SSF by Employer − SSF by Employee{showOvertime && ' + Overtime'} either way — SSF by Employer never reaches the
+        employee, so it doesn&apos;t change Net Payable just because it&apos;s folded into Gross. Click a Basic or Allowance
+        figure to edit it for that employee, or click a name to open that employee&apos;s full salary breakdown. PF / SSF by
+        Employer / SSF by Employee{showOvertime && ' / Overtime'} are all company-wide rates. Per-day figures divide the
+        monthly amount by the number of days in {period.label}. The monthly Payroll report reads these figures and is not
+        edited there.
+        {!showPf && ' PF is currently hidden (columns cog) — unlike SSF, it is left out of Net Payable entirely, not just the table, for a company with no PF scheme.'}
         {showSsfEmployer && ' SSF by Employer is shown twice — once folded into Gross, and again in its own column — the same figure both times.'}
         {showOvertime &&
           ' The Overtime line is a flat allowance (% of Basic), not the real attendance-based overtime pay the Payroll report calculates from actual hours worked.'}
