@@ -790,7 +790,13 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       setFixForm({
         checkIn: r.checkIn ? punchHhmm(r.checkIn) : r.shiftStart ?? '09:00',
         checkOut: r.checkOut ? punchHhmm(r.checkOut) : r.shiftEnd ?? '17:00',
-        checkOutNextDay: r.checkOut ? nepalDateKey(r.checkOut) > r.date : overnight,
+        // Trust the shift's own scheduled hours, not r.checkOut's stored
+        // date — a row already corrupted by a past chaining bug (checkout
+        // landed on the next calendar day despite a same-day shift) would
+        // otherwise pre-check this, and re-saving without noticing pushes
+        // the checkout out by another day on top of whatever was already
+        // wrong, re-locking it (manually_corrected) as even more broken.
+        checkOutNextDay: overnight,
         reason: '',
         deviceId: r.deviceId ?? '',
       });
@@ -832,6 +838,17 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           ? 'Check-out must be after check-in.'
           : 'Check-out must be after check-in — tick "Next day" if they left the following morning.'
       );
+      return;
+    }
+    // No single calendar day can hold more than 24h of work — a hard
+    // physical ceiling, not a shift-specific one. Catches exactly the
+    // self-reinforcing "Next day" pre-fill bug this dialog used to have
+    // (see openCorrection()): reopening an already-corrupted row and
+    // re-saving without noticing the box was still checked used to push
+    // the checkout out by another day on top of whatever was already
+    // wrong, silently, since nothing here checked the result was possible.
+    if (new Date(outTs).getTime() - new Date(inTs).getTime() > 24 * 60 * 60 * 1000) {
+      setFixError('Check-out is more than 24 hours after check-in — that can\'t be right for a single day. Check the date and the "Next day" box.');
       return;
     }
     stageChange({ kind: 'edit', row: fixRow, form: fixForm, inTs, outTs });
