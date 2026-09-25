@@ -492,23 +492,56 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
     const today = nepalTodayIso();
 
+    // logs and summaries each get filtered down to one employee (and, for
+    // logs, further bucketed by day) once per employee below. Re-scanning
+    // the full logs/summaries arrays to do that (the old `logs.filter(l =>
+    // l.employee_id === emp.id)` / `summaries.find(...)` approach) is
+    // O(employees × logs) and O(days × employees × summaries) respectively —
+    // for "All Employees" over a month that's real, felt lag. Grouping both
+    // into per-employee maps in one linear pass each turns every subsequent
+    // lookup into an O(1) Map.get(), independent of employee/day count.
+    const daySet = new Set(days);
+    const logsByEmployee = new Map<string, AttendanceLog[]>();
+    for (const l of logs) {
+      const arr = logsByEmployee.get(l.employee_id);
+      if (arr) arr.push(l);
+      else logsByEmployee.set(l.employee_id, [l]);
+    }
+    const summariesByEmployee = new Map<string, PayrollSummary[]>();
+    for (const s of summaries) {
+      const arr = summariesByEmployee.get(s.employee_id);
+      if (arr) arr.push(s);
+      else summariesByEmployee.set(s.employee_id, [s]);
+    }
+
     // Per-employee: raw same-date bucketing, corrected for any day whose
     // resolved shift crosses midnight (Night Duty/Day & Night Duty) — done
     // once per employee up front (not inside the day×employee loop below)
     // since applyOvernightShiftCorrection needs a whole date range at once.
     const logsByEmployeeDay = new Map<string, Map<string, AttendanceLog[]>>();
+    const summaryByEmployeeDay = new Map<string, Map<string, PayrollSummary>>();
     for (const emp of scopedEmployees) {
-      const empLogs = logs.filter(l => l.employee_id === emp.id);
+      const empLogs = logsByEmployee.get(emp.id) ?? [];
       const byDate = new Map<string, AttendanceLog[]>();
-      for (const day of days) {
-        const dayLogs = empLogs.filter(l => nepalDateKey(l.punch_time) === day);
-        if (dayLogs.length > 0) byDate.set(day, dayLogs);
+      for (const l of empLogs) {
+        // Same range the query already scoped to, but re-checked here since
+        // nepalDateKey (Nepal-local) can land just outside the UTC-padded
+        // [from, to] window the query used — only days actually shown here.
+        const day = nepalDateKey(l.punch_time);
+        if (!daySet.has(day)) continue;
+        const arr = byDate.get(day);
+        if (arr) arr.push(l);
+        else byDate.set(day, [l]);
       }
       applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern, days);
+      const empSummaries = summariesByEmployee.get(emp.id) ?? [];
       // A punch another day's saved row already owns (e.g. a Week Off duty's
       // next-morning check-out) isn't this day's too.
-      dropPunchesClaimedBySummaries(byDate, summaries.filter(s => s.employee_id === emp.id), today);
+      dropPunchesClaimedBySummaries(byDate, empSummaries, today);
       logsByEmployeeDay.set(emp.id, byDate);
+      const summaryByDate = new Map<string, PayrollSummary>();
+      for (const s of empSummaries) summaryByDate.set(s.work_date, s);
+      summaryByEmployeeDay.set(emp.id, summaryByDate);
     }
 
     const out: Row[] = [];
@@ -522,7 +555,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         // would freeze today's attendance at whatever it looked like the
         // moment it was last computed. Always compute today live instead;
         // past days' summaries are final and safe to trust.
-        const rawSummary = summaries.find(s => s.employee_id === emp.id && s.work_date === day);
+        const rawSummary = summaryByEmployeeDay.get(emp.id)?.get(day);
         // Today normally recomputes live (its nightly summary is stale — more
         // punches can still land), but a manual admin correction is a
         // deliberate override and must stick, today included.
@@ -1168,7 +1201,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             {recalculating ? `Recalculating ${recalcProgress?.done ?? 0}/${recalcProgress?.total ?? 0}…` : 'Recalculate'}
           </button>
 
-          <TableExportBar onExportCsv={exportCsv} />
+          <TableExportBar onExportCsv={exportCsv} disabled={loading || recalculating} />
         </div>
       </div>
 
