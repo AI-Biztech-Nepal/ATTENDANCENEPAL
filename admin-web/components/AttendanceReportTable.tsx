@@ -1241,7 +1241,17 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </tr>
           </thead>
           <tbody>
-            {rows.map((saved, i) => {
+            {/* While a fetch or Recalculate is in flight, `rows` is still
+                last cycle's complete, perfectly plausible-looking data —
+                nothing here visually signals it's stale. That's not just a
+                click-the-Print-button race (TableExportBar's disabled prop
+                already covers that): the browser's own Ctrl+P / right-click
+                Print bypasses this component entirely and just captures
+                whatever's on screen. The only fix that closes every trigger
+                is to make sure nothing stale is ever on screen to capture —
+                so rows/totals are replaced with an explicit loading
+                placeholder for the duration, not just guarded at the button. */}
+            {!loading && !recalculating && rows.map((saved, i) => {
               // `r` is the row as it reads with its staged change (if any);
               // `saved` is what's in the database, shown struck through.
               const r = shownRows[i];
@@ -1350,15 +1360,19 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               </tr>
               );
             })}
-            {rows.length === 0 && (
+            {(loading || recalculating || rows.length === 0) && (
               <tr>
                 <td colSpan={12} className="px-4 py-6 text-center text-slate-400">
-                  {loading ? 'Loading…' : 'No records in this range.'}
+                  {loading
+                    ? 'Loading…'
+                    : recalculating
+                      ? `Recalculating ${recalcProgress?.done ?? 0}/${recalcProgress?.total ?? 0}…`
+                      : 'No records in this range.'}
                 </td>
               </tr>
             )}
           </tbody>
-          {rows.length > 0 && (
+          {!loading && !recalculating && rows.length > 0 && (
             <tfoot>
               <tr className="sticky bottom-0 border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-ink print:static print:bg-white print:text-[10px]">
                 <td colSpan={5} className="whitespace-nowrap px-2 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 print:border print:border-slate-400 print:px-2 print:text-[10px] print:text-ink">
