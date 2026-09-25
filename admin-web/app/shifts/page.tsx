@@ -252,7 +252,7 @@ function ShiftsView() {
             }`}
           >
             <span aria-hidden>📅</span>
-            Roster
+            Duty Roster
           </button>
         </div>
         <div className="flex items-center gap-3">
@@ -286,7 +286,7 @@ function ShiftsView() {
                   rosterTab === tab ? 'bg-accent text-white' : 'text-slate-500 hover:bg-slate-50'
                 }`}
               >
-                {tab === 'weekly' ? 'Weekly Pattern' : 'Monthly Roster'}
+                {tab === 'weekly' ? 'Weekly Roster' : 'Monthly Roster'}
               </button>
             ))}
           </div>

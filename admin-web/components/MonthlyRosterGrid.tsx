@@ -6,7 +6,8 @@ import Avatar from '@/components/Avatar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import type { Employee, Shift } from '@/lib/types';
+import { holidayDatesByGender } from '@/lib/weekOff';
+import type { CompanyHoliday, Employee, Shift } from '@/lib/types';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** Two sentinel cell values, distinct from any real shift_id: "no row for
@@ -39,6 +40,7 @@ export default function MonthlyRosterGrid() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [rosterRows, setRosterRows] = useState<RosterRow[]>([]);
   const [patternRows, setPatternRows] = useState<PatternRow[]>([]);
+  const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [loading, setLoading] = useState(true);
   // "employeeId|date" -> a real shift_id, WEEK_OFF_VALUE, or UNSET — staged
   // here until Save is clicked, not written on every pick.
@@ -56,6 +58,10 @@ export default function MonthlyRosterGrid() {
   const templateShifts = useMemo(() => shifts.filter(s => s.employee_id === null), [shifts]);
   const shiftById = useMemo(() => new Map(templateShifts.map(s => [s.id, s])), [templateShifts]);
   const today = todayIso();
+  // Gender-scoped holidays (e.g. Teej) count only for the employees they
+  // cover — same per-gender lookup the Attendance Report uses.
+  const holidayDatesFor = useMemo(() => holidayDatesByGender(holidays), [holidays]);
+  const holidayNameByDate = useMemo(() => new Map(holidays.map(h => [h.holiday_date, h.name])), [holidays]);
 
   const copyTargetMonth = useMemo(() => (copyTargetAnchor ? buildMonth(system, copyTargetAnchor) : null), [system, copyTargetAnchor]);
   const copyTargetIsSameMonth = useMemo(
@@ -81,11 +87,13 @@ export default function MonthlyRosterGrid() {
       supabase.from('shifts').select('*'),
       supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end),
       supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id'),
-    ]).then(([empRes, shiftsRes, rosterRes, patternRes]) => {
+      supabase.from('company_holidays').select('*').gte('holiday_date', start).lte('holiday_date', end),
+    ]).then(([empRes, shiftsRes, rosterRes, patternRes, holidaysRes]) => {
       setEmployees((empRes.data ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
       setShifts(shiftsRes.data ?? []);
       setRosterRows(rosterRes.data ?? []);
       setPatternRows(patternRes.data ?? []);
+      setHolidays(holidaysRes.data ?? []);
       setLoading(false);
     });
   }
@@ -117,15 +125,35 @@ export default function MonthlyRosterGrid() {
     return row.shift_id === null ? WEEK_OFF_VALUE : row.shift_id;
   }
 
+  // Whether this date is a company holiday for this employee specifically
+  // (gender-scoped — e.g. Teej only covers female employees).
+  function isHoliday(employeeId: string, date: string): boolean {
+    const emp = employees.find(e => e.id === employeeId);
+    return holidayDatesFor(emp?.gender).has(date);
+  }
+
   // What the cell actually shows: the exact-date pick if there is one,
-  // otherwise the Weekly Pattern's pick for that weekday — mirrors
-  // resolveShiftForDate()'s own priority, so this grid never disagrees with
-  // what attendance/payroll will actually use for the day.
+  // else the Weekly Pattern's pick for that weekday, else a company holiday
+  // reads as Week Off — mirrors resolveShiftForDate()'s own priority, so
+  // this grid never disagrees with what attendance/payroll will actually
+  // use for the day.
   function currentValue(employeeId: string, date: string): string {
     const explicit = explicitValue(employeeId, date);
     if (explicit !== UNSET) return explicit;
     const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
-    return patternValue(employeeId, weekday);
+    const pattern = patternValue(employeeId, weekday);
+    if (pattern !== UNSET) return pattern;
+    return isHoliday(employeeId, date) ? WEEK_OFF_VALUE : UNSET;
+  }
+
+  // True only when a blank cell's Week Off comes from a company holiday
+  // rather than an actual Week Off pick — shown as "Holiday" instead, in its
+  // own colour, so it reads differently from a real day off.
+  function isHolidayFallback(employeeId: string, date: string): boolean {
+    if (explicitValue(employeeId, date) !== UNSET) return false;
+    const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+    if (patternValue(employeeId, weekday) !== UNSET) return false;
+    return isHoliday(employeeId, date);
   }
 
   // True when what's shown came from the Weekly Pattern, not a pick made for
@@ -236,18 +264,28 @@ export default function MonthlyRosterGrid() {
 
   // `inherited` gives a day pulled from the Weekly Pattern a lighter, dashed
   // border than one explicitly picked for this exact date, so it's clear at
-  // a glance which days are a real employee_daily_shifts row.
-  function cellTone(value: string, dirty: boolean, inherited: boolean) {
+  // a glance which days are a real employee_daily_shifts row. `holiday`
+  // colours a blank-and-nothing-inherited cell as a company holiday instead
+  // of an ordinary Week Off; `onHoliday` rings a cell that's ALSO a holiday
+  // even though the employee has a real shift that day (rostered to work
+  // through it), so that's visible without hiding the shift itself.
+  function cellTone(value: string, dirty: boolean, inherited: boolean, holiday: boolean, onHoliday: boolean) {
     if (dirty) return 'border-accent bg-accent/10 text-ink font-medium';
+    if (holiday) return 'border-dashed border-purple-300 bg-purple-50 text-purple-700';
+    const ring = onHoliday ? ' ring-1 ring-inset ring-purple-300' : '';
     if (value === WEEK_OFF_VALUE) {
-      return inherited
-        ? 'border-dashed border-warning/40 bg-warning-bg/50 text-warning-text'
-        : 'border-warning/30 bg-warning-bg text-warning-text font-semibold';
+      return (
+        (inherited
+          ? 'border-dashed border-warning/40 bg-warning-bg/50 text-warning-text'
+          : 'border-warning/30 bg-warning-bg text-warning-text font-semibold') + ring
+      );
     }
-    if (value === UNSET) return 'border-slate-200 text-slate-400';
-    return inherited
-      ? 'border-dashed border-accent/30 bg-accent/5 text-slate-600'
-      : 'border-accent/30 bg-accent/5 text-ink font-medium';
+    if (value === UNSET) return 'border-slate-200 text-slate-400' + ring;
+    return (
+      (inherited
+        ? 'border-dashed border-accent/30 bg-accent/5 text-slate-600'
+        : 'border-accent/30 bg-accent/5 text-ink font-medium') + ring
+    );
   }
 
   return (
@@ -340,12 +378,25 @@ export default function MonthlyRosterGrid() {
               <thead>
                 <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 font-medium">Employee</th>
-                  {monthCells.map(cell => (
-                    <th key={cell.adKey} className={`whitespace-nowrap px-1 py-2.5 text-center font-medium ${cell.adKey === today ? 'bg-accent/10 text-accent' : ''}`}>
-                      {WEEKDAY_LABELS[new Date(cell.adKey + 'T00:00:00Z').getUTCDay()]}
-                      <div className="text-[11px] font-normal normal-case text-slate-400">{cell.displayDay}</div>
-                    </th>
-                  ))}
+                  {monthCells.map(cell => {
+                    // Company-wide holidays only (no gender filter) for the
+                    // shared header tint — a gender-scoped one (e.g. Teej)
+                    // still shows correctly per employee in each cell below.
+                    const holidayName = holidayDatesFor(null).has(cell.adKey) ? holidayNameByDate.get(cell.adKey) : undefined;
+                    return (
+                      <th
+                        key={cell.adKey}
+                        title={holidayName}
+                        className={`whitespace-nowrap px-1 py-2.5 text-center font-medium ${
+                          holidayName ? 'bg-purple-50 text-purple-700' : cell.adKey === today ? 'bg-accent/10 text-accent' : ''
+                        }`}
+                      >
+                        {WEEKDAY_LABELS[new Date(cell.adKey + 'T00:00:00Z').getUTCDay()]}
+                        <div className="text-[11px] font-normal normal-case text-slate-400">{cell.displayDay}</div>
+                        {holidayName && <div className="max-w-[5.5rem] truncate text-[9px] font-semibold normal-case text-purple-600">{holidayName}</div>}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -363,27 +414,39 @@ export default function MonthlyRosterGrid() {
                         const value = currentValue(emp.id, date);
                         const dirty = `${emp.id}|${date}` in pending;
                         const inherited = !dirty && isInherited(emp.id, date);
+                        const holidayFallback = !dirty && isHolidayFallback(emp.id, date);
+                        const onHoliday = isHoliday(emp.id, date);
+                        const holidayName = holidayNameByDate.get(date);
                         const shiftTitle = shiftById.get(value)
                           ? `${shiftById.get(value)!.name} (${shiftById.get(value)!.start_time.slice(0, 5)}–${shiftById
                               .get(value)!
                               .end_time.slice(0, 5)})`
                           : value === WEEK_OFF_VALUE
-                            ? 'Week Off'
+                            ? holidayFallback
+                              ? (holidayName ?? 'Company holiday')
+                              : 'Week Off'
                             : undefined;
+                        const title = onHoliday && !holidayFallback && shiftTitle
+                          ? `${shiftTitle} — rostered to work through ${holidayName ?? 'a company holiday'}`
+                          : inherited && shiftTitle
+                            ? `${shiftTitle} — from the Weekly Pattern`
+                            : shiftTitle;
                         return (
                           <td key={date} className={`px-0.5 py-1.5 text-center ${date === today ? 'bg-accent/5' : rowBg}`}>
                             <select
                               value={value}
                               onChange={e => setCell(emp.id, date, e.target.value)}
-                              title={inherited && shiftTitle ? `${shiftTitle} — from the Weekly Pattern` : shiftTitle}
+                              title={title}
                               className={`w-24 rounded-md border px-1 py-1 text-[11px] shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50 ${cellTone(
                                 value,
                                 dirty,
-                                inherited
+                                inherited,
+                                holidayFallback,
+                                onHoliday && !holidayFallback
                               )}`}
                             >
                               <option value={UNSET}>—</option>
-                              <option value={WEEK_OFF_VALUE}>Week Off</option>
+                              <option value={WEEK_OFF_VALUE}>{holidayFallback ? 'Holiday' : 'Week Off'}</option>
                               {templateShifts.map(s => (
                                 <option key={s.id} value={s.id}>
                                   {s.name} {s.start_time.slice(0, 2)}-{s.end_time.slice(0, 2)}
@@ -398,6 +461,10 @@ export default function MonthlyRosterGrid() {
                 })}
               </tbody>
             </table>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
+            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-slate-300" /> Dashed = inherited from the Weekly Pattern</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-purple-300 bg-purple-50" /> Company holiday</span>
           </div>
           </>
         )}
