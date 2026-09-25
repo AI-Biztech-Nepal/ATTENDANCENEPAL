@@ -19,12 +19,13 @@ export const runtime = 'nodejs';
 // today may show a small number of "late" false positives here that its
 // real dashboard would correctly exclude. Nothing here is writable — no
 // action taken on this page can affect the real company's data.
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const result = await requireSuperadmin(req);
   if ('response' in result) return result.response;
   const { admin } = result;
+  const { id: companyId } = await params;
 
-  const { data: company } = await admin.from('companies').select('id, name').eq('id', params.id).maybeSingle();
+  const { data: company } = await admin.from('companies').select('id, name').eq('id', companyId).maybeSingle();
   if (!company) {
     return NextResponse.json({ error: 'Company not found.' }, { status: 404 });
   }
@@ -34,10 +35,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   since.setUTCDate(since.getUTCDate() - 7);
 
   const [employeesRes, shiftsRes, logsRes, leaveRes] = await Promise.all([
-    admin.from('employees').select('*').eq('company_id', params.id),
-    admin.from('shifts').select('*').eq('company_id', params.id),
-    admin.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).eq('company_id', params.id).gte('punch_time', since.toISOString()).order('punch_time', { ascending: false }),
-    admin.from('leave_requests').select('employee_id').eq('company_id', params.id).eq('status', 'approved').lte('start_date', today).gte('end_date', today),
+    admin.from('employees').select('*').eq('company_id', companyId),
+    admin.from('shifts').select('*').eq('company_id', companyId),
+    admin.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).eq('company_id', companyId).gte('punch_time', since.toISOString()).order('punch_time', { ascending: false }),
+    admin.from('leave_requests').select('employee_id').eq('company_id', companyId).eq('status', 'approved').lte('start_date', today).gte('end_date', today),
   ]);
 
   const employees = (employeesRes.data ?? []) as Employee[];

@@ -12,20 +12,21 @@ export const runtime = 'nodejs';
 // see superadmin_delete_company() in
 // 20260827100000_superadmin_company_status_and_delete.sql for why this is a
 // single DB transaction rather than a series of client-side deletes).
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const result = await requireSuperadmin(req);
   if ('response' in result) return result.response;
   const { admin } = result;
+  const { id: companyId } = await params;
 
   const [companyRes, profilesRes, employeesRes, devicesRes, syncEventsRes] = await Promise.all([
-    admin.from('companies').select('id, name, created_at, status, suspended_at').eq('id', params.id).maybeSingle(),
-    admin.from('profiles').select('id, full_name, role, employee_id').eq('company_id', params.id),
-    admin.from('employees').select('id, employee_code, name, department, designation, status, date_of_joining').eq('company_id', params.id),
-    admin.from('devices').select('id, name, ip_address, status, last_sync').eq('company_id', params.id).order('name'),
+    admin.from('companies').select('id, name, created_at, status, suspended_at').eq('id', companyId).maybeSingle(),
+    admin.from('profiles').select('id, full_name, role, employee_id').eq('company_id', companyId),
+    admin.from('employees').select('id, employee_code, name, department, designation, status, date_of_joining').eq('company_id', companyId),
+    admin.from('devices').select('id, name, ip_address, status, last_sync').eq('company_id', companyId).order('name'),
     admin
       .from('device_sync_events')
       .select('id, device_id, sync_type, status, requested_at, completed_at, error')
-      .eq('company_id', params.id)
+      .eq('company_id', companyId)
       .order('requested_at', { ascending: false })
       .limit(100),
   ]);
@@ -112,10 +113,11 @@ const SUSPEND_BAN_DURATION = '876000h';
 // through RLS/my_company_id() (that function gates the company's own row
 // too, so a suspended company's admin couldn't even read back *why* they
 // were locked out).
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const result = await requireSuperadmin(req);
   if ('response' in result) return result.response;
   const { admin } = result;
+  const { id: companyId } = await params;
 
   const body = await req.json().catch(() => ({}));
   const action = body?.action;
@@ -123,12 +125,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: 'action must be "suspend" or "reactivate".' }, { status: 400 });
   }
 
-  const { data: company } = await admin.from('companies').select('id, name').eq('id', params.id).maybeSingle();
+  const { data: company } = await admin.from('companies').select('id, name').eq('id', companyId).maybeSingle();
   if (!company) {
     return NextResponse.json({ error: 'Company not found.' }, { status: 404 });
   }
 
-  const { data: profiles, error: profilesError } = await admin.from('profiles').select('id').eq('company_id', params.id);
+  const { data: profiles, error: profilesError } = await admin.from('profiles').select('id').eq('company_id', companyId);
   if (profilesError) {
     return NextResponse.json({ error: profilesError.message }, { status: 500 });
   }
@@ -144,7 +146,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     .update(
       action === 'suspend' ? { status: 'suspended', suspended_at: new Date().toISOString() } : { status: 'active', suspended_at: null }
     )
-    .eq('id', params.id);
+    .eq('id', companyId);
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
@@ -164,15 +166,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 // does (a client-only check is trivially bypassed by anyone driving the API
 // directly), on top of the client-side "type the company name" step the
 // superadmin panel itself requires before ever sending this request.
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const result = await requireSuperadmin(req);
   if ('response' in result) return result.response;
   const { admin } = result;
+  const { id: companyId } = await params;
 
   const body = await req.json().catch(() => ({}));
   const confirmName = typeof body?.confirmName === 'string' ? body.confirmName : '';
 
-  const { data: company } = await admin.from('companies').select('id, name').eq('id', params.id).maybeSingle();
+  const { data: company } = await admin.from('companies').select('id, name').eq('id', companyId).maybeSingle();
   if (!company) {
     return NextResponse.json({ error: 'Company not found.' }, { status: 404 });
   }
@@ -182,7 +185,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
   // Collected BEFORE the data cascade — once it commits, these profile rows
   // (and therefore the join used to look this up) are gone.
-  const { data: profiles, error: profilesError } = await admin.from('profiles').select('id').eq('company_id', params.id);
+  const { data: profiles, error: profilesError } = await admin.from('profiles').select('id').eq('company_id', companyId);
   if (profilesError) {
     return NextResponse.json({ error: profilesError.message }, { status: 500 });
   }
@@ -192,7 +195,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   // everything company-scoped, and the company row itself. Either all of it
   // goes or none of it does — see the migration for the full table list and
   // ordering.
-  const { error: rpcError } = await admin.rpc('superadmin_delete_company', { target_company_id: params.id });
+  const { error: rpcError } = await admin.rpc('superadmin_delete_company', { target_company_id: companyId });
   if (rpcError) {
     return NextResponse.json({ error: `Delete failed, nothing was removed: ${rpcError.message}` }, { status: 500 });
   }
