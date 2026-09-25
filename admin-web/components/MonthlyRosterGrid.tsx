@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/Avatar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, Shift } from '@/lib/types';
@@ -18,6 +19,7 @@ const UNSET = 'unset';
 const WEEK_OFF_VALUE = 'week-off';
 
 type RosterRow = { employee_id: string; work_date: string; shift_id: string | null };
+type PatternRow = { employee_id: string; weekday: number; shift_id: string | null };
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -27,11 +29,13 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
  * rotating crew, etc.) without paging through 4-5 separate weeks. */
 export default function MonthlyRosterGrid() {
   const { system } = useCalendarSystem();
+  const confirm = useConfirm();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState(todayAnchor);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [rosterRows, setRosterRows] = useState<RosterRow[]>([]);
+  const [patternRows, setPatternRows] = useState<PatternRow[]>([]);
   const [loading, setLoading] = useState(true);
   // "employeeId|date" -> a real shift_id, WEEK_OFF_VALUE, or UNSET — staged
   // here until Save is clicked, not written on every pick.
@@ -70,10 +74,12 @@ export default function MonthlyRosterGrid() {
       supabase.from('employees').select('*').eq('status', 'active'),
       supabase.from('shifts').select('*'),
       supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end),
-    ]).then(([empRes, shiftsRes, rosterRes]) => {
+      supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id'),
+    ]).then(([empRes, shiftsRes, rosterRes, patternRes]) => {
       setEmployees((empRes.data ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
       setShifts(shiftsRes.data ?? []);
       setRosterRows(rosterRes.data ?? []);
+      setPatternRows(patternRes.data ?? []);
       setLoading(false);
     });
   }
@@ -95,6 +101,58 @@ export default function MonthlyRosterGrid() {
 
   function setCell(employeeId: string, date: string, value: string) {
     setPending(p => ({ ...p, [`${employeeId}|${date}`]: value }));
+  }
+
+  // The Recurring Weekly Pattern's pick for this employee on this weekday, in
+  // the same UNSET / WEEK_OFF_VALUE / shift_id shape currentValue() uses —
+  // read-only here, this grid never writes employee_weekly_pattern.
+  function patternValue(employeeId: string, weekday: number): string {
+    const row = patternRows.find(r => r.employee_id === employeeId && r.weekday === weekday);
+    if (!row) return UNSET;
+    return row.shift_id === null ? WEEK_OFF_VALUE : row.shift_id;
+  }
+
+  // How many blank cells in the visible month a Fill would actually touch —
+  // disables the button (and lets its confirm text say something concrete)
+  // when there's nothing to do, same idea as copyCandidateCount above.
+  const fillCandidateCount = useMemo(() => {
+    let n = 0;
+    for (const emp of employees) {
+      for (const date of dates) {
+        if (currentValue(emp.id, date) !== UNSET) continue;
+        const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+        if (patternValue(emp.id, weekday) !== UNSET) n++;
+      }
+    }
+    return n;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees, dates, rosterRows, patternRows, pending]);
+
+  // Seeds this month's blanks from the Recurring Weekly Pattern — the normal
+  // workflow (build the weekly pattern once, then clone it onto each real
+  // month) instead of the all-or-nothing Weekly/Monthly Roster switch above.
+  // Only ever fills a blank (—) cell; a day already picked here, whether
+  // saved or just staged, is never touched, so hand-made exceptions for this
+  // month survive a Fill same as they survive Save. Stages into `pending`
+  // exactly like a manual pick — nothing is written until Save changes, and
+  // Cancel discards it the same way.
+  async function applyWeeklyPattern() {
+    if (fillCandidateCount === 0) return;
+    const proceed = await confirm(
+      `Fill ${fillCandidateCount} blank day${fillCandidateCount === 1 ? '' : 's'} this month from the Recurring Weekly ` +
+        `Pattern? Matched by weekday (a Monday here gets that employee's Monday pattern pick). Days you've already set — ` +
+        `saved or not yet saved — are left alone. Nothing is written until you click Save changes.`,
+      { title: 'Fill from Weekly Pattern?', confirmLabel: `Fill ${fillCandidateCount} day${fillCandidateCount === 1 ? '' : 's'}` }
+    );
+    if (!proceed) return;
+    for (const emp of employees) {
+      for (const date of dates) {
+        if (currentValue(emp.id, date) !== UNSET) continue;
+        const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+        const value = patternValue(emp.id, weekday);
+        if (value !== UNSET) setCell(emp.id, date, value);
+      }
+    }
   }
 
   // The day columns run a whole month wide, so dragging the native
@@ -214,6 +272,15 @@ export default function MonthlyRosterGrid() {
         </div>
         <div className="flex items-center gap-3">
           {copyDone && <span className="text-xs font-semibold text-good-text">✓ Copied to {copyTargetMonth?.label}</span>}
+          <button
+            type="button"
+            onClick={applyWeeklyPattern}
+            disabled={fillCandidateCount === 0}
+            title={fillCandidateCount === 0 ? 'Nothing to fill — set a Recurring Weekly Pattern above, or every day here is already picked' : undefined}
+            className="rounded-md border border-good/30 bg-white px-2.5 py-1.5 text-xs font-semibold text-good-text shadow-sm hover:bg-good-bg disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            ↻ Fill from Weekly Pattern
+          </button>
           <button
             type="button"
             onClick={openCopyModal}

@@ -81,6 +81,17 @@ function ShiftsView() {
   const [view, setView] = useState<'templates' | 'roster'>(initialView);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [rosterMode, setRosterMode] = useState<RosterMode>('monthly');
+  // Which roster grid is on screen — independent of rosterMode (companies.
+  // roster_mode, which of the two actually drives real attendance/payroll).
+  // The normal workflow is building the Weekly Pattern once, then using
+  // "Fill from Weekly Pattern" on the Monthly Roster to clone it onto real
+  // dates (see MonthlyRosterGrid) — entirely in 'monthly' mode, the default,
+  // with no need to ever flip roster_mode at all. Defaults to whichever mode
+  // is already live so an existing company sees what it's used to; switching
+  // modes via RosterModeSwitch below also jumps the tab to match (see the
+  // effect below), but clicking a tab on its own never touches roster_mode.
+  const [rosterTab, setRosterTab] = useState<RosterMode>('monthly');
+  useEffect(() => setRosterTab(rosterMode), [rosterMode]);
 
   function reload() {
     supabase.from('shifts').select('*').then(({ data }) => setShifts(data ?? []));
@@ -232,11 +243,13 @@ function ShiftsView() {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           {/* Its own bubble: what template a shift IS. Separate from the
-              "Roster in use" bubble beside it, which decides which of the
-              two roster views actually drives real attendance/payroll —
-              two different questions that used to be mixed into one row of
-              tabs (a "Weekly Roster" tab that quietly showed exact-date
-              picks whenever the company was in Monthly mode). */}
+              Roster view beside it — which grid you're LOOKING AT (its own
+              Weekly Pattern / Monthly Roster tabs, see below) is now a
+              different question from which one is actually LIVE for
+              attendance/payroll (RosterModeSwitch, also below) — the normal
+              workflow builds the Weekly Pattern as a template and clones it
+              onto the Monthly Roster (MonthlyRosterGrid's "Fill from Weekly
+              Pattern") without ever needing to flip roster_mode. */}
           <button
             type="button"
             onClick={() => setView('templates')}
@@ -247,13 +260,16 @@ function ShiftsView() {
             <span aria-hidden>🕐</span>
             Shift Templates
           </button>
-          {/* Clicking anywhere in here shows the roster view immediately;
-              RosterModeSwitch itself only asks to confirm (and only then
-              changes companies.roster_mode) when the click actually picks
-              the roster that ISN'T already in use. */}
-          <div onClickCapture={() => setView('roster')}>
-            <RosterModeSwitch companyId={companyId} mode={rosterMode} onChange={setRosterMode} />
-          </div>
+          <button
+            type="button"
+            onClick={() => setView('roster')}
+            className={`flex items-center gap-1.5 rounded-lg border p-1 px-3 py-2 text-sm font-semibold shadow-sm transition-colors ${
+              view === 'roster' ? 'border-accent bg-accent text-white' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <span aria-hidden>📅</span>
+            Roster
+          </button>
         </div>
         <div className="flex items-center gap-3">
           {view === 'templates' && (
@@ -275,7 +291,35 @@ function ShiftsView() {
       )}
 
       {view === 'roster' ? (
-        rosterMode === 'weekly' ? <WeeklyPatternGrid /> : <MonthlyRosterGrid />
+        <>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+              {(['weekly', 'monthly'] as RosterMode[]).map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setRosterTab(tab)}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                    rosterTab === tab ? 'bg-accent text-white' : 'text-slate-500 hover:bg-slate-50'
+                  }`}
+                >
+                  {tab === 'weekly' ? 'Weekly Pattern' : 'Monthly Roster'}
+                  {rosterMode === tab && (
+                    <span
+                      title="This one is live — it's what actually drives attendance and payroll right now"
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${rosterTab === tab ? 'bg-white/80' : 'bg-good'}`}
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span>Active roster:</span>
+              <RosterModeSwitch companyId={companyId} mode={rosterMode} onChange={setRosterMode} />
+            </div>
+          </div>
+          {rosterTab === 'weekly' ? <WeeklyPatternGrid /> : <MonthlyRosterGrid />}
+        </>
       ) : (
         <>
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">

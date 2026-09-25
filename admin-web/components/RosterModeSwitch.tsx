@@ -23,14 +23,14 @@ const MODE_COPY: Record<RosterMode, { label: string; confirm: string }> = {
 /** The one control for companies.roster_mode — a company-wide setting that
  * decides which of two independent data models actually drives real
  * attendance/payroll shift resolution (see the Weekly/Monthly mutual-
- * exclusion design in resolveShiftForDate(), lib/shift.ts). Lives once in
- * the Shifts page header, in its own bubble separate from the Shift
- * Templates control — this is what's "in use", a data-model flag, not a
- * view you're merely looking at. Picking the option already in use just
- * shows that roster; picking the other one confirms first, since it changes
- * what every admin and every employee's attendance sees. Writes straight to
- * the database (there's nothing to stage) and calls onChange so the page
- * (and any other open tab) shows the new roster immediately. */
+ * exclusion design in resolveShiftForDate(), lib/shift.ts). Lives in the
+ * Shifts page's Roster view, labelled "Active roster" there — a data-model
+ * flag, distinct from the Weekly Pattern/Monthly Roster tabs beside it,
+ * which only decide which grid you're LOOKING AT and never touch this.
+ * Picking the mode already active is a no-op; picking the other confirms
+ * first, since it changes what every admin and every employee's attendance
+ * sees. Writes straight to the database (there's nothing to stage) and calls
+ * onChange so the page (and any other open tab) reflects it immediately. */
 export default function RosterModeSwitch({
   companyId,
   mode,
@@ -63,26 +63,24 @@ export default function RosterModeSwitch({
 
   return (
     <div className="flex items-center gap-2">
-      <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-        {(Object.keys(MODE_COPY) as RosterMode[]).map(key => {
-          const active = mode === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => pick(key)}
-              disabled={saving}
-              title={active ? undefined : MODE_COPY[key].confirm}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                active ? 'bg-accent text-white' : 'text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-white/80' : 'border border-slate-400'}`} />
-              {MODE_COPY[key].label}
-            </button>
-          );
-        })}
-      </div>
+      {/* Controlled by `mode`, not by what's picked — pick() only calls
+          onChange after the confirm succeeds and the write lands, so a
+          cancelled or failed switch leaves this showing the mode still
+          actually in use, same as the confirm dialog it used to gate a
+          button-pair with. */}
+      <select
+        value={mode}
+        disabled={saving}
+        onChange={e => pick(e.target.value as RosterMode)}
+        title={MODE_COPY[mode === 'weekly' ? 'monthly' : 'weekly'].confirm}
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-ink shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {(Object.keys(MODE_COPY) as RosterMode[]).map(key => (
+          <option key={key} value={key}>
+            {MODE_COPY[key].label}
+          </option>
+        ))}
+      </select>
       {error && <span className="text-xs text-critical">Could not switch: {error}</span>}
     </div>
   );
