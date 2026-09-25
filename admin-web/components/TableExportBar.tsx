@@ -87,24 +87,37 @@ export async function downloadExcel(
 export default function TableExportBar({
   onExportCsv,
   leading,
+  disabled,
 }: {
   onExportCsv: () => void;
   /** Optional control(s) rendered just left of the Print button — e.g. a
    * report-settings menu. */
   leading?: ReactNode;
+  /** True while the table's own data is still loading/recomputing — both
+   * buttons capture whatever's currently in the DOM (window.print()) or in
+   * the caller's `rows` closure (onExportCsv) with no wait of their own, so
+   * clicking mid-fetch silently exports a stale or half-loaded table. Pass
+   * the caller's existing loading flag through here instead of adding a
+   * wait inside this component, since only the caller knows when its data
+   * is actually settled. */
+  disabled?: boolean;
 }) {
   return (
     <div className="ml-auto flex items-center gap-2 print:hidden">
       {leading}
       <button
         onClick={() => window.print()}
-        className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+        disabled={disabled}
+        title={disabled ? 'Report is still loading — wait for it to finish before printing' : undefined}
+        className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
       >
         🖨 Print / Save PDF
       </button>
       <button
         onClick={onExportCsv}
-        className="flex items-center gap-1 rounded-md border border-accent bg-accent/5 px-3 py-1.5 text-xs font-semibold text-accent shadow-sm transition-colors hover:bg-accent hover:text-white"
+        disabled={disabled}
+        title={disabled ? 'Report is still loading — wait for it to finish before exporting' : undefined}
+        className="flex items-center gap-1 rounded-md border border-accent bg-accent/5 px-3 py-1.5 text-xs font-semibold text-accent shadow-sm transition-colors hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-accent/5 disabled:hover:text-accent"
       >
         ⭳ Export Excel
       </button>

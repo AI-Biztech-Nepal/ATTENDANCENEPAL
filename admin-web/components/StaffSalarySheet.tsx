@@ -654,6 +654,7 @@ export default function StaffSalarySheet() {
 
           <TableExportBar
             onExportCsv={exportCsv}
+            disabled={loading}
             leading={
               <PayrollColumnsMenu
                 cols={visibleCols}

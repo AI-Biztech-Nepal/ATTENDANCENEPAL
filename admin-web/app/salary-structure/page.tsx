@@ -497,7 +497,7 @@ export default function SalaryStructurePage() {
         <div className="border-b border-slate-200 px-4 py-4 sm:px-6 print:hidden">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-ink">Monthly Salary Structure</h2>
-            <TableExportBar onExportCsv={exportCsv} leading={reportColumnsSettings} />
+            <TableExportBar onExportCsv={exportCsv} disabled={loading} leading={reportColumnsSettings} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2.5">
             <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs font-semibold shadow-sm">

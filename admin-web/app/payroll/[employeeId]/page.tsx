@@ -398,7 +398,7 @@ function PayrollEmployeeDetailView() {
           <BackIcon className="h-4 w-4" />
           Back to Payroll
         </Link>
-        {employee && <TableExportBar onExportCsv={exportCsv} />}
+        {employee && <TableExportBar onExportCsv={exportCsv} disabled={loading} />}
       </div>
 
       {loading ? (

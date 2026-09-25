@@ -271,7 +271,7 @@ function SalaryStructureEmployeeView() {
           <BackIcon className="h-4 w-4" />
           Back to Salary Structure
         </Link>
-        {employee && <TableExportBar onExportCsv={exportCsv} />}
+        {employee && <TableExportBar onExportCsv={exportCsv} disabled={loading} />}
       </div>
 
       {loading ? (

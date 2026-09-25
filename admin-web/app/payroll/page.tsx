@@ -988,6 +988,7 @@ export default function PayrollPage() {
 
           <TableExportBar
             onExportCsv={exportCsv}
+            disabled={loading}
             leading={
               <PayrollColumnsMenu
                 cols={visibleCols}
