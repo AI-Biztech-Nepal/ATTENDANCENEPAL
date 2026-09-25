@@ -58,8 +58,8 @@ export function buildEmployeeDayRows(
    * weekOffDates for the label (a requested leave is a Leave even if it
    * happens to fall on a company off day), but is paid identically. */
   leaveDates?: Set<string>,
-  /** Only populated (by the caller) when the company's roster_mode is
-   * 'weekly' — see resolveShiftForDate() in lib/shift.ts. */
+  /** The employee's Weekly Pattern, always passed by the caller now — see
+   * resolveShiftForDate() in lib/shift.ts. */
   weeklyPattern?: WeeklyPatternByEmployee,
   /** Gender-scoped company_holidays dates (holidayDatesByGender() /
    * holidayDatesInRange() in lib/weekOff.ts) — a punchless day matching this

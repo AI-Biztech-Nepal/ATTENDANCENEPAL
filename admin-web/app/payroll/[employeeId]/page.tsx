@@ -136,22 +136,20 @@ function PayrollEmployeeDetailView() {
       // employer SSF). The pay basis is per-hour for everyone now.
       setIsStaffSheet(f === 'staff_salary_sheet');
     });
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, pfRate, ssfRate, tdsRate, overtimeRate }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, pfRate, ssfRate, tdsRate, overtimeRate }) => {
       setWeeklyOffDay(weeklyOffDay);
       setPfRate(pfRate);
       setSsfEmployerRate(ssfRate);
       setSsfEmployeeRate(tdsRate);
       setOvertimeAllowanceRate(overtimeRate);
-      // Not date-scoped (a pattern applies to every week), and only ever
-      // relevant in 'weekly' roster_mode — see resolveShiftForDate().
-      if (rosterMode === 'weekly') {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('weekday, shift_id')
-          .eq('employee_id', employeeId)
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    supabase
+      .from('employee_weekly_pattern')
+      .select('weekday, shift_id')
+      .eq('employee_id', employeeId)
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 

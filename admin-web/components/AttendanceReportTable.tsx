@@ -405,17 +405,15 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     supabase.from('shifts').select('*').then(({ data }) => setShifts(data ?? []));
     supabase.from('devices').select('*').then(({ data }) => setDevices(data ?? []));
     supabase.rpc('devices_with_punches').then(({ data }) => setPunchDevices(data ?? []));
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay }) => {
       setWeeklyOffDay(weeklyOffDay);
-      // Not date-scoped (a pattern applies to every week), and only ever
-      // relevant in 'weekly' roster_mode — see resolveShiftForDate().
-      if (rosterMode === 'weekly') {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('employee_id, weekday, shift_id')
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    supabase
+      .from('employee_weekly_pattern')
+      .select('employee_id, weekday, shift_id')
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
     fetchLeavePolicy().then(p => setWeekOffLeaveHours(leavePolicyActive(p) && p.weekOffWorkEarnsLeave ? p.hoursPerLeaveDay : null));
   }, []);
 
@@ -639,8 +637,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           // already passed or not. A requested (and approved) Leave keeps
           // its own label even on a day that's also a Week Off — it's still
           // paid the same either way. `resolved` (computed above for the
-          // Shift column) already reflects the per-employee roster
-          // regardless of roster_mode, so this only needs to check it
+          // Shift column) already reflects the per-employee roster (exact
+          // date, then the Weekly Pattern), so this only needs to check it
           // alongside the company-wide set instead of duplicating that
           // resolution — the previous version checked weekOffDateSet only,
           // which meant an employee with a roster Week Off (but no

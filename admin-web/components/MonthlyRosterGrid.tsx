@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/Avatar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
-import { useConfirm } from '@/components/ConfirmDialog';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, Shift } from '@/lib/types';
@@ -23,13 +22,17 @@ type PatternRow = { employee_id: string; weekday: number; shift_id: string | nul
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-/** Same grid/data model as WeeklyRosterGrid (employee_daily_shifts, one exact
- * date per column) just spanning a whole AD/BS month instead of one week —
- * filling in a month of exceptions (someone covering nights all month, a
- * rotating crew, etc.) without paging through 4-5 separate weeks. */
+/** One exact date per column (employee_daily_shifts), spanning a whole AD/BS
+ * month — for filling in exceptions (someone covering nights all month, a
+ * rotating crew, etc.) without paging through 4-5 separate weeks. A blank
+ * day isn't Absent by default: it inherits that weekday's pick from the
+ * Recurring Weekly Pattern (employee_weekly_pattern, read-only here, see
+ * patternValue()) — the same fallback resolveShiftForDate() uses for real
+ * attendance/payroll — so setting up the pattern once is enough for every
+ * month going forward. Explicitly picking a day here overrides the pattern
+ * for that one date only, without changing the pattern itself. */
 export default function MonthlyRosterGrid() {
   const { system } = useCalendarSystem();
-  const confirm = useConfirm();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState(todayAnchor);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -59,8 +62,11 @@ export default function MonthlyRosterGrid() {
     () => (copyTargetAnchor ? monthDateRange(system, copyTargetAnchor).start === dates[0] : false),
     [system, copyTargetAnchor, dates]
   );
+  // Only an EXPLICIT pick counts as something to copy — a day inherited from
+  // the Weekly Pattern needs no copying, since the target month already
+  // inherits the same pattern on its own.
   const copyCandidateCount = useMemo(
-    () => employees.filter(emp => dates.some(date => currentValue(emp.id, date) !== UNSET)).length,
+    () => employees.filter(emp => dates.some(date => explicitValue(emp.id, date) !== UNSET)).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [employees, dates, rosterRows, pending]
   );
@@ -91,7 +97,10 @@ export default function MonthlyRosterGrid() {
     setSaveError(null);
   }, [dates.join(',')]);
 
-  function currentValue(employeeId: string, date: string): string {
+  // The exact-date pick for this cell only — UNSET when nothing is staged or
+  // saved for this specific date, whether or not the Weekly Pattern would
+  // otherwise cover it. This is what actually gets written on Save.
+  function explicitValue(employeeId: string, date: string): string {
     const key = `${employeeId}|${date}`;
     if (key in pending) return pending[key];
     const row = rosterRows.find(r => r.employee_id === employeeId && r.work_date === date);
@@ -99,12 +108,8 @@ export default function MonthlyRosterGrid() {
     return row.shift_id === null ? WEEK_OFF_VALUE : row.shift_id;
   }
 
-  function setCell(employeeId: string, date: string, value: string) {
-    setPending(p => ({ ...p, [`${employeeId}|${date}`]: value }));
-  }
-
   // The Recurring Weekly Pattern's pick for this employee on this weekday, in
-  // the same UNSET / WEEK_OFF_VALUE / shift_id shape currentValue() uses —
+  // the same UNSET / WEEK_OFF_VALUE / shift_id shape as explicitValue() —
   // read-only here, this grid never writes employee_weekly_pattern.
   function patternValue(employeeId: string, weekday: number): string {
     const row = patternRows.find(r => r.employee_id === employeeId && r.weekday === weekday);
@@ -112,47 +117,26 @@ export default function MonthlyRosterGrid() {
     return row.shift_id === null ? WEEK_OFF_VALUE : row.shift_id;
   }
 
-  // How many blank cells in the visible month a Fill would actually touch —
-  // disables the button (and lets its confirm text say something concrete)
-  // when there's nothing to do, same idea as copyCandidateCount above.
-  const fillCandidateCount = useMemo(() => {
-    let n = 0;
-    for (const emp of employees) {
-      for (const date of dates) {
-        if (currentValue(emp.id, date) !== UNSET) continue;
-        const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
-        if (patternValue(emp.id, weekday) !== UNSET) n++;
-      }
-    }
-    return n;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [employees, dates, rosterRows, patternRows, pending]);
+  // What the cell actually shows: the exact-date pick if there is one,
+  // otherwise the Weekly Pattern's pick for that weekday — mirrors
+  // resolveShiftForDate()'s own priority, so this grid never disagrees with
+  // what attendance/payroll will actually use for the day.
+  function currentValue(employeeId: string, date: string): string {
+    const explicit = explicitValue(employeeId, date);
+    if (explicit !== UNSET) return explicit;
+    const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+    return patternValue(employeeId, weekday);
+  }
 
-  // Seeds this month's blanks from the Recurring Weekly Pattern — the normal
-  // workflow (build the weekly pattern once, then clone it onto each real
-  // month) instead of the all-or-nothing Weekly/Monthly Roster switch above.
-  // Only ever fills a blank (—) cell; a day already picked here, whether
-  // saved or just staged, is never touched, so hand-made exceptions for this
-  // month survive a Fill same as they survive Save. Stages into `pending`
-  // exactly like a manual pick — nothing is written until Save changes, and
-  // Cancel discards it the same way.
-  async function applyWeeklyPattern() {
-    if (fillCandidateCount === 0) return;
-    const proceed = await confirm(
-      `Fill ${fillCandidateCount} blank day${fillCandidateCount === 1 ? '' : 's'} this month from the Recurring Weekly ` +
-        `Pattern? Matched by weekday (a Monday here gets that employee's Monday pattern pick). Days you've already set — ` +
-        `saved or not yet saved — are left alone. Nothing is written until you click Save changes.`,
-      { title: 'Fill from Weekly Pattern?', confirmLabel: `Fill ${fillCandidateCount} day${fillCandidateCount === 1 ? '' : 's'}` }
-    );
-    if (!proceed) return;
-    for (const emp of employees) {
-      for (const date of dates) {
-        if (currentValue(emp.id, date) !== UNSET) continue;
-        const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
-        const value = patternValue(emp.id, weekday);
-        if (value !== UNSET) setCell(emp.id, date, value);
-      }
-    }
+  // True when what's shown came from the Weekly Pattern, not a pick made for
+  // this specific date — used to give inherited cells a lighter, dashed
+  // style so it's clear at a glance which days are "real" exact-date rows.
+  function isInherited(employeeId: string, date: string): boolean {
+    return explicitValue(employeeId, date) === UNSET && currentValue(employeeId, date) !== UNSET;
+  }
+
+  function setCell(employeeId: string, date: string, value: string) {
+    setPending(p => ({ ...p, [`${employeeId}|${date}`]: value }));
   }
 
   // The day columns run a whole month wide, so dragging the native
@@ -187,7 +171,9 @@ export default function MonthlyRosterGrid() {
       dates.forEach((date, i) => {
         const targetCell = targetCells[i];
         if (!targetCell) return;
-        const value = currentValue(emp.id, date);
+        // Explicit only — a day inherited from the Weekly Pattern needs no
+        // copying, since the target month already inherits the same pattern.
+        const value = explicitValue(emp.id, date);
         if (value === UNSET) return;
         upserts.push({ employee_id: emp.id, work_date: targetCell.adKey, shift_id: value === WEEK_OFF_VALUE ? null : value });
       });
@@ -248,11 +234,20 @@ export default function MonthlyRosterGrid() {
     reload();
   }
 
-  function cellTone(value: string, dirty: boolean) {
+  // `inherited` gives a day pulled from the Weekly Pattern a lighter, dashed
+  // border than one explicitly picked for this exact date, so it's clear at
+  // a glance which days are a real employee_daily_shifts row.
+  function cellTone(value: string, dirty: boolean, inherited: boolean) {
     if (dirty) return 'border-accent bg-accent/10 text-ink font-medium';
-    if (value === WEEK_OFF_VALUE) return 'border-warning/30 bg-warning-bg text-warning-text font-semibold';
+    if (value === WEEK_OFF_VALUE) {
+      return inherited
+        ? 'border-dashed border-warning/40 bg-warning-bg/50 text-warning-text'
+        : 'border-warning/30 bg-warning-bg text-warning-text font-semibold';
+    }
     if (value === UNSET) return 'border-slate-200 text-slate-400';
-    return 'border-accent/30 bg-accent/5 text-ink font-medium';
+    return inherited
+      ? 'border-dashed border-accent/30 bg-accent/5 text-slate-600'
+      : 'border-accent/30 bg-accent/5 text-ink font-medium';
   }
 
   return (
@@ -272,15 +267,6 @@ export default function MonthlyRosterGrid() {
         </div>
         <div className="flex items-center gap-3">
           {copyDone && <span className="text-xs font-semibold text-good-text">✓ Copied to {copyTargetMonth?.label}</span>}
-          <button
-            type="button"
-            onClick={applyWeeklyPattern}
-            disabled={fillCandidateCount === 0}
-            title={fillCandidateCount === 0 ? 'Nothing to fill — set a Recurring Weekly Pattern above, or every day here is already picked' : undefined}
-            className="rounded-md border border-good/30 bg-white px-2.5 py-1.5 text-xs font-semibold text-good-text shadow-sm hover:bg-good-bg disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            ↻ Fill from Weekly Pattern
-          </button>
           <button
             type="button"
             onClick={openCopyModal}
@@ -376,21 +362,24 @@ export default function MonthlyRosterGrid() {
                       {dates.map(date => {
                         const value = currentValue(emp.id, date);
                         const dirty = `${emp.id}|${date}` in pending;
+                        const inherited = !dirty && isInherited(emp.id, date);
+                        const shiftTitle = shiftById.get(value)
+                          ? `${shiftById.get(value)!.name} (${shiftById.get(value)!.start_time.slice(0, 5)}–${shiftById
+                              .get(value)!
+                              .end_time.slice(0, 5)})`
+                          : value === WEEK_OFF_VALUE
+                            ? 'Week Off'
+                            : undefined;
                         return (
                           <td key={date} className={`px-0.5 py-1.5 text-center ${date === today ? 'bg-accent/5' : rowBg}`}>
                             <select
                               value={value}
                               onChange={e => setCell(emp.id, date, e.target.value)}
-                              title={
-                                shiftById.get(value)
-                                  ? `${shiftById.get(value)!.name} (${shiftById.get(value)!.start_time.slice(0, 5)}–${shiftById
-                                      .get(value)!
-                                      .end_time.slice(0, 5)})`
-                                  : undefined
-                              }
+                              title={inherited && shiftTitle ? `${shiftTitle} — from the Weekly Pattern` : shiftTitle}
                               className={`w-24 rounded-md border px-1 py-1 text-[11px] shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50 ${cellTone(
                                 value,
-                                dirty
+                                dirty,
+                                inherited
                               )}`}
                             >
                               <option value={UNSET}>—</option>
@@ -441,11 +430,12 @@ export default function MonthlyRosterGrid() {
               <p className="mb-4 text-sm text-critical">Pick a different month — this is the month you&apos;re already viewing.</p>
             ) : (
               <p className="mb-4 text-sm text-slate-600">
-                {copyCandidateCount} employee{copyCandidateCount === 1 ? '' : 's'} with a pick this month will get that same
-                plan applied to {copyTargetMonth?.label}, matched by day-of-month position (the 1st here → the 1st there, and
-                so on). If the two months are different lengths, the extra days at the end are left alone. A day here left
-                blank (—) leaves any existing pick on the matching day untouched — this only fills in, it never clears. You
-                can still hand-edit any single day afterward.
+                {copyCandidateCount} employee{copyCandidateCount === 1 ? '' : 's'} with an exact-date pick this month will get
+                that same plan applied to {copyTargetMonth?.label}, matched by day-of-month position (the 1st here → the 1st
+                there, and so on). A day only inherited from the Weekly Pattern (dashed border) isn't copied — the target
+                month already inherits the same pattern on its own. If the two months are different lengths, the extra days
+                at the end are left alone, and an existing pick on the matching target day is left untouched — this only
+                fills in, it never clears. You can still hand-edit any single day afterward.
               </p>
             )}
             {copyError && <p className="mb-3 text-sm text-critical">Could not copy: {copyError}</p>}

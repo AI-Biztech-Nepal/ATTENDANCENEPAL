@@ -74,7 +74,7 @@ export default function PayrollPage() {
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
-  const [rosterMode, setRosterMode] = useState<'weekly' | 'monthly' | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
   // Yearly paid-leave balance (lib/leaveBalance.ts, set on the Leave page):
   // an absent working day it still covers is paid, and Week Off work earns
   // leave instead of overtime pay.
@@ -204,7 +204,7 @@ export default function PayrollPage() {
   // The oldest/newest punch on record — bounds the period dropdown to
   // months that actually have data instead of listing years of empty ones.
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ companyId, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate, overtimeRate }) => {
+    fetchMyCompanyWeekOffConfig().then(({ companyId, weeklyOffDay, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate, overtimeRate }) => {
       setCompanyId(companyId);
       setWeeklyOffDay(weeklyOffDay);
       setOtHoursPerDay(otHoursPerDay);
@@ -213,16 +213,14 @@ export default function PayrollPage() {
       setSsfRate(ssfRate);
       setSsfByEmployeeRate(tdsRate);
       setOvertimeAllowanceRate(overtimeRate);
-      setRosterMode(rosterMode);
-      // Not date-scoped (a pattern applies to every week), and only ever
-      // relevant in 'weekly' roster_mode — see resolveShiftForDate().
-      if (rosterMode === 'weekly') {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('employee_id, weekday, shift_id')
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
+      setConfigLoaded(true);
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    supabase
+      .from('employee_weekly_pattern')
+      .select('employee_id, weekday, shift_id')
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
     fetchLeavePolicy().then(setLeavePolicy);
   }, []);
 
@@ -309,18 +307,18 @@ export default function PayrollPage() {
   // in the year have already used their share of the balance.
   useEffect(() => {
     // A staff_salary_sheet company renders StaffSalarySheet, which loads its own.
-    if (payrollFormat !== 'standard' || !rosterMode || !leaveOn || employees.length === 0) {
+    if (payrollFormat !== 'standard' || !configLoaded || !leaveOn || employees.length === 0) {
       setLeaveLedgers(new Map());
       return;
     }
     let cancelled = false;
-    loadLeaveLedgers({ employees, policy: leavePolicy, weeklyOffDay, rosterMode, until: end, periodStart: start }).then(m => {
+    loadLeaveLedgers({ employees, policy: leavePolicy, weeklyOffDay, until: end, periodStart: start }).then(m => {
       if (!cancelled) setLeaveLedgers(m);
     });
     return () => {
       cancelled = true;
     };
-  }, [payrollFormat, employees, leaveOn, leavePolicy, weeklyOffDay, rosterMode, start, end]);
+  }, [payrollFormat, employees, leaveOn, leavePolicy, weeklyOffDay, configLoaded, start, end]);
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
     const map: DailyShiftByDate = new Map();

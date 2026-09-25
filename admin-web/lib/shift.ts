@@ -34,10 +34,10 @@ export function resolveShift(employee: Employee, shifts: Shift[]) {
 export type DailyShiftByDate = Map<string, Map<string, string | null>>;
 
 /** employeeId -> weekday (0=Sunday..6=Saturday) -> shift_id, from
- * employee_weekly_pattern (20260818100000) — only ever meaningful when the
- * company's roster_mode is 'weekly'; callers in 'monthly' mode (the default)
- * pass undefined here and resolution behaves exactly as it always has. Same
- * null-means-Week-Off convention as DailyShiftByDate. */
+ * employee_weekly_pattern (20260818100000) — the Monthly Roster's fallback
+ * for any date with no exact-date row: build it once, an employee with no
+ * pattern of their own falls through resolveShiftForDate() to resolveShift()
+ * exactly as before. Same null-means-Week-Off convention as DailyShiftByDate. */
 export type WeeklyPatternByEmployee = Map<string, Map<number, string | null>>;
 
 export function buildWeeklyPatternByEmployee(
@@ -68,14 +68,14 @@ export function isWeekOff(shift: ResolvedShift): shift is typeof WEEK_OFF {
  * employee_daily_shifts row for this exact date wins (its shift, or
  * WEEK_OFF if shift_id is null) — a deliberate, specific override, so it
  * beats everything else including a company-wide Week-off below. No roster
- * row at all falls through, in 'weekly' roster_mode companies only, to a
- * matching weekday in employee_weekly_pattern (20260818100000) — same
- * override-wins priority as the exact-date roster, since it's the same kind
- * of deliberate assignment, just recurring instead of one-off. After that,
- * falls through to a company-wide Week-off date (weeklyOffDay or a
- * company_holidays row, passed in by the caller — see lib/weekOff.ts) if
- * this date is one, and only then to the normal own-shift/department/
- * default chain — companies using none of these features see no change. */
+ * row at all falls through to a matching weekday in employee_weekly_pattern
+ * (20260818100000) — the Monthly Roster auto-fills every blank day from this
+ * exact fallback, so an employee's Weekly Pattern is always live the moment
+ * it's set, with no separate mode to switch on. After that, falls through to
+ * a company-wide Week-off date (weeklyOffDay or a company_holidays row,
+ * passed in by the caller — see lib/weekOff.ts) if this date is one, and
+ * only then to the normal own-shift/department/default chain — an employee
+ * with no weekly pattern of their own sees no change from before. */
 export function resolveShiftForDate(
   employee: Employee,
   shifts: Shift[],

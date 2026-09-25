@@ -106,17 +106,15 @@ export default function DashboardPage() {
       .select('employee_id, shift_id')
       .eq('work_date', today)
       .then(({ data }) => setTodayRoster(data ?? []));
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay }) => {
       setWeeklyOffDay(weeklyOffDay);
-      // Not date-scoped (a pattern applies to every week), and only ever
-      // relevant in 'weekly' roster_mode — see resolveShiftForDate().
-      if (rosterMode === 'weekly') {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('employee_id, weekday, shift_id')
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    supabase
+      .from('employee_weekly_pattern')
+      .select('employee_id, weekday, shift_id')
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
     supabase.from('company_holidays').select('*').eq('holiday_date', today).maybeSingle().then(({ data }) => setTodayHoliday(data ?? null));
     supabase
       .from('attendance_logs')
@@ -237,8 +235,8 @@ export default function DashboardPage() {
 
   // todayIsWeekOff only covers the COMPANY-wide off day — an employee can
   // also have their own per-employee roster Week Off for today specifically
-  // (an employee_daily_shifts row, or an employee_weekly_pattern row in
-  // 'weekly' roster_mode) with no company-wide off day in effect at all.
+  // (an employee_daily_shifts row, or an employee_weekly_pattern row) with
+  // no company-wide off day in effect at all.
   // Without resolving each employee's own shift here, someone on a roster
   // Week Off who hasn't punched in showed up as "Absent" on this dashboard
   // even though every other page (Payroll, My Calendar, the Attendance

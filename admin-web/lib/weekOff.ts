@@ -5,16 +5,9 @@ import type { CompanyHoliday, Gender, HolidayScope } from './types';
  * companies.weekly_off_day) plus ad-hoc dates (company_holidays). Applies to
  * every employee at once — distinct from the per-employee roster Week Off
  * (employee_daily_shifts.shift_id = null, see lib/shift.ts's WEEK_OFF). */
-export type RosterMode = 'weekly' | 'monthly';
-
 export type CompanyWeekOffConfig = {
   companyId: string | null;
   weeklyOffDay: number | null;
-  /** Which roster drives real employee shifts — 'monthly' (the default) is
-   * today's exact-date employee_daily_shifts model; 'weekly' means
-   * employee_weekly_pattern is consulted instead (see resolveShiftForDate in
-   * lib/shift.ts). Defaults to 'monthly' when there's no company yet. */
-  rosterMode: RosterMode;
   /** Overtime policy (companies.ot_hours_per_day/ot_multiplier,
    * 20260825160000_company_overtime_settings.sql) — the admin-set default
    * a "standard day" and OT pay rate use everywhere overtime pay is
@@ -42,7 +35,6 @@ export type CompanyWeekOffConfig = {
 const DEFAULT_CONFIG: CompanyWeekOffConfig = {
   companyId: null,
   weeklyOffDay: null,
-  rosterMode: 'monthly',
   otHoursPerDay: 8,
   otMultiplier: 1.5,
   pfRate: 10,
@@ -51,11 +43,10 @@ const DEFAULT_CONFIG: CompanyWeekOffConfig = {
   overtimeRate: 0,
 };
 
-/** The current user's own company_id + weekly_off_day + roster_mode +
- * overtime policy + contribution rates. Reads go through `profiles` first
- * (RLS-scoped to the caller's own row) to find company_id, then `companies`
- * itself (RLS-scoped to id = my_company_id(), see
- * 20260814180000_companies_rls_policies.sql). */
+/** The current user's own company_id + weekly_off_day + overtime policy +
+ * contribution rates. Reads go through `profiles` first (RLS-scoped to the
+ * caller's own row) to find company_id, then `companies` itself (RLS-scoped
+ * to id = my_company_id(), see 20260814180000_companies_rls_policies.sql). */
 export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfig> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return DEFAULT_CONFIG;
@@ -64,7 +55,7 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
   if (!companyId) return DEFAULT_CONFIG;
   const { data: company } = await supabase
     .from('companies')
-    .select('weekly_off_day, roster_mode, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate')
+    .select('weekly_off_day, ot_hours_per_day, ot_multiplier, pf_rate, ssf_rate, tds_rate')
     .eq('id', companyId)
     .single();
 
@@ -81,7 +72,6 @@ export async function fetchMyCompanyWeekOffConfig(): Promise<CompanyWeekOffConfi
   return {
     companyId,
     weeklyOffDay: company?.weekly_off_day ?? null,
-    rosterMode: (company?.roster_mode as RosterMode) ?? 'monthly',
     otHoursPerDay: company?.ot_hours_per_day ?? DEFAULT_CONFIG.otHoursPerDay,
     otMultiplier: company?.ot_multiplier ?? DEFAULT_CONFIG.otMultiplier,
     pfRate: company?.pf_rate ?? DEFAULT_CONFIG.pfRate,

@@ -7,12 +7,10 @@ import AppShell from '@/components/AppShell';
 import Badge from '@/components/Badge';
 import WeeklyPatternGrid from '@/components/WeeklyPatternGrid';
 import MonthlyRosterGrid from '@/components/MonthlyRosterGrid';
-import RosterModeSwitch from '@/components/RosterModeSwitch';
 import { useConfirm } from '@/components/ConfirmDialog';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import type { Employee, Shift } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
-import { fetchMyCompanyWeekOffConfig, type RosterMode } from '@/lib/weekOff';
 
 const EMPTY_FORM = { name: '', type: 'fixed' as Shift['type'], start_time: '09:00', end_time: '18:00', grace_minutes: 10, department: '' };
 
@@ -71,7 +69,6 @@ function ShiftsView() {
   const initialView = initialTabParam === 'roster' || initialTabParam === 'monthly' ? 'roster' : 'templates';
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [rosterEmployeeIds, setRosterEmployeeIds] = useState<Set<string>>(new Set());
   const [dailyRows, setDailyRows] = useState<{ employee_id: string; shift_id: string | null }[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -79,19 +76,11 @@ function ShiftsView() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<'templates' | 'roster'>(initialView);
-  const [companyId, setCompanyId] = useState<string | null>(null);
-  const [rosterMode, setRosterMode] = useState<RosterMode>('monthly');
-  // Which roster grid is on screen — independent of rosterMode (companies.
-  // roster_mode, which of the two actually drives real attendance/payroll).
-  // The normal workflow is building the Weekly Pattern once, then using
-  // "Fill from Weekly Pattern" on the Monthly Roster to clone it onto real
-  // dates (see MonthlyRosterGrid) — entirely in 'monthly' mode, the default,
-  // with no need to ever flip roster_mode at all. Defaults to whichever mode
-  // is already live so an existing company sees what it's used to; switching
-  // modes via RosterModeSwitch below also jumps the tab to match (see the
-  // effect below), but clicking a tab on its own never touches roster_mode.
-  const [rosterTab, setRosterTab] = useState<RosterMode>('monthly');
-  useEffect(() => setRosterTab(rosterMode), [rosterMode]);
+  // Which roster grid is on screen — the Weekly Pattern is always live now
+  // (the Monthly Roster auto-fills its blank days from it, see
+  // resolveShiftForDate() in lib/shift.ts), so this is purely which one
+  // you're looking at, not a mode to switch between.
+  const [rosterTab, setRosterTab] = useState<'weekly' | 'monthly'>('monthly');
 
   function reload() {
     supabase.from('shifts').select('*').then(({ data }) => setShifts(data ?? []));
@@ -99,29 +88,28 @@ function ShiftsView() {
     supabase
       .from('employee_daily_shifts')
       .select('employee_id, shift_id')
-      .then(({ data }) => {
-        setDailyRows(data ?? []);
-        setRosterEmployeeIds(new Set((data ?? []).map(r => r.employee_id)));
-      });
+      .then(({ data }) => setDailyRows(data ?? []));
     supabase
       .from('employee_weekly_pattern')
       .select('employee_id, weekday, shift_id')
       .then(({ data }) => setWeeklyPatternRows(data ?? []));
-    fetchMyCompanyWeekOffConfig().then(({ companyId, rosterMode }) => {
-      setCompanyId(companyId);
-      setRosterMode(rosterMode);
-    });
   }
   useEffect(reload, []);
 
   const templateShifts = useMemo(() => shifts.filter(s => s.employee_id === null), [shifts]);
 
+  // An employee with a row in either roster has a "Custom" shift that varies
+  // by date/weekday, not a single static pick — see the Employee Shift
+  // Assignments list below.
+  const rosterEmployeeIds = useMemo(
+    () => new Set([...dailyRows.map(r => r.employee_id), ...weeklyPatternRows.map(r => r.employee_id)]),
+    [dailyRows, weeklyPatternRows]
+  );
+
   // employee_id -> set of every real (non-Week-Off) shift_id they've ever
-  // been put on via the roster that's actually active for this company
-  // (employee_daily_shifts for 'monthly' mode, employee_weekly_pattern for
-  // 'weekly' — RosterModeSwitch keeps both tables around across a switch,
-  // so only reading the active one avoids resurrecting stale counts from a
-  // mode this company isn't using any more).
+  // been put on via either roster — a specific date (employee_daily_shifts)
+  // or the Weekly Pattern (employee_weekly_pattern), both always live at
+  // once now, so both count toward "how many employees are on this shift".
   const shiftEmployeeIds = useMemo(() => {
     const map = new Map<string, Set<string>>();
     function add(shiftId: string | null, employeeId: string) {
@@ -133,13 +121,10 @@ function ShiftsView() {
       }
       set.add(employeeId);
     }
-    if (rosterMode === 'weekly') {
-      for (const r of weeklyPatternRows) add(r.shift_id, r.employee_id);
-    } else {
-      for (const r of dailyRows) add(r.shift_id, r.employee_id);
-    }
+    for (const r of dailyRows) add(r.shift_id, r.employee_id);
+    for (const r of weeklyPatternRows) add(r.shift_id, r.employee_id);
     return map;
-  }, [rosterMode, weeklyPatternRows, dailyRows]);
+  }, [weeklyPatternRows, dailyRows]);
 
   // Employees on the Weekly/Monthly Roster work a different shift on
   // different days, so resolveShift() alone (each employee's static
@@ -242,14 +227,13 @@ function ShiftsView() {
     <AppShell title="Shift Roster Management">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          {/* Its own bubble: what template a shift IS. Separate from the
-              Roster view beside it — which grid you're LOOKING AT (its own
-              Weekly Pattern / Monthly Roster tabs, see below) is now a
-              different question from which one is actually LIVE for
-              attendance/payroll (RosterModeSwitch, also below) — the normal
-              workflow builds the Weekly Pattern as a template and clones it
-              onto the Monthly Roster (MonthlyRosterGrid's "Fill from Weekly
-              Pattern") without ever needing to flip roster_mode. */}
+          {/* Its own bubble: what template a shift IS, separate from the
+              Roster view beside it — which grid you're looking at (its own
+              Weekly Pattern / Monthly Roster tabs, see below). Both are
+              always live at once: the Weekly Pattern is the Monthly
+              Roster's fallback for any day with no exact-date pick (see
+              resolveShiftForDate() in lib/shift.ts), so setting one up is
+              enough — no mode to switch on either roster or per-shift. */}
           <button
             type="button"
             onClick={() => setView('templates')}
@@ -292,31 +276,19 @@ function ShiftsView() {
 
       {view === 'roster' ? (
         <>
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-              {(['weekly', 'monthly'] as RosterMode[]).map(tab => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setRosterTab(tab)}
-                  className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
-                    rosterTab === tab ? 'bg-accent text-white' : 'text-slate-500 hover:bg-slate-50'
-                  }`}
-                >
-                  {tab === 'weekly' ? 'Weekly Pattern' : 'Monthly Roster'}
-                  {rosterMode === tab && (
-                    <span
-                      title="This one is live — it's what actually drives attendance and payroll right now"
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${rosterTab === tab ? 'bg-white/80' : 'bg-good'}`}
-                    />
-                  )}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <span>Active roster:</span>
-              <RosterModeSwitch companyId={companyId} mode={rosterMode} onChange={setRosterMode} />
-            </div>
+          <div className="mb-4 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+            {(['weekly', 'monthly'] as const).map(tab => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setRosterTab(tab)}
+                className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                  rosterTab === tab ? 'bg-accent text-white' : 'text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                {tab === 'weekly' ? 'Weekly Pattern' : 'Monthly Roster'}
+              </button>
+            ))}
           </div>
           {rosterTab === 'weekly' ? <WeeklyPatternGrid /> : <MonthlyRosterGrid />}
         </>
@@ -399,7 +371,7 @@ function ShiftsView() {
                     onClick={() => setView('roster')}
                     className="shrink-0 rounded-lg border border-accent/20 bg-accent/5 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/10"
                   >
-                    Custom — {rosterMode === 'weekly' ? 'Weekly' : 'Monthly'} Roster
+                    Custom — Roster
                   </button>
                 ) : (
                   <div className="w-48 shrink-0">

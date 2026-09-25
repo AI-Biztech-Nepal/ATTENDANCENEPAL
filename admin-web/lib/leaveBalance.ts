@@ -325,7 +325,6 @@ export async function loadLeaveLedgers(opts: {
   employees: Employee[];
   policy: LeavePolicy;
   weeklyOffDay: number | null;
-  rosterMode: 'weekly' | 'monthly';
   /** Last day to count. Clamped to yesterday: today isn't finished. */
   until: string;
   /** Start of the pay period being viewed, if any — the walk starts at the
@@ -381,9 +380,7 @@ export async function loadLeaveLedgers(opts: {
     ),
     supabase.from('company_holidays').select('*').gte('holiday_date', walkStart).lte('holiday_date', until),
     supabase.from('leave_requests').select('*').eq('status', 'approved').lte('start_date', until).gte('end_date', walkStart),
-    opts.rosterMode === 'weekly'
-      ? supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id')
-      : Promise.resolve({ data: [] as { employee_id: string; weekday: number; shift_id: string | null }[] }),
+    supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id'),
   ]);
 
   const firstPunchIso = firstPunch.data?.[0]?.punch_time as string | undefined;

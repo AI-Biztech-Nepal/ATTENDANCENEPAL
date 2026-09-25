@@ -133,7 +133,7 @@ export default function StaffSalarySheet() {
   const [ssfEmployerRate, setSsfEmployerRate] = useState(11);
   const [ssfEmployeeRate, setSsfEmployeeRate] = useState(0);
   const [otHoursPerDay, setOtHoursPerDay] = useState(8);
-  const [rosterMode, setRosterMode] = useState<'weekly' | 'monthly' | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
   // Yearly paid-leave balance (lib/leaveBalance.ts, set on the Leave page).
   // An absent working day the balance still covers is paid like a day
   // present; Week Off work earns leave instead of showing as overtime.
@@ -194,26 +194,24 @@ export default function StaffSalarySheet() {
   }, []);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, ssfRate, tdsRate, otHoursPerDay }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, ssfRate, tdsRate, otHoursPerDay }) => {
       setWeeklyOffDay(weeklyOffDay);
       setOtHoursPerDay(otHoursPerDay);
       setSsfEmployerRate(ssfRate);
       setSsfEmployeeRate(tdsRate);
-      setRosterMode(rosterMode);
-      if (rosterMode === 'weekly') {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('employee_id, weekday, shift_id')
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
+      setConfigLoaded(true);
     });
+    supabase
+      .from('employee_weekly_pattern')
+      .select('employee_id, weekday, shift_id')
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
     fetchLeavePolicy().then(setLeavePolicy);
   }, []);
 
   // The balance is walked from 1 Shrawan, not just this period, so an absence
   // earlier in the year has already used its share before this month's days.
   useEffect(() => {
-    if (!rosterMode || !visibleCols.paidLeave || !leavePolicyActive(leavePolicy, employees) || employees.length === 0) {
+    if (!configLoaded || !visibleCols.paidLeave || !leavePolicyActive(leavePolicy, employees) || employees.length === 0) {
       setLeaveLedgers(new Map());
       return;
     }
@@ -222,7 +220,6 @@ export default function StaffSalarySheet() {
       employees,
       policy: leavePolicy,
       weeklyOffDay,
-      rosterMode,
       until: period.end,
       periodStart: period.start,
     }).then(m => {
@@ -231,7 +228,7 @@ export default function StaffSalarySheet() {
     return () => {
       cancelled = true;
     };
-  }, [employees, leavePolicy, weeklyOffDay, rosterMode, period, visibleCols.paidLeave]);
+  }, [employees, leavePolicy, weeklyOffDay, configLoaded, period, visibleCols.paidLeave]);
 
   // The Paid Leave switch in the cog turns the balance off for this report.
   const leaveOn = visibleCols.paidLeave && leavePolicyActive(leavePolicy, employees);

@@ -50,7 +50,7 @@ export default function LeavePage() {
   // default: each employee has only the leave an admin enters for them.
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [policy, setPolicy] = useState<LeavePolicy>(NO_LEAVE_POLICY);
-  const [company, setCompany] = useState<{ weeklyOffDay: number | null; rosterMode: 'weekly' | 'monthly' } | null>(null);
+  const [company, setCompany] = useState<{ weeklyOffDay: number | null } | null>(null);
   const [ledgers, setLedgers] = useState<Map<string, LeaveLedger>>(new Map());
   const [ledgersLoading, setLedgersLoading] = useState(false);
   const [openEmployee, setOpenEmployee] = useState<string | null>(null);
@@ -73,7 +73,7 @@ export default function LeavePage() {
       setCompanyId(p.companyId);
       setPolicy(p);
     });
-    fetchMyCompanyWeekOffConfig().then(c => setCompany({ weeklyOffDay: c.weeklyOffDay, rosterMode: c.rosterMode }));
+    fetchMyCompanyWeekOffConfig().then(c => setCompany({ weeklyOffDay: c.weeklyOffDay }));
   }, []);
 
   const activeEmployees = useMemo(() => employees.filter(e => e.status === 'active'), [employees]);
@@ -91,7 +91,6 @@ export default function LeavePage() {
       employees: activeEmployees,
       policy,
       weeklyOffDay: company.weeklyOffDay,
-      rosterMode: company.rosterMode,
       until: nepalTodayIso(),
     }).then(m => {
       if (cancelled) return;

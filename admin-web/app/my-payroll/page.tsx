@@ -60,23 +60,23 @@ export default function MyPayrollPage() {
 
   useEffect(() => {
     fetchCompanyPayrollFormat().then(f => setSalaryMode(f === 'staff_salary_sheet' ? 'flat' : 'hourly'));
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate }) => {
       setWeeklyOffDay(weeklyOffDay);
       setOtHoursPerDay(otHoursPerDay);
       setOtMultiplier(otMultiplier);
       setPfRate(pfRate);
       setSsfRate(ssfRate);
       setTdsRate(tdsRate);
-      // Not date-scoped (a pattern applies to every week), and only ever
-      // relevant in 'weekly' roster_mode — see resolveShiftForDate().
-      if (rosterMode === 'weekly' && employeeId) {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('weekday, shift_id')
-          .eq('employee_id', employeeId)
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    if (employeeId) {
+      supabase
+        .from('employee_weekly_pattern')
+        .select('weekday, shift_id')
+        .eq('employee_id', employeeId)
+        .then(({ data }) => setWeeklyPatternRows(data ?? []));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 

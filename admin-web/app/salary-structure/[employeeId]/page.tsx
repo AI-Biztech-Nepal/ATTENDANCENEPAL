@@ -110,17 +110,17 @@ function SalaryStructureEmployeeView() {
   }, [start, end]);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ pfRate, ssfRate, tdsRate, overtimeRate, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier }) => {
+    fetchMyCompanyWeekOffConfig().then(({ pfRate, ssfRate, tdsRate, overtimeRate, weeklyOffDay, otHoursPerDay, otMultiplier }) => {
       setRates({ pf: pfRate, ssf: ssfRate, tds: tdsRate, overtime: overtimeRate });
       setConfig({ weeklyOffDay, otHoursPerDay, otMultiplier });
-      if (rosterMode === 'weekly') {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('weekday, shift_id')
-          .eq('employee_id', employeeId)
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    supabase
+      .from('employee_weekly_pattern')
+      .select('weekday, shift_id')
+      .eq('employee_id', employeeId)
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
   }, [employeeId]);
 
   useEffect(() => {

@@ -74,18 +74,16 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ weekday: number; shift_id: string | null }[]>([]);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay }) => {
       setWeeklyOffDay(weeklyOffDay);
-      // Not date-scoped (a pattern applies to every week), and only ever
-      // relevant in 'weekly' roster_mode — see resolveShiftForDate().
-      if (rosterMode === 'weekly') {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('weekday, shift_id')
-          .eq('employee_id', employeeId)
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    supabase
+      .from('employee_weekly_pattern')
+      .select('weekday, shift_id')
+      .eq('employee_id', employeeId)
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 
@@ -183,10 +181,10 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   const leaveDates = useMemo(() => new Set(leaveByDate.keys()), [leaveByDate]);
 
   // Dates this employee has an explicit Week Off roster entry for (a row
-  // exists in employee_daily_shifts with shift_id null), plus — in 'weekly'
-  // roster_mode — any date whose weekday matches a Week Off in the
-  // recurring pattern and has no exact-date roster row of its own (an
-  // exact date always wins, same priority resolveShiftForDate uses). Both
+  // exists in employee_daily_shifts with shift_id null), plus any date whose
+  // weekday matches a Week Off in the recurring pattern and has no
+  // exact-date roster row of its own (an exact date always wins, same
+  // priority resolveShiftForDate uses). Both
   // treated the same way as approved leave: never counted toward
   // Present/Hours/Late/Early/Overtime, never "Absent" on a day nothing was
   // expected.
