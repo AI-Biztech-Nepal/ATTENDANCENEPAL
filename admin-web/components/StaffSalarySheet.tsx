@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import AppShell from '@/components/AppShell';
+import { usePageTitle } from '@/lib/pageTitle';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import PayrollColumnsMenu from '@/components/PayrollColumnsMenu';
@@ -103,6 +103,7 @@ type SheetRow = {
  * report.
  */
 export default function StaffSalarySheet() {
+  usePageTitle('Payroll Report');
   const { system } = useCalendarSystem();
   const [period, setPeriod] = useState<CalendarPeriod>(() => {
     const { year, month } = currentSystemYearMonth(system);
@@ -598,7 +599,7 @@ export default function StaffSalarySheet() {
   const colCount = 10 + visibleAttCols.length + (leaveOn ? 1 : 0);
 
   return (
-    <AppShell title="Payroll Report">
+    <>
       {/* 10–13 columns need landscape — scoped here so it only affects THIS
           report's print, leaving every other page's orientation toggle
           alone. The global @media-print table rules are otherwise tuned
@@ -821,7 +822,7 @@ export default function StaffSalarySheet() {
         </div>
 
       </div>
-    </AppShell>
+    </>
   );
 }
 
