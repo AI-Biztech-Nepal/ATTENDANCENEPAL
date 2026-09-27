@@ -110,8 +110,7 @@ function isOvernightShift(shift: Pick<Shift, 'start_time' | 'end_time'>) {
 }
 
 export function formatShiftHours(shift: Pick<Shift, 'start_time' | 'end_time'>) {
-  const hh = (t: string) => t.slice(0, 2);
-  return `${shift.start_time.slice(0, 5)}–${shift.end_time.slice(0, 5)} (${hh(shift.start_time)}-${hh(shift.end_time)})`;
+  return `${shift.start_time.slice(0, 5)}–${shift.end_time.slice(0, 5)}`;
 }
 
 export type DayStatus = {

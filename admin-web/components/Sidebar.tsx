@@ -115,7 +115,7 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
           </div>
         )}
 
-        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
+        <nav className="sidebar-scroll flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-4">
           {items.map(item => {
             // A grouped item's own landing page becomes the first child; the
             // group row itself no longer navigates anywhere.

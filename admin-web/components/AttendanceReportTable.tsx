@@ -9,6 +9,7 @@ import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { formatDdMmYyyy } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
+import { fetchCompanyName } from '@/lib/payrollFormat';
 import {
   applyOvernightShiftCorrection,
   dropPunchesClaimedBySummaries,
@@ -395,8 +396,11 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const [saveProgress, setSaveProgress] = useState(0);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [guardAction, setGuardAction] = useState<(() => void) | null>(null);
+  const [companyName, setCompanyName] = useState<string | null>(null);
+  const [showFiltersMenu, setShowFiltersMenu] = useState(false);
 
   useEffect(() => {
+    fetchCompanyName().then(setCompanyName);
     supabase
       .from('employees')
       .select('*')
@@ -1087,23 +1091,78 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
   return (
     <>
-      <h1 className="mb-3 hidden text-2xl font-bold text-ink print:block">
-        Attendance Report — {formatDdMmYyyy(from, system)} to {formatDdMmYyyy(to, system)}
-      </h1>
-      <div className="mb-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm print:hidden">
-        <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            @media print {
+              @page { size: landscape; margin: 12mm 10mm; }
+              body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+              table { border-collapse: collapse !important; width: 100% !important; font-size: 9px !important; }
+              thead { display: table-header-group; }
+              thead tr { background: #f8fafc !important; }
+              thead th {
+                border: 1px solid #cbd5e1 !important;
+                padding: 6px 8px !important;
+                font-size: 8px !important;
+                font-weight: 700 !important;
+                text-transform: uppercase !important;
+                letter-spacing: 0.05em !important;
+                color: #334155 !important;
+                background: #f1f5f9 !important;
+              }
+              tbody td {
+                border: 1px solid #e2e8f0 !important;
+                padding: 5px 8px !important;
+                font-size: 9px !important;
+                color: #1e293b !important;
+              }
+              tbody tr:nth-child(even) { background: #f8fafc !important; }
+              tbody tr:nth-child(odd) { background: #ffffff !important; }
+              .print-total-row td {
+                border: 1px solid #cbd5e1 !important;
+                padding: 6px 8px !important;
+                background: #f1f5f9 !important;
+                font-weight: 700 !important;
+                font-size: 9px !important;
+              }
+            }
+          `,
+        }}
+      />
+      {/* Professional Print Header */}
+      <div className="hidden print:block mb-5">
+        <div className="flex justify-between items-start pb-3 border-b-2 border-slate-800">
           <div>
-            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">Employee</label>
-            <div className="flex items-center gap-1.5">
+            <div className="text-[13px] font-bold text-slate-800 tracking-wide uppercase mb-1">{companyName || 'Company Name'}</div>
+            <h1 className="text-[22px] font-extrabold text-slate-900 leading-none">Attendance Report</h1>
+          </div>
+          <div className="text-right text-[9px] text-slate-600 leading-relaxed">
+            <div className="text-[10px] font-semibold text-slate-700 mb-0.5">
+              {formatDdMmYyyy(from, system)} — {formatDdMmYyyy(to, system)}
+            </div>
+            {employeeId !== 'all' && (
+              <div>Employee: {employees.find(e => e.id === employeeId)?.name ?? 'Selected'}</div>
+            )}
+            {status !== 'All' && <div>Status: {status}</div>}
+            <div>Generated: {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="relative z-50 mb-5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] print:hidden transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-4">
+          <div className="group">
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Employee</label>
+            <div className="flex items-center gap-2">
               <div className="relative">
-                <PersonIcon className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-accent" />
+                <PersonIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
                 <select
                   value={employeeId}
                   onChange={e => {
                     const v = e.target.value;
                     guarded(() => setEmployeeId(v));
                   }}
-                  className="min-w-[10rem] rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-2.5 text-xs shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                  className="min-w-[12rem] rounded-xl border border-slate-200/60 bg-white/80 py-2 pl-9 pr-3 text-sm font-medium text-slate-700 shadow-sm transition-all duration-300 focus:border-accent focus:bg-white focus:outline-none focus:ring-4 focus:ring-accent/15 hover:border-slate-300 cursor-pointer"
                 >
                   <option value="all">All Employees</option>
                   {employees.map(e => (
@@ -1114,51 +1173,89 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 </select>
               </div>
               {employeeId !== 'all' && (
-                <button onClick={() => guarded(() => setEmployeeId('all'))} className="text-[11px] font-medium text-accent hover:underline">
+                <button onClick={() => guarded(() => setEmployeeId('all'))} className="text-xs font-semibold text-accent/80 hover:text-accent hover:underline transition-colors">
                   Clear
                 </button>
               )}
             </div>
           </div>
 
-          <div>
-            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">Status</label>
-            <div className="relative">
-              <StatusIcon className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-accent" />
-              <select
-                value={status}
-                onChange={e => {
-                  const v = e.target.value as typeof status;
-                  guarded(() => setStatus(v));
-                }}
-                className="rounded-md border border-slate-200 bg-white py-1.5 pl-8 pr-2.5 text-xs shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-              >
-                <option value="All">All Logs</option>
-                <option value="Present">Present</option>
-                <option value="Absent">Absent</option>
-                <option value="Late">Late</option>
-                <option value="Early">Early</option>
-                <option value="Week Off">Week Off</option>
-                <option value="Leave">Leave</option>
-                <option value="Holiday">Holiday</option>
-                <option value="Exempt">Excused</option>
-              </select>
-            </div>
-          </div>
+          <div className="relative">
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-transparent select-none">&nbsp;</label>
+            <button
+              type="button"
+              onClick={() => setShowFiltersMenu(!showFiltersMenu)}
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium shadow-sm transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-accent/15 ${
+                showFiltersMenu || status !== 'All' || from !== to // highlighting if active
+                  ? 'border-accent/40 bg-accent/5 text-accent-dark'
+                  : 'border-slate-200/60 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-white'
+              }`}
+            >
+              <StatusIcon className={`h-4 w-4 ${showFiltersMenu || status !== 'All' ? 'text-accent' : 'text-accent/70'}`} />
+              More Filters
+              {(status !== 'All' || from !== to) && (
+                <span className="ml-1 flex h-2 w-2 rounded-full bg-accent" />
+              )}
+            </button>
+            {showFiltersMenu && (
+              <>
+                {/* Invisible backdrop to close the menu when clicking outside */}
+                <div className="fixed inset-0 z-40" onClick={() => setShowFiltersMenu(false)} />
+                <div className="absolute left-0 top-full mt-2 z-50 w-[24rem] rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_10px_40px_rgb(0,0,0,0.1)]">
+                  <div className="flex flex-col gap-5">
+                    <div className="group">
+                      <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Status</label>
+                      <div className="relative">
+                        <StatusIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
+                        <select
+                          value={status}
+                          onChange={e => {
+                            const v = e.target.value as typeof status;
+                            guarded(() => setStatus(v));
+                          }}
+                          className="w-full rounded-xl border border-slate-200/60 bg-white py-2 pl-9 pr-3 text-sm font-medium text-slate-700 shadow-sm transition-all duration-300 focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/15 hover:border-slate-300 cursor-pointer"
+                        >
+                          <option value="All">All Logs</option>
+                          <option value="Present">Present</option>
+                          <option value="Absent">Absent</option>
+                          <option value="Late">Late</option>
+                          <option value="Early">Early</option>
+                          <option value="Week Off">Week Off</option>
+                          <option value="Leave">Leave</option>
+                          <option value="Holiday">Holiday</option>
+                          <option value="Exempt">Excused</option>
+                        </select>
+                      </div>
+                    </div>
 
-          <div className="hidden h-8 w-px bg-slate-200 sm:block" />
+                    <div className="group">
+                      <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Date Range</label>
+                      <div className="w-full transition-transform duration-300">
+                        <DateRangePicker from={from} to={to} onChange={(f, t) => guarded(() => {
+                          setFrom(f);
+                          setTo(t);
+                        })} />
+                      </div>
+                    </div>
 
-          <div>
-            <label className="mb-0.5 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">Date Range</label>
-            {/* Wide enough for two spelled-out BS dates ("22 Shrawan 2083 –
-                22 Shrawan 2083"); at the old w-48 the picker's own `truncate`
-                cut the second one off to "22 Bhadra 2083 – 22 …". */}
-            <div className="w-[21rem]">
-              <DateRangePicker from={from} to={to} onChange={(f, t) => guarded(() => {
-                setFrom(f);
-                setTo(t);
-              })} />
-            </div>
+                    <div className="pt-2 border-t border-slate-100 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => guarded(() => {
+                          setEmployeeId('all');
+                          setStatus('All');
+                          setFrom(isoDaysAgo(0));
+                          setTo(isoDaysAgo(0));
+                        })}
+                        className="text-xs font-semibold text-slate-500 hover:text-accent hover:underline transition-colors"
+                      >
+                        Reset All Filters
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Correction mode — off is the standard report; on surfaces a Fix
@@ -1171,31 +1268,31 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 ? 'Correction mode on — click a Fix chip to correct a missed punch, or to add attendance on an Absent / Week Off day'
                 : `Turn on to fix missed punches and add attendance on Absent / Week Off days${incompleteCount ? ` (${incompleteCount} missed punches in this range)` : ''}`
             }
-            className={`flex items-center gap-2 self-end rounded-md border px-2.5 py-1.5 text-xs font-semibold shadow-sm transition-colors ${
+            className={`flex items-center gap-2.5 self-end rounded-xl border px-4 py-2 text-sm font-bold shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
               correctionMode
-                ? 'border-accent/40 bg-accent-light text-good-text'
-                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                ? 'border-accent/30 bg-gradient-to-r from-accent/10 to-accent/5 text-accent-dark'
+                : 'border-slate-200 bg-white/80 text-slate-600 hover:border-slate-300'
             }`}
           >
-            <CorrectionIcon className={`h-3.5 w-3.5 ${correctionMode ? 'text-good-text' : 'text-slate-400'}`} />
+            <CorrectionIcon className={`h-4 w-4 transition-colors ${correctionMode ? 'text-accent' : 'text-slate-400'}`} />
             Correction
             {incompleteCount > 0 && (
               <span
-                className={`rounded-full px-1.5 py-px text-[10px] font-bold ${
-                  correctionMode ? 'bg-white/70 text-good-text' : 'bg-warning-bg text-warning-text'
+                className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-extrabold shadow-sm ${
+                  correctionMode ? 'bg-white text-accent' : 'bg-warning-bg text-warning-text'
                 }`}
               >
                 {incompleteCount}
               </span>
             )}
             <span
-              className={`ml-0.5 inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
-                correctionMode ? 'bg-accent' : 'bg-slate-300'
+              className={`ml-1 inline-flex h-4 w-8 shrink-0 items-center rounded-full transition-colors duration-300 ${
+                correctionMode ? 'bg-accent shadow-inner' : 'bg-slate-300'
               }`}
             >
               <span
-                className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${
-                  correctionMode ? 'translate-x-3.5' : 'translate-x-0.5'
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform duration-300 ${
+                  correctionMode ? 'translate-x-4' : 'translate-x-0.5'
                 }`}
               />
             </span>
@@ -1210,9 +1307,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             onClick={() => guarded(recalculateRange)}
             disabled={recalculating}
             title="Recompute hours, late/early, overtime and status for this range from each employee's current shift — use this after changing a shift's times or a roster assignment"
-            className="flex items-center gap-1.5 self-end rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex items-center gap-2 self-end rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-sm font-bold text-slate-600 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-md hover:text-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:-translate-y-0"
           >
-            <RecalculateIcon className="h-3.5 w-3.5 text-slate-400" />
+            <RecalculateIcon className={`h-4 w-4 transition-transform duration-700 ${recalculating ? 'animate-spin text-accent' : 'text-slate-400 group-hover:text-accent'}`} />
             {recalculating ? `Recalculating ${recalcProgress?.done ?? 0}/${recalcProgress?.total ?? 0}…` : 'Recalculate'}
           </button>
 
@@ -1220,13 +1317,13 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white shadow-sm print:border-0 print:shadow-none">
+      <div className="rounded-2xl border border-slate-100 bg-white/70 backdrop-blur-sm shadow-[0_8px_30px_rgb(0,0,0,0.04)] print:border-0 print:shadow-none transition-all duration-500 overflow-hidden print:overflow-visible">
         {/* Same left-to-right table on every screen size, including phones —
             horizontal scroll instead of a condensed/truncated mobile layout,
             so it always matches the desktop web view exactly. Print gets the
             full table instead of just the scrolled-into-view slice. */}
         <HorizontalScrollButtons targetRef={tableScrollRef} />
-        <div ref={tableScrollRef} className="max-h-[65vh] overflow-auto rounded-lg print:max-h-none print:overflow-visible">
+        <div ref={tableScrollRef} className="max-h-[65vh] overflow-auto print:max-h-none print:overflow-visible">
         {/* print:-prefixed classes below only take effect inside the browser's
             print/Save-as-PDF preview — the on-screen table (colors, compact
             10-12px sizing) is untouched. Print gets a plain black-and-white
@@ -1239,24 +1336,25 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             `separate`, not `collapse`. */}
         <table className="w-full text-left text-xs">
           <thead>
-            <tr className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 print:static print:text-ink">
-              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Date</th>
-              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Day</th>
-              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">ID</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Employee</th>
-              <th className="w-px px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Shift</th>
-              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Check-In</th>
-              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Check-Out</th>
+            <tr className="sticky top-0 z-10 border-b border-slate-200/80 bg-slate-50/90 backdrop-blur-sm text-[11px] uppercase tracking-wider text-slate-500 print:static print:text-slate-500 print:border-b-[1.5px] print:border-[#d1d5db]">
+              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">S.N.</th>
+              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Date</th>
+              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Day</th>
+              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">ID</th>
+              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Employee</th>
+              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Shift</th>
+              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Check-In</th>
+              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Check-Out</th>
               {/* Screen only — omitted from print/PDF (and the totals row
                   below stays in step: its own placeholder cell for this
                   column is print:hidden too) since it's a data-entry aid,
                   not something worth taking up space on a printed report. */}
-              <th className="w-px whitespace-nowrap px-1.5 py-1.5 text-center font-semibold print:hidden" title="Raw punches this day — 2 is normal (one in, one out); more is worth a look (a break, or a device double-tap)">Punches</th>
-              <th className="w-px whitespace-nowrap px-1.5 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Late/Early</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Work Hours</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Overtime</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:w-16 print:border print:border-slate-400 print:px-1 print:py-1">Status</th>
-              <th className="whitespace-nowrap px-2 py-1.5 font-semibold print:border print:border-slate-400 print:px-1 print:py-1">Device</th>
+              <th className="w-px whitespace-nowrap px-4 py-3.5 text-left font-bold print:hidden" title="Raw punches this day — 2 is normal (one in, one out); more is worth a look (a break, or a device double-tap)">Punches</th>
+              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Late/Early</th>
+              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Work Hours</th>
+              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Overtime</th>
+              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:w-16 print:px-1 print:py-1 text-left">Status</th>
+              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Device</th>
             </tr>
           </thead>
           <tbody>
@@ -1296,22 +1394,23 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''} ${change?.kind === 'edit' ? 'bg-info-bg/50 print:bg-transparent' : change?.kind === 'delete' ? 'bg-critical-bg/40 print:bg-transparent' : ''}`}
                 style={isFirstRowForEmployee ? { breakBefore: 'page' } : undefined}
               >
+                <td className="w-px whitespace-nowrap px-4 py-3.5 tabular-nums text-slate-500 font-medium print:px-2 print:py-1 print:text-ink">{i + 1}</td>
                 {/* Numeric date (22/05/2083) rather than the spelled-out
                     "22 Bhadra 2083" — the month name is the same on every
                     row and the range is already named in the header, so the
                     words only cost width. The Day column beside it is what
                     makes a date scannable in practice. */}
-                <td className={`w-px whitespace-nowrap px-1.5 py-1 tabular-nums text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''} ${change?.kind === 'edit' ? 'border-l-2 border-l-info print:border-l' : change?.kind === 'delete' ? 'border-l-2 border-l-critical print:border-l' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
-                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
-                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
-                <td className="whitespace-nowrap px-2 py-1 font-medium text-ink print:border print:border-slate-400 print:px-2 print:py-1">{r.employeeName}</td>
-                <td className="w-px px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                <td className={`w-px whitespace-nowrap px-4 py-3.5 tabular-nums text-slate-600 text-left print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''} ${change?.kind === 'edit' ? 'border-l-2 border-l-info print:border-l' : change?.kind === 'delete' ? 'border-l-2 border-l-critical print:border-l' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
+                <td className="w-px whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
+                <td className="w-px whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
+                <td className="whitespace-nowrap px-4 py-3.5 font-medium text-ink text-left print:px-2 print:py-1">{r.employeeName}</td>
+                <td className="w-px px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   <span className="flex flex-col leading-tight">
                     <span className="whitespace-nowrap">{r.shiftName}</span>
                     {r.shiftTime && <span className="whitespace-nowrap text-[10px] text-slate-400 print:text-ink">{r.shiftTime}</span>}
                   </span>
                 </td>
-                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                <td className="w-px whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckInCell row={r} />
                   ) : blank === 'in' ? (
@@ -1323,7 +1422,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   )}
                   {change && fmtPunch(saved.checkIn) !== fmtPunch(r.checkIn) && <WasValue>{fmtPunch(saved.checkIn)}</WasValue>}
                 </td>
-                <td className="w-px whitespace-nowrap px-1.5 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                <td className="w-px whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckOutCell row={r} />
                   ) : blank === 'out' ? (
@@ -1335,25 +1434,25 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   )}
                   {change && fmtPunch(saved.checkOut) !== fmtPunch(r.checkOut) && <WasValue>{fmtPunch(saved.checkOut)}</WasValue>}
                 </td>
-                <td className={`w-px whitespace-nowrap px-1.5 py-1 text-center tabular-nums print:hidden ${r.punchCount > 2 ? 'font-semibold text-warning-text' : 'text-slate-600'}`}>
+                <td className={`w-px whitespace-nowrap px-4 py-3.5 text-left tabular-nums print:hidden ${r.punchCount > 2 ? 'font-semibold text-warning-text' : 'text-slate-600'}`}>
                   {r.punchCount || '–'}
                 </td>
-                <td className="w-px whitespace-nowrap px-1.5 py-1 text-[10px] print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                <td className="w-px whitespace-nowrap px-4 py-3.5 text-left text-[10px] print:px-2 print:py-1 print:text-ink">
                   <LateEarlyCell row={r} />
                 </td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                <td className="whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.hours)}
                   {change && fmtHrs(saved.hours) !== fmtHrs(r.hours) && <WasValue>{fmtHrs(saved.hours)}</WasValue>}
                 </td>
-                <td className="whitespace-nowrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-ink">
+                <td className="whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.overtime)}
                 </td>
-                <td className="whitespace-nowrap px-2 py-1 print:w-20 print:border print:border-slate-400 print:px-1 print:py-1">
+                <td className="whitespace-nowrap px-4 py-3.5 text-left print:w-20 print:px-1 print:py-1">
                   <span className="print:hidden">{statusBadge(r)}</span>
                   <span className="hidden print:inline print:text-ink">{r.status}</span>
                   {change && saved.status !== r.status && <WasValue>{saved.status}</WasValue>}
                 </td>
-                <td className="whitespace-nowrap print-wrap px-2 py-1 text-slate-600 print:border print:border-slate-400 print:px-2 print:py-1 print:text-[8px] print:text-ink">
+                <td className="whitespace-nowrap print-wrap px-4 py-3.5 text-slate-600 print:px-2 print:py-1 print:text-[8px] print:text-ink">
                   {canFix ? (
                     <EditablePunch onClick={() => openCorrection(saved)}>
                       <span>{r.device}</span>
@@ -1381,7 +1480,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             })}
             {(loading || recalculating || rows.length === 0) && (
               <tr>
-                <td colSpan={12} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={13} className="px-4 py-6 text-center text-slate-400">
                   {loading
                     ? 'Loading…'
                     : recalculating
@@ -1392,17 +1491,22 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             )}
           </tbody>
           {!loading && !recalculating && rows.length > 0 && (
-            <tfoot>
-              <tr className="sticky bottom-0 border-t-2 border-slate-200 bg-slate-50 text-xs font-bold text-ink print:static print:bg-white print:text-[10px]">
-                <td colSpan={5} className="whitespace-nowrap px-2 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 print:border print:border-slate-400 print:px-2 print:text-[10px] print:text-ink">
+            <tbody className="border-t-2 border-slate-200 print:border-slate-400">
+              <tr className="sticky bottom-0 bg-slate-50 text-xs font-bold text-ink print:static print:bg-white print:text-[10px] print-total-row">
+                <td colSpan={6} className="whitespace-nowrap px-4 py-3.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 print:px-2 print:text-[10px] print:text-ink">
                   Total
                 </td>
                 <td className="print:border print:border-slate-400" />
                 <td className="print:border print:border-slate-400" />
+                {/* Punches placeholder — print:hidden to match the Punches
+                    column itself, so the printed footer stays aligned with
+                    the printed body/header instead of shifting one cell
+                    right. */}
                 <td className="print:hidden" />
-                <td className="whitespace-nowrap px-2 py-1.5 print:border print:border-slate-400 print:px-2">{fmtHrs(totals.workHours)}</td>
-                <td className="whitespace-nowrap px-2 py-1.5 print:border print:border-slate-400 print:px-2">{fmtHrs(totals.overtimeHours)}</td>
-                <td className="whitespace-nowrap px-2 py-1.5 text-[10px] font-semibold print:w-20 print:whitespace-normal print:border print:border-slate-400 print:px-1 print:text-[10px]">
+                <td className="print:border print:border-slate-400" />
+                <td className="whitespace-nowrap px-4 py-3.5 text-left print:px-2">{fmtHrs(totals.workHours)}</td>
+                <td className="whitespace-nowrap px-4 py-3.5 text-left print:px-2">{fmtHrs(totals.overtimeHours)}</td>
+                <td className="whitespace-nowrap px-4 py-3.5 text-[10px] font-semibold print:w-20 print:whitespace-normal print:px-1 print:text-[10px] text-left">
                   {/* On-screen: one line, colored, joined by " · " — unchanged.
                       Print: stacked on two lines instead, so this cell doesn't
                       force the totals row (and the columns before it) wider
@@ -1419,11 +1523,33 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 </td>
                 <td className="print:border print:border-slate-400" />
               </tr>
-            </tfoot>
+            </tbody>
           )}
         </table>
         </div>
       </div>
+
+      {/* Professional Print Footer — signature lines */}
+      {!loading && !recalculating && rows.length > 0 && (
+        <div className="hidden print:block mt-8">
+          <div className="flex justify-between items-end text-[9px] text-slate-500 border-t border-slate-300 pt-4">
+            <div>
+              <div className="text-[10px] text-slate-700 font-medium mb-1">Total Records: {rows.length}</div>
+              <div>{companyName || 'Company Name'} — Attendance Report</div>
+            </div>
+            <div className="flex gap-16">
+              <div className="text-center">
+                <div className="w-32 border-b border-slate-400 mb-1" />
+                <div className="text-[8px] uppercase tracking-wider">Prepared By</div>
+              </div>
+              <div className="text-center">
+                <div className="w-32 border-b border-slate-400 mb-1" />
+                <div className="text-[8px] uppercase tracking-wider">Approved By</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Nothing staged in Correction mode is written until this bar's Save
           changes — see saveAllChanges(). */}

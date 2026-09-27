@@ -4,7 +4,6 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { usePageTitle } from '@/lib/pageTitle';
 import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
@@ -14,6 +13,7 @@ import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, Shift, Profile, Branch, Department } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
+import { usePageTitle } from '@/lib/pageTitle';
 
 const PAGE_SIZE = 10;
 
@@ -183,6 +183,19 @@ function EmployeesView() {
   const [resignDate, setResignDate] = useState('');
   const [resigning, setResigning] = useState(false);
   const [resignError, setResignError] = useState<string | null>(null);
+
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(event.target as Node)) {
+        setActiveMenuId(null);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   function reload() {
     supabase.from('employees').select('*').order('created_at', { ascending: false }).then(({ data }) => setEmployees(data ?? []));
@@ -724,84 +737,91 @@ function EmployeesView() {
 
   return (
     <>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative">
-            <FilterIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent" />
-            <select
-              value={filter}
-              onChange={e => {
-                setFilter(e.target.value);
-                setPage(1);
-              }}
-              className="min-w-[13rem] rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-8 text-sm font-medium text-ink shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-            >
-              {['All', ...departments, 'Unenrolled', 'Resigned'].map(f => (
-                <option key={f} value={f}>
-                  {f === 'All' ? 'All Departments' : f === 'Unenrolled' ? 'Biometric Unenrolled' : f === 'Resigned' ? 'Resigned Employees' : f}
-                </option>
-              ))}
-            </select>
+      <div className="relative z-50 mb-5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-4">
+          <div className="group">
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Department</label>
+            <div className="relative">
+              <FilterIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
+              <select
+                value={filter}
+                onChange={e => {
+                  setFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="min-w-[13rem] appearance-none rounded-xl border border-slate-200/80 bg-white/80 py-2.5 pl-9 pr-8 text-sm font-medium text-ink shadow-sm backdrop-blur-sm transition-all duration-200 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 hover:border-accent/40"
+              >
+                {['All', ...departments, 'Unenrolled', 'Resigned'].map(f => (
+                  <option key={f} value={f}>
+                    {f === 'All' ? 'All Departments' : f === 'Unenrolled' ? 'Biometric Unenrolled' : f === 'Resigned' ? 'Resigned Employees' : f}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div
-            ref={searchBoxRef}
-            tabIndex={-1}
-            onBlur={e => {
-              if (!searchBoxRef.current?.contains(e.relatedTarget as Node)) setSuggestionsOpen(false);
-            }}
-            className="relative"
-          >
-            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search employees..."
-              value={search}
-              onChange={e => {
-                setSearch(e.target.value);
-                setPage(1);
-                setSuggestionsOpen(true);
+          <div className="group">
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Search</label>
+            <div
+              ref={searchBoxRef}
+              tabIndex={-1}
+              onBlur={e => {
+                if (!searchBoxRef.current?.contains(e.relatedTarget as Node)) setSuggestionsOpen(false);
               }}
-              onFocus={() => setSuggestionsOpen(true)}
-              className="w-56 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-4 text-sm text-ink shadow-sm placeholder:text-slate-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
-            />
-            {suggestionsOpen && searchSuggestions.length > 0 && (
-              <div className="absolute left-0 top-full z-20 mt-1 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                {searchSuggestions.map(s => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => {
-                      setSearch(s);
-                      setPage(1);
-                      setSuggestionsOpen(false);
-                    }}
-                    className="block w-full truncate px-3 py-2 text-left text-sm text-ink hover:bg-slate-50"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              className="relative"
+            >
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-hover:text-accent" />
+              <input
+                type="text"
+                placeholder="Search employees..."
+                value={search}
+                onChange={e => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                  setSuggestionsOpen(true);
+                }}
+                onFocus={() => setSuggestionsOpen(true)}
+                className="w-56 appearance-none rounded-xl border border-slate-200/80 bg-white/80 py-2.5 pl-9 pr-4 text-sm text-ink shadow-sm backdrop-blur-sm transition-all duration-200 placeholder:text-slate-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 hover:border-accent/40"
+              />
+              {suggestionsOpen && searchSuggestions.length > 0 && (
+                <div className="absolute left-0 top-full z-20 mt-1.5 w-56 overflow-hidden rounded-xl border border-slate-100 bg-white/95 py-1 shadow-xl backdrop-blur-sm">
+                  {searchSuggestions.map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => {
+                        setSearch(s);
+                        setPage(1);
+                        setSuggestionsOpen(false);
+                      }}
+                      className="block w-full truncate px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-accent/5 hover:text-accent"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="ml-auto flex gap-2">
+            <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCsvSelected} className="hidden" />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-accent/40 hover:bg-white hover:shadow-md disabled:opacity-60"
+            >
+              {importing ? 'Importing…' : '⭱ Import CSV'}
+            </button>
+            {filter !== 'Resigned' && (
+              <button
+                onClick={() => setShowForm(true)}
+                className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-accent/90 hover:shadow-md"
+              >
+                + Add Employee
+              </button>
             )}
           </div>
-        </div>
-        <div className="flex gap-2">
-          <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCsvSelected} className="hidden" />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-          >
-            {importing ? 'Importing…' : '⭱ Import CSV'}
-          </button>
-          {filter !== 'Resigned' && (
-            <button
-              onClick={() => setShowForm(true)}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90"
-            >
-              + Add Employee
-            </button>
-          )}
         </div>
       </div>
 
@@ -856,7 +876,7 @@ function EmployeesView() {
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-2xl border border-slate-100 bg-white/70 backdrop-blur-sm shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-500">
         {/* Mobile: one stacked card per employee — no side-scrolling. */}
         <div className="divide-y divide-slate-100 md:hidden">
           {pageItems.map(emp => {
@@ -1070,30 +1090,31 @@ function EmployeesView() {
         </div>
 
         {/* Desktop: full table. */}
-        <HorizontalScrollButtons targetRef={tableScrollRef} />
-        <div ref={tableScrollRef} className="hidden overflow-x-auto md:block">
+        <div ref={tableScrollRef} className="hidden overflow-x-auto overflow-y-visible md:block pb-24 -mb-24">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-2 py-3 text-center font-medium">ID</th>
-                <th className="px-3 py-3 text-center font-medium">Employee Name</th>
-                <th className="px-2 py-3 text-center font-medium">Username</th>
-                <th className="w-32 px-2 py-3 text-center font-medium">Date of Joining</th>
-                <th className="w-28 px-2 py-3 text-center font-medium">Branch</th>
-                <th className="w-32 px-2 py-3 text-center font-medium">Department</th>
-                <th className="w-28 px-2 py-3 text-center font-medium">Designation</th>
-                <th className="w-32 px-2 py-3 text-center font-medium">Shift</th>
-                <th className="px-3 py-3 text-center font-medium">Bio Enrollment</th>
-                <th className="px-3 py-3 text-center font-medium">Actions</th>
+              <tr className="sticky top-0 z-10 border-b border-slate-200/80 bg-slate-50/90 backdrop-blur-sm text-[11px] uppercase tracking-wider text-slate-500">
+                <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold text-left rounded-tl-2xl">S.N.</th>
+                <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold text-left">ID</th>
+                <th className="whitespace-nowrap px-4 py-3.5 font-bold text-left">Employee Name</th>
+                <th className="whitespace-nowrap px-4 py-3.5 font-bold text-left">Username</th>
+                <th className="w-32 whitespace-nowrap px-4 py-3.5 font-bold text-left">Date of Joining</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3.5 font-bold text-left">Branch</th>
+                <th className="w-32 whitespace-nowrap px-4 py-3.5 font-bold text-left">Department</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3.5 font-bold text-left">Designation</th>
+                <th className="w-32 whitespace-nowrap px-4 py-3.5 font-bold text-left">Shift</th>
+                <th className="whitespace-nowrap px-4 py-3.5 font-bold text-left">Bio Enrollment</th>
+                <th className="whitespace-nowrap px-4 py-3.5 font-bold text-left rounded-tr-2xl">Actions</th>
               </tr>
             </thead>
             <tbody>
               {pageItems.map(emp => {
                 const shift = resolveShift(emp, shifts);
                 return (
-                  <tr key={emp.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-2 py-3 text-center text-sm font-semibold text-ink">{emp.fingerprint_id ?? '—'}</td>
-                    <td className="px-3 py-3">
+                  <tr key={emp.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/70 transition-colors">
+                    <td className="w-px whitespace-nowrap px-4 py-3.5 tabular-nums text-slate-500 font-medium">{pageItems.indexOf(emp) + 1 + (page - 1) * PAGE_SIZE}</td>
+                    <td className="w-px whitespace-nowrap px-4 py-3.5 text-sm font-semibold text-ink text-left">{emp.fingerprint_id ?? '—'}</td>
+                    <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => openPhotoPicker(emp.id)}
@@ -1121,7 +1142,7 @@ function EmployeesView() {
                         </div>
                       </div>
                     </td>
-                    <td className="px-2 py-3">
+                    <td className="px-4 py-3.5">
                       {linkedEmployeeIds.has(emp.id) ? (
                         editingUsernameId === emp.id ? (
                           <div className="flex flex-col items-start gap-1.5">
@@ -1169,10 +1190,10 @@ function EmployeesView() {
                         <span className="text-xs text-slate-300">—</span>
                       )}
                     </td>
-                    <td className="w-32 px-2 py-3 text-center text-xs text-slate-500">
+                    <td className="w-32 px-4 py-3.5 text-left text-xs text-slate-500">
                       {emp.date_of_joining ? formatAdDate(emp.date_of_joining, system) : <span className="text-slate-300">—</span>}
                     </td>
-                    <td className="w-28 px-2 py-3">
+                    <td className="w-28 px-4 py-3.5">
                       <select
                         value={pendingBranch[emp.id] ?? (emp.branch_id ?? '')}
                         onChange={e => setPendingBranch(p => ({ ...p, [emp.id]: e.target.value }))}
@@ -1188,7 +1209,7 @@ function EmployeesView() {
                         ))}
                       </select>
                     </td>
-                    <td className="w-32 px-2 py-3">
+                    <td className="w-32 px-4 py-3.5">
                       <select
                         value={pendingDepartment[emp.id] ?? (emp.department ?? '')}
                         onChange={e => setPendingDepartment(p => ({ ...p, [emp.id]: e.target.value }))}
@@ -1205,7 +1226,7 @@ function EmployeesView() {
                         )}
                       </select>
                     </td>
-                    <td className="w-28 px-2 py-3">
+                    <td className="w-28 px-4 py-3.5">
                       <input
                         type="text"
                         placeholder="—"
@@ -1214,7 +1235,7 @@ function EmployeesView() {
                         className="w-full max-w-[7rem] rounded-md border border-slate-200 px-1.5 py-1 text-xs text-slate-600"
                       />
                     </td>
-                    <td className="w-32 px-2 py-3 text-center">
+                    <td className="w-32 px-4 py-3.5 text-left">
                       {rosterEmployeeIds.has(emp.id) ? (
                         <Link
                           href="/shifts?tab=roster"
@@ -1229,79 +1250,130 @@ function EmployeesView() {
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-4 py-3.5">
                       <div className="flex flex-col items-start gap-1">
                         {renderBioEnrollment(emp)}
                         {linkedEmployeeIds.has(emp.id) && <Badge tone="good">Login Active</Badge>}
                       </div>
                     </td>
-                    <td className="px-3 py-3">
-                      <div className="grid w-48 grid-cols-3 gap-1.5">
-                        {linkedEmployeeIds.has(emp.id) ? (
-                          <ActionTile
-                            icon={<KeyIcon className="h-3.5 w-3.5" />}
-                            label="Reset"
-                            title="Reset password"
-                            tone="accent"
-                            onClick={() => openResetModal(emp)}
-                          />
-                        ) : (
-                          <ActionTile
-                            icon={<KeyIcon className="h-3.5 w-3.5" />}
-                            label="Login"
-                            title="Create login"
-                            tone="accent"
-                            onClick={() => openLoginModal(emp)}
-                          />
-                        )}
-                        {emp.status === 'active' && (
-                          <ActionTile
-                            icon={<UserMinusIcon className="h-3.5 w-3.5" />}
-                            label="Resign"
-                            title="Mark Resigned"
-                            tone="warning"
-                            onClick={() => openResignModal(emp)}
-                          />
-                        )}
-                        <ActionTile
-                          icon={<TrashIcon className="h-3.5 w-3.5" />}
-                          label="Remove"
-                          tone="critical"
-                          onClick={() => handleDelete(emp.id)}
-                        />
-                        {emp.status !== 'active' && (
-                          <>
-                            <ActionTile
-                              icon={<PencilIcon className="h-3.5 w-3.5" />}
-                              label="Edit date"
-                              title="Edit resignation date"
-                              tone="warning"
-                              onClick={() => openResignModal(emp)}
-                            />
-                            <ActionTile
-                              icon={<RestoreIcon className="h-3.5 w-3.5" />}
-                              label="Restore"
-                              title="Restore to active"
-                              tone="accent"
-                              onClick={() => handleRestore(emp)}
-                            />
-                            <ActionTile
-                              icon={<TrashIcon className="h-3.5 w-3.5" />}
-                              label="Delete forever"
-                              title="Permanently delete this employee and all their history"
-                              tone="critical"
-                              onClick={() => openForceDelete(emp)}
-                            />
-                          </>
-                        )}
-                      </div>
+                    <td className="px-4 py-3.5 text-right relative">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveMenuId(activeMenuId === emp.id ? null : emp.id);
+                        }}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/60 bg-white text-slate-400 shadow-sm transition-colors hover:border-accent hover:bg-accent/5 hover:text-accent"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                        </svg>
+                      </button>
+
+                      {activeMenuId === emp.id && (
+                        <div
+                          ref={actionMenuRef}
+                          className="absolute right-8 top-10 z-50 w-48 overflow-hidden rounded-xl border border-slate-100 bg-white/95 p-1.5 shadow-xl backdrop-blur-sm"
+                        >
+                          {linkedEmployeeIds.has(emp.id) ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                openResetModal(emp);
+                                setActiveMenuId(null);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-accent/5 hover:text-accent"
+                            >
+                              <KeyIcon className="h-4 w-4" />
+                              Reset Password
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                openLoginModal(emp);
+                                setActiveMenuId(null);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-accent/5 hover:text-accent"
+                            >
+                              <KeyIcon className="h-4 w-4" />
+                              Create Login
+                            </button>
+                          )}
+
+                          {emp.status === 'active' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                openResignModal(emp);
+                                setActiveMenuId(null);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-warning/10 hover:text-warning-text"
+                            >
+                              <UserMinusIcon className="h-4 w-4" />
+                              Mark Resigned
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDelete(emp.id);
+                              setActiveMenuId(null);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-critical transition-colors hover:bg-critical/10"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                            Remove
+                          </button>
+
+                          {emp.status !== 'active' && (
+                            <>
+                              <div className="my-1 border-t border-slate-100" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  openResignModal(emp);
+                                  setActiveMenuId(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-warning/10 hover:text-warning-text"
+                              >
+                                <PencilIcon className="h-4 w-4" />
+                                Edit Date
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleRestore(emp);
+                                  setActiveMenuId(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition-colors hover:bg-accent/5 hover:text-accent"
+                              >
+                                <RestoreIcon className="h-4 w-4" />
+                                Restore
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  openForceDelete(emp);
+                                  setActiveMenuId(null);
+                                }}
+                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-critical transition-colors hover:bg-critical/10"
+                              >
+                                <TrashIcon className="h-4 w-4" />
+                                Delete Forever
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
               })}
               {pageItems.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-slate-400">
+                  <td colSpan={11} className="px-4 py-16 text-center text-[13px] text-slate-500 italic">
                     No employees match this filter.
                   </td>
                 </tr>
@@ -1310,25 +1382,26 @@ function EmployeesView() {
           </table>
         </div>
 
-        <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-sm text-slate-500">
-          <span>
-            Showing {pageItems.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1} to {(page - 1) * PAGE_SIZE + pageItems.length} of{' '}
-            {filtered.length} employees
+        <div className="flex items-center justify-between border-t border-slate-100/80 bg-slate-50/50 px-5 py-3.5 text-sm rounded-b-2xl">
+          <span className="text-slate-500 text-[12px]">
+            Showing <span className="font-semibold text-ink">{pageItems.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}</span> to <span className="font-semibold text-ink">{(page - 1) * PAGE_SIZE + pageItems.length}</span> of{' '}
+            <span className="font-semibold text-ink">{filtered.length}</span> employees
           </span>
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="rounded-md border border-slate-200 px-3 py-1 disabled:opacity-40"
+              className="rounded-xl border border-slate-200/80 bg-white px-4 py-1.5 text-sm font-medium text-slate-600 shadow-sm transition-all duration-200 hover:border-accent/40 hover:shadow-md disabled:opacity-40"
             >
-              Prev
+              ← Prev
             </button>
+            <span className="flex items-center px-2 text-xs font-semibold text-slate-500">{page} / {totalPages}</span>
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="rounded-md border border-slate-200 px-3 py-1 disabled:opacity-40"
+              className="rounded-xl border border-slate-200/80 bg-white px-4 py-1.5 text-sm font-medium text-slate-600 shadow-sm transition-all duration-200 hover:border-accent/40 hover:shadow-md disabled:opacity-40"
             >
-              Next
+              Next →
             </button>
           </div>
         </div>
