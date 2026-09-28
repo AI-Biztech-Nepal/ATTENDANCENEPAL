@@ -132,7 +132,6 @@ export default function SuperadminDashboardPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-lg font-bold text-ink sm:text-2xl">Dashboard</h1>
       {error && <p className="mb-4 text-sm text-critical">{error}</p>}
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:grid-cols-3">

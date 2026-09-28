@@ -15,8 +15,15 @@ const NAV_ITEMS = [
   { href: '/superadmin/companies', label: 'Companies', icon: BuildingIcon },
 ];
 
+// Only the Dashboard route gets a header title — Companies and the
+// per-company dashboard preview render their own in-page h1 (with search
+// boxes, back links, etc. alongside it), so a blanket pathname→title map
+// here would just duplicate those.
+const HEADER_TITLES: Record<string, string> = { '/superadmin': 'Dashboard' };
+
 export default function SuperadminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const headerTitle = HEADER_TITLES[pathname];
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
@@ -52,12 +59,15 @@ export default function SuperadminShell({ children }: { children: React.ReactNod
         </div>
       </aside>
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center justify-end gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 lg:px-8">
-          <button aria-label="Notifications" className="rounded-full p-2 text-slate-500 hover:bg-slate-100">
-            <BellIcon className="h-5 w-5" />
-          </button>
-          <div className="hidden h-8 w-px bg-slate-200 sm:block" />
-          <SuperadminAccountMenu />
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 lg:px-8">
+          {headerTitle ? <h1 className="text-lg font-bold text-ink sm:text-2xl">{headerTitle}</h1> : <div />}
+          <div className="flex items-center gap-4">
+            <button aria-label="Notifications" className="rounded-full p-2 text-slate-500 hover:bg-slate-100">
+              <BellIcon className="h-5 w-5" />
+            </button>
+            <div className="hidden h-8 w-px bg-slate-200 sm:block" />
+            <SuperadminAccountMenu />
+          </div>
         </header>
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
