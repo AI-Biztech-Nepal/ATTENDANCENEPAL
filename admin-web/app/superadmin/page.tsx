@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { formatAdDate, formatDateTime, localDateKey } from '@/lib/calendar';
+import { useCalendarSystem } from '@/lib/calendarSystem';
 import CompanyDetailModal from '@/components/CompanyDetailModal';
 import Badge from '@/components/Badge';
 
@@ -50,6 +52,7 @@ const AVATAR_COLORS = [
 // admin/hr roster — no subscription plans/status/renewal/revenue (that
 // piece was removed: not useful without real payment gateway credentials).
 export default function SuperadminDashboardPage() {
+  const { system } = useCalendarSystem();
   const [stats, setStats] = useState<Stats | null>(null);
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,7 +205,7 @@ export default function SuperadminDashboardPage() {
                         <span className="truncate text-base font-semibold text-ink">{c.name}</span>
                         {c.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
                       </div>
-                      <div className="truncate text-xs text-slate-500">Signed up {new Date(c.createdAt).toLocaleDateString()}</div>
+                      <div className="truncate text-xs text-slate-500">Signed up {formatAdDate(localDateKey(c.createdAt), system)}</div>
                     </div>
                   </div>
 
@@ -266,7 +269,7 @@ export default function SuperadminDashboardPage() {
                         <span className="truncate text-sm font-semibold text-ink">{c.name}</span>
                         {c.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
                       </div>
-                      <div className="truncate text-xs text-slate-500">Signed up {new Date(c.createdAt).toLocaleDateString()}</div>
+                      <div className="truncate text-xs text-slate-500">Signed up {formatAdDate(localDateKey(c.createdAt), system)}</div>
                     </div>
                   </div>
 
@@ -327,7 +330,7 @@ export default function SuperadminDashboardPage() {
                   <li key={a.companyId}>
                     <button
                       onClick={() => setSelectedCompanyId(a.companyId)}
-                      title={`Last punch: ${new Date(a.lastPunchAt).toLocaleString()}`}
+                      title={`Last punch: ${formatDateTime(a.lastPunchAt, system)}`}
                       className="flex w-full items-center justify-between gap-2 text-left text-sm hover:text-accent"
                     >
                       <span className="truncate font-medium text-ink">{a.companyName}</span>
@@ -352,7 +355,7 @@ export default function SuperadminDashboardPage() {
                       className="flex w-full items-center justify-between gap-2 text-left text-sm hover:text-accent"
                     >
                       <span className="truncate font-medium text-ink">{c.name}</span>
-                      <span className="shrink-0 text-xs text-slate-500">{new Date(c.createdAt).toLocaleDateString()}</span>
+                      <span className="shrink-0 text-xs text-slate-500">{formatAdDate(localDateKey(c.createdAt), system)}</span>
                     </button>
                   </li>
                 ))}

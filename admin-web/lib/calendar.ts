@@ -255,6 +255,21 @@ export function formatAdDate(adKey: string | null | undefined, system: CalendarS
   return NepaliDate.fromAD(new Date(Number(y), Number(mo) - 1, Number(d))).format('D MMMM YYYY');
 }
 
+/** Formats a full ISO timestamp's clock time — reads the same regardless of
+ * calendar system, so this never branches on AD/BS. */
+export function formatTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Formats a full ISO timestamp as "<date in the active calendar system> · <time>" —
+ * the counterpart to formatAdDate() for values that carry a time-of-day too
+ * (e.g. a last-punch or last-sync timestamp), not just a bare date. */
+export function formatDateTime(value: string | null | undefined, system: CalendarSystem): string {
+  if (!value) return '—';
+  return `${formatAdDate(localDateKey(value), system)} · ${formatTime(value)}`;
+}
+
 export type WeekRange = { start: string; end: string; label: string; dates: string[] };
 
 /** The Sun-Sat AD week (7 real calendar dates) containing `anchorKey` —

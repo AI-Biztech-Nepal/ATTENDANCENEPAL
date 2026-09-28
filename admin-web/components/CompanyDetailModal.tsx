@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { formatAdDate, formatDateTime, localDateKey } from '@/lib/calendar';
+import { useCalendarSystem } from '@/lib/calendarSystem';
 import Badge from '@/components/Badge';
 
 type User = { id: string; name: string; email: string; role: string };
@@ -50,6 +52,7 @@ export default function CompanyDetailModal({
   /** Called after a successful permanent delete — company is gone, close this modal. */
   onDeleted: () => void;
 }) {
+  const { system } = useCalendarSystem();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -189,7 +192,7 @@ export default function CompanyDetailModal({
               <h3 className="text-lg font-semibold text-ink">{detail?.company.name ?? 'Loading…'}</h3>
               {detail?.company.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
             </div>
-            {detail && <p className="text-xs text-slate-500">Signed up {new Date(detail.company.createdAt).toLocaleDateString()}</p>}
+            {detail && <p className="text-xs text-slate-500">Signed up {formatAdDate(localDateKey(detail.company.createdAt), system)}</p>}
           </div>
           <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-600">
             ✕
@@ -297,12 +300,12 @@ export default function CompanyDetailModal({
                         <Badge tone={d.status === 'online' ? 'good' : 'critical'}>{d.status}</Badge>
                       </div>
                       <div className="space-y-1 border-t border-slate-100 pt-1.5 text-xs text-slate-500">
-                        <div>Last active: {d.last_sync ? new Date(d.last_sync).toLocaleString() : 'never'}</div>
+                        <div>Last active: {d.last_sync ? formatDateTime(d.last_sync, system) : 'never'}</div>
                         <div className="flex items-center gap-1.5">
                           Last pull (attendance logs):{' '}
                           {d.lastPull ? (
                             <>
-                              {new Date(d.lastPull.at).toLocaleString()}
+                              {formatDateTime(d.lastPull.at, system)}
                               <Badge tone={d.lastPull.status === 'success' ? 'good' : 'critical'}>{d.lastPull.status}</Badge>
                             </>
                           ) : (
@@ -313,7 +316,7 @@ export default function CompanyDetailModal({
                           Last user sync:{' '}
                           {d.lastUserSync ? (
                             <>
-                              {new Date(d.lastUserSync.at).toLocaleString()}
+                              {formatDateTime(d.lastUserSync.at, system)}
                               <Badge tone={d.lastUserSync.status === 'success' ? 'good' : 'critical'}>{d.lastUserSync.status}</Badge>
                             </>
                           ) : (

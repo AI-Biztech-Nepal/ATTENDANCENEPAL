@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { formatAdDate, localDateKey } from '@/lib/calendar';
+import { useCalendarSystem } from '@/lib/calendarSystem';
 import Badge from '@/components/Badge';
 import CompanyDetailModal from '@/components/CompanyDetailModal';
 
@@ -27,6 +29,7 @@ const AVATAR_COLORS = [
 ];
 
 export default function SuperadminCompaniesPage() {
+  const { system } = useCalendarSystem();
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -102,7 +105,7 @@ export default function SuperadminCompaniesPage() {
                   <span className="truncate text-base font-semibold text-ink">{c.name}</span>
                   {c.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
                 </div>
-                <div className="truncate text-xs text-slate-500">Signed up {new Date(c.createdAt).toLocaleDateString()}</div>
+                <div className="truncate text-xs text-slate-500">Signed up {formatAdDate(localDateKey(c.createdAt), system)}</div>
               </div>
             </div>
 

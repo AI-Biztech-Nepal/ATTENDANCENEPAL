@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import SuperadminAccountMenu from './SuperadminAccountMenu';
+import CalendarSystemSwitch from './CalendarSystemSwitch';
 
 // Deliberately NOT built on AppShell/Sidebar/TopBar — those are structurally
 // tied to the tenant role: 'admin' | 'hr' union, and reusing them here would
@@ -60,7 +61,10 @@ export default function SuperadminShell({ children }: { children: React.ReactNod
       </aside>
       <div className="flex flex-1 flex-col overflow-hidden">
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 lg:px-8">
-          {headerTitle ? <h1 className="text-lg font-bold text-ink sm:text-2xl">{headerTitle}</h1> : <div />}
+          <div className="flex min-w-0 items-center gap-3">
+            {headerTitle && <h1 className="text-lg font-bold text-ink sm:text-2xl">{headerTitle}</h1>}
+            <CalendarSystemSwitch />
+          </div>
           <div className="flex items-center gap-4">
             <button aria-label="Notifications" className="rounded-full p-2 text-slate-500 hover:bg-slate-100">
               <BellIcon className="h-5 w-5" />
