@@ -1,9 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { supabase } from '@/lib/supabase';
-import StatCard from '@/components/StatCard';
 import CompanyDetailModal from '@/components/CompanyDetailModal';
 import Badge from '@/components/Badge';
 
@@ -48,9 +46,6 @@ const AVATAR_COLORS = [
   'bg-pink-50 text-pink-600',
   'bg-blue-50 text-blue-600',
 ];
-const ROLE_COLORS: Record<string, string> = { admin: '#7c3aed', hr: '#0d9488', employee: '#2563eb' };
-const ROLE_LABELS: Record<string, string> = { admin: 'Admin', hr: 'HR', employee: 'Employee' };
-
 // Everything here is a real, unfiltered count, a real timestamp, or a real
 // admin/hr roster — no subscription plans/status/renewal/revenue (that
 // piece was removed: not useful without real payment gateway credentials).
@@ -124,39 +119,9 @@ export default function SuperadminDashboardPage() {
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5);
 
-  const roleBreakdown = stats
-    ? (['admin', 'hr', 'employee'] as const)
-        .map(role => ({ role, name: ROLE_LABELS[role], value: stats.roleCounts[role], color: ROLE_COLORS[role] }))
-        .filter(r => r.value > 0)
-    : [];
-
   return (
     <div>
       {error && <p className="mb-4 text-sm text-critical">{error}</p>}
-
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 sm:grid-cols-3">
-        <StatCard
-          label="Total Companies"
-          value={stats ? String(stats.totalCompanies) : '—'}
-          hint="All time"
-          icon={<BuildingIcon className="h-5 w-5" />}
-          iconClassName="bg-violet-50 text-violet-600"
-        />
-        <StatCard
-          label="Total Employees"
-          value={stats ? String(stats.totalEmployees) : '—'}
-          hint="Across all companies"
-          icon={<BriefcaseIcon className="h-5 w-5" />}
-          iconClassName="bg-info-bg text-info"
-        />
-        <StatCard
-          label="Registered Devices"
-          value={stats ? String(stats.totalDevices) : '—'}
-          hint="Biometric terminals"
-          icon={<DeviceIcon className="h-5 w-5" />}
-          iconClassName="bg-warning-bg text-warning"
-        />
-      </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-4">
         <div className="xl:col-span-3">
@@ -345,37 +310,6 @@ export default function SuperadminDashboardPage() {
 
         <div className="flex flex-col gap-4">
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <h2 className="mb-3 text-sm font-semibold text-ink">User Roles (platform-wide)</h2>
-            {roleBreakdown.length === 0 ? (
-              <p className="text-sm text-slate-400">No users yet.</p>
-            ) : (
-              <>
-                <ResponsiveContainer width="100%" height={160}>
-                  <PieChart>
-                    <Pie data={roleBreakdown} dataKey="value" nameKey="name" innerRadius={40} outerRadius={65} paddingAngle={2}>
-                      {roleBreakdown.map(r => (
-                        <Cell key={r.role} fill={r.color} stroke="#fff" strokeWidth={2} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number, n: string) => [`${v} users`, n]} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <ul className="mt-2 space-y-1.5 text-xs">
-                  {roleBreakdown.map(r => (
-                    <li key={r.role} className="flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 text-slate-600">
-                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: r.color }} />
-                        {r.name}
-                      </span>
-                      <span className="font-medium text-ink">{r.value}</span>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="mb-3 flex items-center gap-2">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-75" />
@@ -443,30 +377,6 @@ export default function SuperadminDashboardPage() {
   );
 }
 
-function BuildingIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <rect x="4" y="3" width="16" height="18" rx="1" />
-      <path strokeLinecap="round" d="M8 7h1M8 11h1M8 15h1M15 7h1M15 11h1M15 15h1M10 21v-3h4v3" />
-    </svg>
-  );
-}
-function BriefcaseIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <rect x="3" y="7" width="18" height="13" rx="2" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-    </svg>
-  );
-}
-function DeviceIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-      <path strokeLinecap="round" d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
-    </svg>
-  );
-}
 function GridIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
