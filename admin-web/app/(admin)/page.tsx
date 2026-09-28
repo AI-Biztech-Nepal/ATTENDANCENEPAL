@@ -13,6 +13,7 @@ import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, Shi
 import { ATTENDANCE_LOG_COLUMNS } from '@/lib/types';
 import { dateKey, firstCheckIn, isLate, last7Days, presentEmployeeIds, WEEKDAY_LABEL } from '@/lib/metrics';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesByGender } from '@/lib/weekOff';
+import { fetchAll } from '@/lib/leaveBalance';
 import {
   applyOvernightShiftCorrection,
   buildWeeklyPatternByEmployee,
@@ -117,12 +118,13 @@ export default function DashboardPage() {
       .select('employee_id, weekday, shift_id')
       .then(({ data }) => setWeeklyPatternRows(data ?? []));
     supabase.from('company_holidays').select('*').eq('holiday_date', today).maybeSingle().then(({ data }) => setTodayHoliday(data ?? null));
-    supabase
-      .from('attendance_logs')
-      .select(ATTENDANCE_LOG_COLUMNS)
-      .gte('punch_time', since.toISOString())
-      .order('punch_time', { ascending: false })
-      .then(({ data }) => setLogs(data ?? []));
+    // A week of punches for a busy/large company can pass PostgREST's
+    // default 1000-row cap on a plain select(), which silently truncates
+    // rather than erroring — quietly wrong present/late/absent KPIs and a
+    // stale-looking activity feed. fetchAll pages through every row instead.
+    fetchAll<AttendanceLog>((a, b) =>
+      supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).gte('punch_time', since.toISOString()).order('punch_time', { ascending: false }).range(a, b)
+    ).then(rows => setLogs(rows));
 
     const channel = supabase
       .channel('dashboard-live-feed')

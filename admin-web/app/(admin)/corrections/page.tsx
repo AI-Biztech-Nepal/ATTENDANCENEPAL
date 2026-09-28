@@ -9,6 +9,7 @@ import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalDateKey, nepalDateTimeToUtcMs, nepalTodayIso, punchMinuteOfDay, punchTypeLabel, selectDayPunches } from '@/lib/shift';
+import { fetchAll } from '@/lib/leaveBalance';
 import { ATTENDANCE_LOG_COLUMNS } from '@/lib/types';
 import type { AttendanceLog, Employee, CorrectionRequest, AttendanceGpsRequest } from '@/lib/types';
 
@@ -66,12 +67,14 @@ export default function CorrectionsPage() {
       .then(({ data }) => setGpsRequests(data ?? []));
     supabase.from('employees').select('*').then(({ data }) => setEmployees(data ?? []));
     // Punches since the start of this month — feeds the "incomplete entries"
-    // list and pre-fills the form with a day's existing punches.
-    supabase
-      .from('attendance_logs')
-      .select(ATTENDANCE_LOG_COLUMNS)
-      .gte('punch_time', `${startOfThisMonthIso()}T00:00:00Z`)
-      .then(({ data }) => setLogs(data ?? []));
+    // list and pre-fills the form with a day's existing punches. Company-wide
+    // and with no upper bound, so a busy company can pass PostgREST's default
+    // 1000-row cap on a plain select() well before month-end, which silently
+    // truncates rather than erroring — some real incomplete entries would
+    // just never show up on this worklist. fetchAll pages through every row.
+    fetchAll<AttendanceLog>((a, b) =>
+      supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).gte('punch_time', `${startOfThisMonthIso()}T00:00:00Z`).range(a, b)
+    ).then(logs => setLogs(logs));
   }
   useEffect(reload, []);
 

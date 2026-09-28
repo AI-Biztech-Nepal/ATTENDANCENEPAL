@@ -19,6 +19,7 @@ import {
   type WeeklyPatternByEmployee,
 } from '../lib/shift';
 import { fetchMyCompanyWeekOffConfig } from '../lib/weekOff';
+import { fetchAll } from '../lib/leaveBalance';
 import { colors } from '../theme';
 import { formatDdMmYyyy } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
@@ -114,13 +115,32 @@ export default function HistoryScreen() {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', from).lte('work_date', to),
-      supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).gte('punch_time', `${from}T00:00:00Z`).lte('punch_time', `${to}T23:59:59Z`),
-      supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', from).lte('work_date', to),
-    ]).then(([summariesRes, logsRes, rosterRes]) => {
-      setSummaries((summariesRes.data as PayrollSummary[]) ?? []);
-      setLogs((logsRes.data as AttendanceLog[]) ?? []);
-      setDailyShiftRows((rosterRes.data as any) ?? []);
+      // payroll_summaries/attendance_logs/employee_daily_shifts are one row
+      // per employee per day (or per punch) — a company-wide range (this
+      // screen allows an arbitrary custom range, not just one month) easily
+      // passes PostgREST's default 1000-row cap on a plain select(), which
+      // silently truncates rather than erroring — and this table is also
+      // what exportCsv() below writes out, so a truncated fetch means a
+      // wrong CSV handed to someone. fetchAll pages through every row
+      // instead (same fix already applied on the web side).
+      fetchAll<PayrollSummary>((a, b) =>
+        supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', from).lte('work_date', to).range(a, b)
+      ),
+      fetchAll<AttendanceLog>((a, b) =>
+        supabase
+          .from('attendance_logs')
+          .select(ATTENDANCE_LOG_COLUMNS)
+          .gte('punch_time', `${from}T00:00:00Z`)
+          .lte('punch_time', `${to}T23:59:59Z`)
+          .range(a, b)
+      ),
+      fetchAll<{ employee_id: string; work_date: string; shift_id: string | null }>((a, b) =>
+        supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', from).lte('work_date', to).range(a, b)
+      ),
+    ]).then(([summaries, logs, rosterRows]) => {
+      setSummaries(summaries);
+      setLogs(logs);
+      setDailyShiftRows(rosterRows as any);
       setLoading(false);
     });
   }, [from, to]);

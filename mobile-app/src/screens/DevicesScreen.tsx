@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
-import type { AttendanceLog, Branch, Device, DeviceSyncEvent, Employee } from '../types';
-import { ATTENDANCE_LOG_COLUMNS } from '../types';
+import type { Branch, Device, DeviceSyncEvent, Employee } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
 
@@ -12,7 +11,13 @@ export default function DevicesScreen() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [logs, setLogs] = useState<AttendanceLog[]>([]);
+  // device_id -> total punches ever synced from it. A per-device exact COUNT
+  // (head: true, no rows transferred) instead of fetching every zkteco
+  // attendance_logs row for the whole company and filtering client-side —
+  // that used to hit PostgREST's default 1000-row cap on an unpaginated
+  // select(), so this count silently stopped climbing past 1000 regardless
+  // of how much had actually synced (same bug already fixed on the web side).
+  const [logCounts, setLogCounts] = useState<Record<string, number>>({});
   const [syncEvents, setSyncEvents] = useState<DeviceSyncEvent[]>([]);
   const [queuing, setQueuing] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -21,15 +26,24 @@ export default function DevicesScreen() {
   const [saving, setSaving] = useState(false);
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
 
+  async function loadLogCounts(forDevices: Device[]) {
+    const entries = await Promise.all(
+      forDevices.map(async d => {
+        const { count } = await supabase.from('attendance_logs').select('*', { count: 'exact', head: true }).eq('device_id', d.id);
+        return [d.id, count ?? 0] as const;
+      })
+    );
+    setLogCounts(Object.fromEntries(entries));
+  }
+
   function reload() {
-    supabase.from('devices').select('*').then(({ data }) => setDevices((data as Device[]) ?? []));
+    supabase.from('devices').select('*').then(({ data }) => {
+      const list = (data as Device[]) ?? [];
+      setDevices(list);
+      loadLogCounts(list);
+    });
     supabase.from('branches').select('*').then(({ data }) => setBranches((data as Branch[]) ?? []));
     supabase.from('employees').select('*').then(({ data }) => setEmployees((data as Employee[]) ?? []));
-    supabase
-      .from('attendance_logs')
-      .select(ATTENDANCE_LOG_COLUMNS)
-      .eq('method', 'zkteco')
-      .then(({ data }) => setLogs((data as AttendanceLog[]) ?? []));
     supabase
       .from('device_sync_events')
       .select('*')
@@ -148,7 +162,7 @@ export default function DevicesScreen() {
         renderItem={({ item: d }) => {
           const branch = branches.find(b => b.id === d.branch_id);
           const registered = employees.filter(e => e.branch_id === d.branch_id && e.fingerprint_id).length;
-          const fetched = logs.filter((l: any) => l.device_id === d.id).length;
+          const fetched = logCounts[d.id] ?? 0;
           const deviceEvents = syncEvents.filter(e => e.device_id === d.id);
           const busy = (type: 'users' | 'logs') =>
             queuing === `${d.id}-${type}` || deviceEvents.some(e => e.sync_type === type && (e.status === 'pending' || e.status === 'running'));

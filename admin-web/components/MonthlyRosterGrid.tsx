@@ -7,6 +7,7 @@ import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { holidayDatesByGender } from '@/lib/weekOff';
+import { fetchAll } from '@/lib/leaveBalance';
 import type { CompanyHoliday, Employee, Shift } from '@/lib/types';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -85,13 +86,24 @@ export default function MonthlyRosterGrid() {
     Promise.all([
       supabase.from('employees').select('*').eq('status', 'active'),
       supabase.from('shifts').select('*'),
-      supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end),
+      // One row per employee per day for a whole month — a company with
+      // more than ~32 active employees passes PostgREST's default 1000-row
+      // cap on a plain select(), which silently truncates rather than
+      // erroring. A cell whose real row got dropped this way renders as
+      // blank/inherited even though it has an explicit pick in the
+      // database — Save or Copy then acts on what the grid shows, not on
+      // what's actually stored, which can quietly clear or overwrite a real
+      // assignment the admin never saw. fetchAll pages through every row
+      // instead (same fix already applied elsewhere for this table).
+      fetchAll<RosterRow>((a, b) =>
+        supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end).range(a, b)
+      ),
       supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id'),
       supabase.from('company_holidays').select('*').gte('holiday_date', start).lte('holiday_date', end),
-    ]).then(([empRes, shiftsRes, rosterRes, patternRes, holidaysRes]) => {
+    ]).then(([empRes, shiftsRes, rosterRows, patternRes, holidaysRes]) => {
       setEmployees((empRes.data ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
       setShifts(shiftsRes.data ?? []);
-      setRosterRows(rosterRes.data ?? []);
+      setRosterRows(rosterRows);
       setPatternRows(patternRes.data ?? []);
       setHolidays(holidaysRes.data ?? []);
       setLoading(false);

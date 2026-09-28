@@ -11,6 +11,7 @@ import { useConfirm } from '@/components/ConfirmDialog';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import type { Employee, Shift } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
+import { fetchAll } from '@/lib/leaveBalance';
 
 const EMPTY_FORM = { name: '', type: 'fixed' as Shift['type'], start_time: '09:00', end_time: '18:00', grace_minutes: 10, department: '' };
 
@@ -86,10 +87,13 @@ function ShiftsView() {
   function reload() {
     supabase.from('shifts').select('*').then(({ data }) => setShifts(data ?? []));
     supabase.from('employees').select('*').eq('status', 'active').then(({ data }) => setEmployees(data ?? []));
-    supabase
-      .from('employee_daily_shifts')
-      .select('employee_id, shift_id')
-      .then(({ data }) => setDailyRows(data ?? []));
+    // Whole table, no date filter — a company with enough roster history
+    // passes PostgREST's default 1000-row cap on a plain select(), which
+    // silently truncates rather than erroring, so per-shift headcounts here
+    // could quietly under-count. fetchAll pages through every row instead.
+    fetchAll<{ employee_id: string; shift_id: string | null }>((a, b) =>
+      supabase.from('employee_daily_shifts').select('employee_id, shift_id').range(a, b)
+    ).then(rows => setDailyRows(rows));
     supabase
       .from('employee_weekly_pattern')
       .select('employee_id, weekday, shift_id')

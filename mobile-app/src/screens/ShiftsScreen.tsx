@@ -3,6 +3,7 @@ import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput } 
 import { supabase } from '../lib/supabase';
 import type { Employee, Shift } from '../types';
 import { resolveShift, formatShiftHours } from '../lib/shift';
+import { fetchAll } from '../lib/leaveBalance';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
 
@@ -22,10 +23,13 @@ export default function ShiftsScreen() {
   function reload() {
     supabase.from('shifts').select('*').then(({ data }) => setShifts((data as Shift[]) ?? []));
     supabase.from('employees').select('*').eq('status', 'active').then(({ data }) => setEmployees((data as Employee[]) ?? []));
-    supabase
-      .from('employee_daily_shifts')
-      .select('employee_id')
-      .then(({ data }) => setRosterEmployeeIds(new Set((data ?? []).map((r: any) => r.employee_id))));
+    // Whole table, no date filter — a company with enough roster history
+    // passes PostgREST's default 1000-row cap on a plain select(), which
+    // silently truncates rather than erroring, so per-shift headcounts here
+    // could quietly under-count. fetchAll pages through every row instead.
+    fetchAll<{ employee_id: string }>((a, b) => supabase.from('employee_daily_shifts').select('employee_id').range(a, b)).then(rows =>
+      setRosterEmployeeIds(new Set(rows.map(r => r.employee_id)))
+    );
   }
   useEffect(reload, []);
 

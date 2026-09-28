@@ -22,6 +22,7 @@ import { fetchStaffSheetConfig } from '../lib/payrollFormat';
 import {
   NO_LEAVE_POLICY,
   coveredDaysInRange,
+  fetchAll,
   fetchLeavePolicy,
   formatLeaveDays,
   leavePolicyActive,
@@ -177,19 +178,35 @@ export default function PayrollScreen({ navigation }: any) {
   function reload() {
     setLoading(true);
     Promise.all([
-      supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', start).lte('work_date', end),
-      supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).gte('punch_time', `${start}T00:00:00Z`).lte('punch_time', `${end}T23:59:59Z`),
+      // payroll_summaries/attendance_logs/employee_daily_shifts are one row
+      // per employee per day (or per punch) — a company-wide month easily
+      // passes PostgREST's default 1000-row cap on a plain select(), which
+      // silently truncates rather than erroring. fetchAll pages through
+      // every row instead (same fix already applied on the web side).
+      fetchAll<PayrollSummary>((a, b) =>
+        supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', start).lte('work_date', end).range(a, b)
+      ),
+      fetchAll<AttendanceLog>((a, b) =>
+        supabase
+          .from('attendance_logs')
+          .select(ATTENDANCE_LOG_COLUMNS)
+          .gte('punch_time', `${start}T00:00:00Z`)
+          .lte('punch_time', `${end}T23:59:59Z`)
+          .range(a, b)
+      ),
       supabase.from('shifts').select('*'),
       supabase.from('employees').select('*').eq('status', 'active'),
-      supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end),
+      fetchAll<{ employee_id: string; work_date: string; shift_id: string | null }>((a, b) =>
+        supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end).range(a, b)
+      ),
       supabase.from('company_holidays').select('*').gte('holiday_date', start).lte('holiday_date', end),
       supabase.from('leave_requests').select('*').eq('status', 'approved').lte('start_date', end).gte('end_date', start),
-    ]).then(([summariesRes, logsRes, shiftsRes, employeesRes, rosterRes, holidaysRes, leaveRes]) => {
-      setSummaries((summariesRes.data as PayrollSummary[]) ?? []);
-      setLogs((logsRes.data as AttendanceLog[]) ?? []);
+    ]).then(([summaries, logs, shiftsRes, employeesRes, rosterRows, holidaysRes, leaveRes]) => {
+      setSummaries(summaries);
+      setLogs(logs);
       setShifts((shiftsRes.data as Shift[]) ?? []);
       setEmployees((employeesRes.data as Employee[]) ?? []);
-      setDailyShiftRows((rosterRes.data as any) ?? []);
+      setDailyShiftRows(rosterRows as any);
       setHolidays((holidaysRes.data as CompanyHoliday[]) ?? []);
       setLeaveRequests((leaveRes.data as LeaveRequest[]) ?? []);
       setLoading(false);

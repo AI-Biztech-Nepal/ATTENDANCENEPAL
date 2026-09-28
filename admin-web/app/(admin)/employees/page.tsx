@@ -14,6 +14,7 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, Shift, Profile, Branch, Department } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
 import { usePageTitle } from '@/lib/pageTitle';
+import { fetchAll } from '@/lib/leaveBalance';
 
 const PAGE_SIZE = 10;
 
@@ -200,10 +201,14 @@ function EmployeesView() {
   function reload() {
     supabase.from('employees').select('*').order('created_at', { ascending: false }).then(({ data }) => setEmployees(data ?? []));
     supabase.from('shifts').select('*').then(({ data }) => setShifts(data ?? []));
-    supabase
-      .from('employee_daily_shifts')
-      .select('employee_id')
-      .then(({ data }) => setRosterEmployeeIds(new Set((data ?? []).map(r => r.employee_id))));
+    // Whole table, no date filter — a company with enough roster history
+    // passes PostgREST's default 1000-row cap on a plain select(), which
+    // silently truncates rather than erroring, so this "Custom shift" badge
+    // could quietly stop showing for real employees. fetchAll pages through
+    // every row instead.
+    fetchAll<{ employee_id: string }>((a, b) => supabase.from('employee_daily_shifts').select('employee_id').range(a, b)).then(rows =>
+      setRosterEmployeeIds(new Set(rows.map(r => r.employee_id)))
+    );
     supabase.from('profiles').select('id, employee_id, role').then(({ data }) => setProfiles(data ?? []));
     supabase.from('branches').select('*').order('name').then(({ data }) => setBranches(data ?? []));
     supabase.from('departments').select('*').order('name').then(({ data }) => setDepartmentOptions(data ?? []));

@@ -5,6 +5,7 @@ import { compressPhoto } from '../lib/compressPhoto';
 import { supabase } from '../lib/supabase';
 import type { Branch, Department, Employee, Gender, Profile, Shift } from '../types';
 import { resolveShift, formatShiftHours } from '../lib/shift';
+import { fetchAll } from '../lib/leaveBalance';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
 import DatePicker from '../components/DatePicker';
@@ -84,10 +85,14 @@ export default function EmployeesScreen({ route, navigation }: any) {
         setLoading(false);
       });
     supabase.from('shifts').select('*').then(({ data }) => setShifts((data as Shift[]) ?? []));
-    supabase
-      .from('employee_daily_shifts')
-      .select('employee_id')
-      .then(({ data }) => setRosterEmployeeIds(new Set((data ?? []).map((r: any) => r.employee_id))));
+    // Whole table, no date filter — a company with enough roster history
+    // passes PostgREST's default 1000-row cap on a plain select(), which
+    // silently truncates rather than erroring, so this "Custom shift" badge
+    // could quietly stop showing for real employees. fetchAll pages through
+    // every row instead.
+    fetchAll<{ employee_id: string }>((a, b) => supabase.from('employee_daily_shifts').select('employee_id').range(a, b)).then(rows =>
+      setRosterEmployeeIds(new Set(rows.map(r => r.employee_id)))
+    );
     supabase
       .from('profiles')
       .select('id, employee_id, role')

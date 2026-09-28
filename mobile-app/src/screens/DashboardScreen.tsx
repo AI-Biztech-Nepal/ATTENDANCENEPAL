@@ -8,6 +8,7 @@ import StatCard from '../components/StatCard';
 import SimpleLineChart from '../components/SimpleLineChart';
 import SimplePieChart from '../components/SimplePieChart';
 import { dateKey, firstCheckIn, isLate, presentEmployeeIds } from '../lib/metrics';
+import { fetchAll } from '../lib/leaveBalance';
 import {
   applyOvernightShiftCorrection,
   buildWeeklyPatternByEmployee,
@@ -103,16 +104,16 @@ export default function DashboardScreen({ navigation }: any) {
       .select('employee_id, shift_id')
       .eq('work_date', today)
       .then(({ data }) => setTodayRoster(data ?? []));
-    supabase
-      .from('attendance_logs')
-      .select(ATTENDANCE_LOG_COLUMNS)
-      .gte('punch_time', since.toISOString())
-      .order('punch_time', { ascending: false })
-      .then(({ data }) => {
-        const logs = (data as AttendanceLog[]) ?? [];
-        setWeekLogs(logs);
-        setFeed(logs.slice(0, 20));
-      });
+    // A week of punches for a busy/large company can pass PostgREST's
+    // default 1000-row cap on a plain select(), which silently truncates
+    // rather than erroring — quietly wrong present/late/absent KPIs and a
+    // stale-looking activity feed. fetchAll pages through every row instead.
+    fetchAll<AttendanceLog>((a, b) =>
+      supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).gte('punch_time', since.toISOString()).order('punch_time', { ascending: false }).range(a, b)
+    ).then(logs => {
+      setWeekLogs(logs);
+      setFeed(logs.slice(0, 20));
+    });
 
     const channel = supabase
       .channel('attendance-live')
