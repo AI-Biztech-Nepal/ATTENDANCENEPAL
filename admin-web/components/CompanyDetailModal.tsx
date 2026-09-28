@@ -76,6 +76,13 @@ export default function CompanyDetailModal({
   const [suspendConfirming, setSuspendConfirming] = useState(false);
   const [suspendError, setSuspendError] = useState<string | null>(null);
 
+  // View their account: single confirm, since a real session as their own
+  // login is a meaningfully bigger grant than anything else in this modal
+  // (read-write over their real data, not just a status flag).
+  const [impersonateBusy, setImpersonateBusy] = useState(false);
+  const [impersonateConfirming, setImpersonateConfirming] = useState(false);
+  const [impersonateError, setImpersonateError] = useState<string | null>(null);
+
   async function callAction(path: string, init: RequestInit) {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
@@ -103,6 +110,42 @@ export default function CompanyDetailModal({
       setSuspendError(e instanceof Error ? e.message : 'Could not update company status.');
     } finally {
       setSuspendBusy(false);
+    }
+  }
+
+  // Stashes this superadmin's own tokens (so ImpersonationBanner can restore
+  // them later) before switching this tab's session to the target login via
+  // verifyOtp() — see /api/superadmin/companies/[id]/impersonate for how the
+  // token_hash it returns was minted, and lib/superadmin's requireSuperadmin
+  // for the allowlist gate on generating it in the first place.
+  async function handleImpersonate() {
+    setImpersonateBusy(true);
+    setImpersonateError(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const returnSession = sessionData.session;
+      if (!returnSession) throw new Error('Your own session expired — refresh and sign in again.');
+
+      const body = await callAction(`/api/superadmin/companies/${companyId}/impersonate`, { method: 'POST' });
+
+      sessionStorage.setItem(
+        'impersonation_return',
+        JSON.stringify({
+          returnAccessToken: returnSession.access_token,
+          returnRefreshToken: returnSession.refresh_token,
+          companyName: body.company.name,
+          asEmail: body.asUser.email,
+          asRole: body.asUser.role,
+        })
+      );
+
+      const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: body.tokenHash, type: 'magiclink' });
+      if (verifyError) throw verifyError;
+
+      window.location.href = '/';
+    } catch (e) {
+      setImpersonateError(e instanceof Error ? e.message : 'Could not view their account.');
+      setImpersonateBusy(false);
     }
   }
 
@@ -159,15 +202,45 @@ export default function CompanyDetailModal({
         {detail && (
           <div className="space-y-6">
             <section>
-              <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <h4 className="text-sm font-semibold text-ink">Admin / HR / Employee logins ({detail.users.length})</h4>
-                <Link
-                  href={`/superadmin/companies/${detail.company.id}/dashboard`}
-                  className="shrink-0 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100"
-                >
-                  View their Dashboard (read-only)
-                </Link>
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                  <Link
+                    href={`/superadmin/companies/${detail.company.id}/dashboard`}
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    Dashboard preview (read-only)
+                  </Link>
+                  {impersonateConfirming ? (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setImpersonateConfirming(false)}
+                        disabled={impersonateBusy}
+                        className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleImpersonate}
+                        disabled={impersonateBusy || detail.users.length === 0}
+                        className="rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                      >
+                        {impersonateBusy ? 'Signing in…' : 'Confirm — view their account'}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setImpersonateConfirming(true)}
+                      disabled={detail.users.length === 0}
+                      title={detail.users.length === 0 ? 'No logins to view as.' : undefined}
+                      className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      View their account
+                    </button>
+                  )}
+                </div>
               </div>
+              {impersonateError && <p className="mb-2 text-xs text-critical">{impersonateError}</p>}
               {detail.users.length === 0 ? (
                 <p className="text-xs text-slate-400">None found.</p>
               ) : (

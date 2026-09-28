@@ -7,6 +7,7 @@ import { PageTitleProvider, usePageTitle } from '@/lib/pageTitle';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import ConfigWarning from './ConfigWarning';
+import ImpersonationBanner from './ImpersonationBanner';
 
 type Role = 'admin' | 'hr';
 
@@ -71,15 +72,18 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden print:h-auto print:overflow-visible">
-      <div className="print:hidden">
-        <Sidebar role={role} drawerOpen={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)} />
-      </div>
-      <div className="flex flex-1 flex-col overflow-hidden print:overflow-visible">
+    <div className="flex h-screen flex-col overflow-hidden print:h-auto print:overflow-visible">
+      <ImpersonationBanner />
+      <div className="flex flex-1 overflow-hidden print:overflow-visible">
         <div className="print:hidden">
-          <TopBar title={title} onOpenMenu={() => setDrawerOpen(true)} adminName={adminName} role={role} />
+          <Sidebar role={role} drawerOpen={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)} />
         </div>
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 print:overflow-visible print:p-0">{children}</main>
+        <div className="flex flex-1 flex-col overflow-hidden print:overflow-visible">
+          <div className="print:hidden">
+            <TopBar title={title} onOpenMenu={() => setDrawerOpen(true)} adminName={adminName} role={role} />
+          </div>
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 print:overflow-visible print:p-0">{children}</main>
+        </div>
       </div>
     </div>
   );
