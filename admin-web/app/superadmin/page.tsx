@@ -163,7 +163,10 @@ export default function SuperadminDashboardPage() {
         <div className="xl:col-span-3">
           <div className="mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <div>
-              <h2 className="text-base font-semibold text-ink">All Companies</h2>
+              <h2 className="text-base font-semibold text-ink">
+                All Companies
+                {stats && <span className="ml-1 text-[10px] font-normal text-slate-500">({stats.totalCompanies})</span>}
+              </h2>
               <p className="text-xs text-slate-500">Overview of all registered companies</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
