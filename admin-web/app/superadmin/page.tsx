@@ -122,11 +122,17 @@ export default function SuperadminDashboardPage() {
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5);
 
+  // Keyed by companyId so each company's own card can show its activity
+  // pulse inline instead of duplicating the same company names in a
+  // separate "Live Activity" list next to the one they're already in.
+  const activityByCompany = new Map<string, RecentActivity>(recentActivity?.map(a => [a.companyId, a]) ?? []);
+
   return (
     <div>
+      <h1 className="mb-6 text-lg font-bold text-ink sm:text-2xl">Dashboard</h1>
       {error && <p className="mb-4 text-sm text-critical">{error}</p>}
 
-      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-4">
         <div className="xl:col-span-3">
           <div className="mb-4 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <div>
@@ -196,17 +202,33 @@ export default function SuperadminDashboardPage() {
                   }}
                   className="min-w-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-accent hover:shadow-md"
                 >
-                  <div className="mb-3 flex min-w-0 items-center gap-3">
-                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}>
-                      {c.name.slice(0, 2).toUpperCase()}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate text-base font-semibold text-ink">{c.name}</span>
-                        {c.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
+                  <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}>
+                        {c.name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate text-base font-semibold text-ink">{c.name}</span>
+                          {c.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
+                        </div>
+                        <div className="truncate text-xs text-slate-500">Signed up {formatAdDate(localDateKey(c.createdAt), system)}</div>
                       </div>
-                      <div className="truncate text-xs text-slate-500">Signed up {formatAdDate(localDateKey(c.createdAt), system)}</div>
                     </div>
+                    {activityByCompany.has(c.id) && (
+                      <div className="flex shrink-0 flex-col items-end gap-0.5">
+                        <span className="flex items-center gap-1.5 text-[11px] font-semibold text-accent">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-75" />
+                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-good" />
+                          </span>
+                          {formatRelativeTime(activityByCompany.get(c.id)!.lastPunchAt)}
+                        </span>
+                        <span className="whitespace-nowrap text-[10px] text-slate-400">
+                          {formatDateTime(activityByCompany.get(c.id)!.lastPunchAt, system)}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 py-2.5 text-center">
@@ -273,6 +295,23 @@ export default function SuperadminDashboardPage() {
                     </div>
                   </div>
 
+                  <div className="flex w-32 shrink-0 flex-col items-center gap-0.5">
+                    {activityByCompany.has(c.id) && (
+                      <>
+                        <span className="flex items-center gap-1.5 text-[11px] font-semibold text-accent">
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-75" />
+                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-good" />
+                          </span>
+                          {formatRelativeTime(activityByCompany.get(c.id)!.lastPunchAt)}
+                        </span>
+                        <span className="whitespace-nowrap text-[10px] text-slate-400">
+                          {formatDateTime(activityByCompany.get(c.id)!.lastPunchAt, system)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
                   <div className="flex shrink-0 items-center gap-4 sm:gap-6">
                     <div className="text-center">
                       <div className="text-sm font-bold text-ink">{c.userCount}</div>
@@ -312,36 +351,6 @@ export default function SuperadminDashboardPage() {
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <div className="mb-3 flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-good opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-good" />
-              </span>
-              <h2 className="text-sm font-semibold text-ink">Live Activity</h2>
-            </div>
-            {recentActivity === null ? (
-              <p className="text-sm text-slate-400">Loading…</p>
-            ) : recentActivity.length === 0 ? (
-              <p className="text-sm text-slate-400">No punches recorded yet.</p>
-            ) : (
-              <ul className="space-y-2.5">
-                {recentActivity.map(a => (
-                  <li key={a.companyId}>
-                    <button
-                      onClick={() => setSelectedCompanyId(a.companyId)}
-                      title={`Last punch: ${formatDateTime(a.lastPunchAt, system)}`}
-                      className="flex w-full items-center justify-between gap-2 text-left text-sm hover:text-accent"
-                    >
-                      <span className="truncate font-medium text-ink">{a.companyName}</span>
-                      <span className="shrink-0 text-xs text-slate-500">{formatRelativeTime(a.lastPunchAt)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <h2 className="mb-3 text-sm font-semibold text-ink">Recent Company Registrations</h2>
             {recentCompanies.length === 0 ? (
