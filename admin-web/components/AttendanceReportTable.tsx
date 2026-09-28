@@ -29,7 +29,7 @@ import {
   type ResolvedShift,
 } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, holidayDatesByGender, leaveDatesByEmployee, weekOffDatesByGender } from '@/lib/weekOff';
-import { fetchLeavePolicy, leavePolicyActive } from '@/lib/leaveBalance';
+import { fetchAll, fetchLeavePolicy, leavePolicyActive } from '@/lib/leaveBalance';
 import { useSessionState } from '@/lib/useSessionState';
 import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
@@ -424,16 +424,34 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', from).lte('work_date', to),
-      supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).gte('punch_time', `${from}T00:00:00Z`).lte('punch_time', `${to}T23:59:59Z`),
-      supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', from).lte('work_date', to),
+      // payroll_summaries/attendance_logs/employee_daily_shifts are one row
+      // per employee per day (or per punch) — a company-wide month easily
+      // passes PostgREST's default 1000-row cap on a plain select(), which
+      // silently truncates rather than erroring (this report is exported to
+      // Excel/PDF, so a truncated fetch means missing rows on a document
+      // someone hands out). fetchAll pages through every row instead (same
+      // fix already applied in leaveBalance.ts for the same three tables).
+      fetchAll<PayrollSummary>((a, b) =>
+        supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', from).lte('work_date', to).range(a, b)
+      ),
+      fetchAll<AttendanceLog>((a, b) =>
+        supabase
+          .from('attendance_logs')
+          .select(ATTENDANCE_LOG_COLUMNS)
+          .gte('punch_time', `${from}T00:00:00Z`)
+          .lte('punch_time', `${to}T23:59:59Z`)
+          .range(a, b)
+      ),
+      fetchAll<{ employee_id: string; work_date: string; shift_id: string | null }>((a, b) =>
+        supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', from).lte('work_date', to).range(a, b)
+      ),
       supabase.from('company_holidays').select('*').gte('holiday_date', from).lte('holiday_date', to),
       supabase.from('leave_requests').select('*').eq('status', 'approved').lte('start_date', to).gte('end_date', from),
-    ]).then(([summariesRes, logsRes, rosterRes, holidaysRes, leaveRes]) => {
+    ]).then(([summaries, logs, rosterRows, holidaysRes, leaveRes]) => {
       // Rows a correction on another date has superseded are left out.
-      setSummaries(withoutSupersededSummaries(summariesRes.data ?? []));
-      setLogs(logsRes.data ?? []);
-      setDailyShiftRows(rosterRes.data ?? []);
+      setSummaries(withoutSupersededSummaries(summaries));
+      setLogs(logs);
+      setDailyShiftRows(rosterRows);
       setHolidays(holidaysRes.data ?? []);
       setLeaveRequests(leaveRes.data ?? []);
       setLoading(false);

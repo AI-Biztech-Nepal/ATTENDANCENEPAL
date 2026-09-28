@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperadmin } from '@/lib/superadmin';
 import { dateKey, isLate, presentEmployeeIds } from '@/lib/metrics';
+import { fetchAll } from '@/lib/leaveBalance';
 import { nepalTodayIso } from '@/lib/shift';
 import type { AttendanceLog, Employee, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS } from '@/lib/types';
@@ -34,16 +35,28 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const since = new Date();
   since.setUTCDate(since.getUTCDate() - 7);
 
-  const [employeesRes, shiftsRes, logsRes, leaveRes] = await Promise.all([
+  const [employeesRes, shiftsRes, logs, leaveRes] = await Promise.all([
     admin.from('employees').select('*').eq('company_id', companyId),
     admin.from('shifts').select('*').eq('company_id', companyId),
-    admin.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).eq('company_id', companyId).gte('punch_time', since.toISOString()).order('punch_time', { ascending: false }),
+    // A week of punches for a company with 35+ active employees can pass
+    // PostgREST's default 1000-row cap on a plain select() — which silently
+    // truncates rather than erroring, quietly wrong present/late/absent
+    // counts on a page support uses to walk a customer through their own
+    // dashboard. fetchAll pages through every row instead.
+    fetchAll<AttendanceLog>((a, b) =>
+      admin
+        .from('attendance_logs')
+        .select(ATTENDANCE_LOG_COLUMNS)
+        .eq('company_id', companyId)
+        .gte('punch_time', since.toISOString())
+        .order('punch_time', { ascending: false })
+        .range(a, b)
+    ),
     admin.from('leave_requests').select('employee_id').eq('company_id', companyId).eq('status', 'approved').lte('start_date', today).gte('end_date', today),
   ]);
 
   const employees = (employeesRes.data ?? []) as Employee[];
   const shifts = (shiftsRes.data ?? []) as Shift[];
-  const logs = (logsRes.data ?? []) as AttendanceLog[];
   const activeEmployees = employees.filter(e => e.status === 'active');
   const todayLogs = logs.filter(l => dateKey(l.punch_time) === today);
   const presentIds = presentEmployeeIds(logs, today);
