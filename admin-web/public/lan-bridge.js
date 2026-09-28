@@ -198,12 +198,19 @@ async function pullDeviceLogsAndUsers(device) {
 const LOG_CLEAR_INTERVAL_MS = 5 * 60 * 1000;
 const lastClearedAt = new Map();
 
-async function maybeClearDeviceLog(device, rawLogs) {
-  if (!rawLogs || rawLogs.length === 0) return;
-  if (Date.now() - (lastClearedAt.get(device.id) || 0) < LOG_CLEAR_INTERVAL_MS) return;
-  await withDevice(device, zk => zk.clearAttendanceLog(), 15000);
-  lastClearedAt.set(device.id, Date.now());
-  console.log(`[lan-bridge] ${device.name}: cleared ${rawLogs.length} already-synced record(s) off the device`);
+// DISABLED 2026-09-28: upsertLogs() below silently SKIPS any row whose
+// fingerprint doesn't currently map to a known employee (see its own
+// comment) — it never reaches Supabase at all. This function had no way to
+// know that happened: it only checked "did rawLogs have anything in it",
+// then wiped the device's ENTIRE log regardless. Net effect: any punch from
+// an unmapped fingerprint got permanently destroyed from BOTH the device and
+// Supabase the moment this ran, with zero way to recover it — confirmed live,
+// this ate real attendance history. DO NOT re-enable without first making
+// upsertLogs() report exactly which rawLogs rows were actually persisted
+// (inserted or already-present), and clearing only when every single row in
+// rawLogs is accounted for — never a coarse "rawLogs was non-empty" check.
+async function maybeClearDeviceLog() {
+  return;
 }
 
 // employeeIdByFingerprint can be passed in by a caller that's about to make
