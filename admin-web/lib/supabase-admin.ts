@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type User } from '@supabase/supabase-js';
 
 // Server-only: uses the service_role key, which bypasses Row Level Security
 // entirely. Never import this file from a 'use client' component — only from
@@ -17,4 +17,21 @@ export function getSupabaseAdmin() {
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+}
+
+/** admin.auth.admin.listUsers() only returns one page (1000 users max) — this
+ * lists auth users across the ENTIRE platform (every tenant company), not
+ * just the caller's own, so a single-page call silently missed anyone past
+ * that cutoff once total platform users crossed it. Pages through until an
+ * empty page comes back. */
+export async function listAllUsers(admin: ReturnType<typeof getSupabaseAdmin>) {
+  const perPage = 1000;
+  const users: User[] = [];
+  for (let page = 1; ; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+    if (error) return { users, error };
+    users.push(...data.users);
+    if (data.users.length < perPage) break;
+  }
+  return { users, error: null };
 }

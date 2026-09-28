@@ -271,6 +271,8 @@ function openSettingsWindow() {
     width: 420,
     height: 560,
     resizable: false,
+    show: false,
+    backgroundColor: '#0f172a',
     title: 'Device Bridge Settings',
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
@@ -282,6 +284,10 @@ function openSettingsWindow() {
   });
   settingsWindow.setMenu(null);
   settingsWindow.loadFile(path.join(__dirname, 'settings.html'));
+  // Created hidden and shown only once the document has painted: a visible
+  // window told to load afterwards renders a half-finished frame, and with
+  // resizable:false there is no way for the user to force a clean repaint.
+  settingsWindow.once('ready-to-show', () => settingsWindow.show());
   settingsWindow.on('closed', () => {
     settingsWindow = null;
   });
@@ -373,15 +379,42 @@ function setupAutoUpdater() {
   setInterval(check, AUTO_UPDATE_CHECK_INTERVAL_MS);
 }
 
+// Registers this app (the installed .exe, not this dev checkout) to launch
+// automatically at Windows login — idempotent, so calling it on every start
+// is fine. Without this, a device bridge configured via the tray only
+// resumes syncing once someone happens to reopen the app after a reboot;
+// Windows Update forces plenty of those, and a bridge silently offline until
+// someone notices is exactly the "have to babysit it" problem this app
+// exists to remove. Only meaningful for an installed build — a portable exe
+// run from an arbitrary folder has no stable path for Windows to relaunch,
+// and there's no login-item concept to register in dev (`npm start`).
+function enableAutoLaunch() {
+  if (!app.isPackaged) return;
+  try {
+    // args: ['--hidden'] marks a login-triggered launch so it can open
+    // straight to the tray below, instead of popping the dashboard window
+    // in front of whoever just logged in.
+    app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] });
+  } catch (err) {
+    console.error('[main] enabling auto-launch at login failed:', err.message);
+  }
+}
+
+const launchedHidden = process.argv.includes('--hidden');
+
 app.whenReady().then(async () => {
   // Nothing in the dashboard needs File/Edit/View/Window/Help — this is a
   // wrapped website, not a native editor, and that default Electron menu
   // just looks like leftover dev tooling.
   Menu.setApplicationMenu(null);
+  enableAutoLaunch();
   // The dashboard window shows immediately — it doesn't wait on the bridge
   // fetch below, since that's a background concern only relevant to whoever
-  // has actually configured a device bridge.
-  createWindow();
+  // has actually configured a device bridge. Skipped when Windows itself
+  // triggered this launch at login (--hidden): the point of auto-launch is
+  // the bridge quietly resuming in the tray, not the dashboard window
+  // popping up unasked-for every time someone signs in.
+  if (!launchedHidden) createWindow();
 
   // Each of these is independent — a failure in one (e.g. a bad icon path
   // throwing inside createTray()) must never silently abort the ones after

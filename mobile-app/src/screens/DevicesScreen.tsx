@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
 import type { AttendanceLog, Branch, Device, DeviceSyncEvent, Employee } from '../types';
+import { ATTENDANCE_LOG_COLUMNS } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
 
@@ -26,7 +27,7 @@ export default function DevicesScreen() {
     supabase.from('employees').select('*').then(({ data }) => setEmployees((data as Employee[]) ?? []));
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('method', 'zkteco')
       .then(({ data }) => setLogs((data as AttendanceLog[]) ?? []));
     supabase
@@ -58,8 +59,15 @@ export default function DevicesScreen() {
     };
   }, []);
 
+  // Poll every 3s only while a RECENT sync is queued/running — the 2-minute
+  // cutoff on requested_at stops the poll running forever on a sync stuck
+  // 'pending' because the bridge is offline.
   useEffect(() => {
-    if (!syncEvents.some(e => e.status === 'pending' || e.status === 'running')) return;
+    const cutoff = Date.now() - 2 * 60 * 1000;
+    const active = syncEvents.some(
+      e => (e.status === 'pending' || e.status === 'running') && new Date(e.requested_at).getTime() > cutoff
+    );
+    if (!active) return;
     const id = setInterval(reload, 3000);
     return () => clearInterval(id);
   }, [syncEvents]);

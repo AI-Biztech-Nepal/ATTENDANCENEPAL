@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, Switch } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { buildWeeklyPatternByEmployee, formatHoursMinutes, nepalTodayIso, type DailyShiftByDate, type WeeklyPatternByEmployee } from '../lib/shift';
 import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail } from '../lib/payrollDetail';
@@ -7,11 +7,10 @@ import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '../lib/weekOff
 import { formatDdMmYyyy } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '../types';
+import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '../types';
 import { colors } from '../theme';
 import { ChevronIcon } from '../components/icons';
 
-const OT_HOURS_PER_DAY = 8;
-const OT_MULTIPLIER = 1.5;
 const MONTH_LABEL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 function fmtHrs(hours: number) {
@@ -40,10 +39,21 @@ export default function AdminPayrollDetailScreen({ route }: any) {
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ weekday: number; shift_id: string | null }[]>([]);
+  // Read-only here (the save control lives on the admin Payroll list
+  // screen) — loaded from the company's saved default rather than a
+  // hardcoded 8h/1.5x.
+  const [otHoursPerDay, setOtHoursPerDay] = useState(8);
+  const [otMultiplier, setOtMultiplier] = useState(1.5);
+  // Overtime pay is optional per employee (some employees just aren't
+  // paid extra for it) — on by default, toggled here on the employee's
+  // own page (moved off the Payroll list).
+  const [otOn, setOtOn] = useState(true);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier }) => {
       setWeeklyOffDay(weeklyOffDay);
+      setOtHoursPerDay(otHoursPerDay);
+      setOtMultiplier(otMultiplier);
       if (rosterMode === 'weekly') {
         supabase
           .from('employee_weekly_pattern')
@@ -68,10 +78,10 @@ export default function AdminPayrollDetailScreen({ route }: any) {
   }, [employeeId]);
 
   useEffect(() => {
-    supabase.from('payroll_summaries').select('*').eq('employee_id', employeeId).gte('work_date', start).lte('work_date', end).then(({ data }) => setSummaries((data as PayrollSummary[]) ?? []));
+    supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).eq('employee_id', employeeId).gte('work_date', start).lte('work_date', end).then(({ data }) => setSummaries((data as PayrollSummary[]) ?? []));
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('punch_time', `${start}T00:00:00Z`)
       .lte('punch_time', `${end}T23:59:59Z`)
@@ -88,8 +98,15 @@ export default function AdminPayrollDetailScreen({ route }: any) {
       .then(({ data }) => setLeaveRequests((data as LeaveRequest[]) ?? []));
   }, [employeeId, start, end]);
 
-  const paidOffDates = useMemo(() => {
-    const set = weekOffDatesInRange(start, end, weeklyOffDay, holidays);
+  // Week-offs and approved Leave are kept apart, as on the dashboard: a
+  // week-off is already priced into the working-days divisor, while a Leave
+  // day on a working day earns a clean day on top.
+  const weekOffDates = useMemo(
+    () => weekOffDatesInRange(start, end, weeklyOffDay, holidays, employee?.gender ?? null),
+    [start, end, weeklyOffDay, holidays, employee?.gender]
+  );
+  const leaveDates = useMemo(() => {
+    const set = new Set<string>();
     for (const req of leaveRequests) {
       const cur = new Date((req.start_date < start ? start : req.start_date) + 'T00:00:00Z');
       const endDate = new Date((req.end_date > end ? end : req.end_date) + 'T00:00:00Z');
@@ -99,7 +116,7 @@ export default function AdminPayrollDetailScreen({ route }: any) {
       }
     }
     return set;
-  }, [start, end, weeklyOffDay, holidays, leaveRequests]);
+  }, [start, end, leaveRequests]);
 
   const dailyShiftByDate: DailyShiftByDate = useMemo(() => {
     const map: DailyShiftByDate = new Map();
@@ -115,29 +132,38 @@ export default function AdminPayrollDetailScreen({ route }: any) {
   }, [weeklyPatternRows, employeeId]);
 
   const dayRows: DayDetail[] = useMemo(
-    () => (employee ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern) : []),
-    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern]
+    () =>
+      employee
+        ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern)
+        : [],
+    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, weekOffDates, leaveDates, weeklyPattern]
   );
   const daysInRange = useMemo(() => (new Date(end).getTime() - new Date(start).getTime()) / 86400000 + 1, [start, end]);
+  // Basic is spread over WORKING days (calendar days minus week-offs), the
+  // same divisor the dashboard uses, so the two agree to the rupee.
+  const workingDays = useMemo(() => Math.max(1, Math.round(daysInRange) - weekOffDates.size), [daysInRange, weekOffDates]);
+  const earningOpts = useMemo(
+    () => ({ workingDays, otHoursPerDay, otMultiplier, otOn, mode: 'hourly' as const, today: nepalTodayIso() }),
+    [workingDays, otHoursPerDay, otMultiplier, otOn]
+  );
 
   const totals = useMemo(() => {
     const totalHours = dayRows.reduce((s, r) => s + r.hours, 0);
     const overtimeHours = dayRows.reduce((s, r) => s + r.overtime, 0);
-    const breakMinutes = dayRows.reduce((s, r) => s + r.breakMinutes, 0);
     const presentDays = dayRows.filter(r => r.checkIn).length;
     const absentDays = dayRows.filter(r => r.status === 'Absent').length;
     const paidOffDays = dayRows.filter(r => r.status === 'Week Off').length;
     let baseEarning = 0;
     let overtimeEarning = 0;
     for (const r of dayRows) {
-      const earning = dailySalaryEarning(r, employee?.salary ?? null, daysInRange, OT_HOURS_PER_DAY, OT_MULTIPLIER, true);
+      const earning = dailySalaryEarning(r, employee?.salary ?? null, { ...earningOpts, isCompanyOffDay: weekOffDates.has(r.date) });
       if (earning) {
         baseEarning += earning.base;
         overtimeEarning += earning.overtime;
       }
     }
-    return { totalHours, overtimeHours, breakMinutes, presentDays, absentDays, paidOffDays, totalSalary: baseEarning + overtimeEarning, overtimeEarning };
-  }, [dayRows, employee, daysInRange]);
+    return { totalHours, overtimeHours, presentDays, absentDays, paidOffDays, totalSalary: baseEarning + overtimeEarning, overtimeEarning };
+  }, [dayRows, employee, earningOpts, weekOffDates]);
 
   function changeMonth(delta: number) {
     let m = month + delta;
@@ -181,13 +207,22 @@ export default function AdminPayrollDetailScreen({ route }: any) {
               <Text style={styles.empMeta}>
                 ID {employee.fingerprint_id ?? '—'} · {employee.designation ?? '—'}
               </Text>
+              <View style={styles.otToggleRow}>
+                <Text style={styles.otToggleLabel}>Overtime Salary</Text>
+                <Switch
+                  value={otOn}
+                  onValueChange={setOtOn}
+                  trackColor={{ false: colors.slate200, true: colors.good }}
+                  style={{ transform: [{ scale: 0.8 }] }}
+                />
+              </View>
             </View>
             {employee.salary != null && (
               <View style={styles.statsRow}>
                 <View style={[styles.statCard, { backgroundColor: colors.goodBg }]}>
                   <Text style={[styles.statLabel, { color: colors.goodText }]}>Salary/Day</Text>
                   <Text style={styles.statValue}>{employee.salary.toLocaleString()}</Text>
-                  <Text style={[styles.statHint, { color: colors.goodText }]}>{Math.round(employee.salary / daysInRange).toLocaleString()}/day</Text>
+                  <Text style={[styles.statHint, { color: colors.goodText }]}>{Math.round(employee.salary / workingDays).toLocaleString()}/day</Text>
                 </View>
                 <View style={[styles.statCard, { backgroundColor: colors.infoBg }]}>
                   <Text style={[styles.statLabel, { color: colors.infoText }]}>Receivable</Text>
@@ -215,34 +250,34 @@ export default function AdminPayrollDetailScreen({ route }: any) {
 
             <Text style={styles.sectionHeading}>Daily Breakdown</Text>
             <View style={styles.tableHeader}>
-              <Text style={[styles.th, { flex: 0.14 }]}>Date</Text>
-              <Text style={[styles.th, { flex: 0.13 }]}>Hrs</Text>
-              <Text style={[styles.th, { flex: 0.13 }]}>OT</Text>
-              <Text style={[styles.th, { flex: 0.13 }]}>Break</Text>
-              <Text style={[styles.th, { flex: 0.17 }]}>Status</Text>
-              <Text style={[styles.th, { flex: 0.3 }]}>Total (OT)</Text>
+              <Text style={[styles.th, { flex: 0.16 }]}>Date</Text>
+              <Text style={[styles.th, { flex: 0.15 }]}>Hrs</Text>
+              <Text style={[styles.th, { flex: 0.15 }]}>OT</Text>
+              <Text style={[styles.th, { flex: 0.19 }]}>Status</Text>
+              <Text style={[styles.th, { flex: 0.35 }]}>Total (OT)</Text>
             </View>
           </>
         }
         renderItem={({ item: row, index }) => {
           const earning =
-            row.checkIn || row.paidOff ? dailySalaryEarning(row, employee?.salary ?? null, daysInRange, OT_HOURS_PER_DAY, OT_MULTIPLIER, true) : null;
+            row.checkIn || row.paidOff
+              ? dailySalaryEarning(row, employee?.salary ?? null, { ...earningOpts, isCompanyOffDay: weekOffDates.has(row.date) })
+              : null;
           return (
             <View style={[styles.tr, index % 2 === 1 && styles.trAlt]}>
-              <Text style={[styles.td, { flex: 0.14 }]}>{formatDdMmYyyy(row.date, system).slice(0, 5)}</Text>
-              <Text style={[styles.td, { flex: 0.13 }]}>{row.checkIn ? fmtHrs(row.hours) : '—'}</Text>
-              <Text style={[styles.td, { flex: 0.13, color: colors.infoText }]}>{row.checkIn ? fmtHrs(row.overtime) : '—'}</Text>
-              <Text style={[styles.td, { flex: 0.13 }]}>{row.breakMinutes > 0 ? formatHoursMinutes(row.breakMinutes) : '—'}</Text>
+              <Text style={[styles.td, { flex: 0.16 }]}>{formatDdMmYyyy(row.date, system).slice(0, 5)}</Text>
+              <Text style={[styles.td, { flex: 0.15 }]}>{row.checkIn ? fmtHrs(row.hours) : '—'}</Text>
+              <Text style={[styles.td, { flex: 0.15, color: colors.infoText }]}>{row.checkIn ? fmtHrs(row.overtime) : '—'}</Text>
               <Text
                 style={[
                   styles.td,
-                  { flex: 0.17 },
+                  { flex: 0.19 },
                   row.checkIn ? { color: colors.goodText } : row.status === 'Week Off' ? { color: colors.accent } : row.status === 'Absent' ? { color: colors.criticalText } : styles.dim,
                 ]}
               >
                 {row.checkIn ? 'Present' : row.status === 'Week Off' ? 'Week Off' : row.status === 'Absent' ? 'Absent' : '—'}
               </Text>
-              <Text style={[styles.td, styles.tdBold, { flex: 0.3 }]}>
+              <Text style={[styles.td, styles.tdBold, { flex: 0.35 }]}>
                 {earning ? earning.total.toFixed(0) : '—'}
                 {earning && earning.overtime > 0 ? <Text style={{ color: colors.infoText }}> ({earning.overtime.toFixed(0)})</Text> : null}
               </Text>
@@ -253,15 +288,14 @@ export default function AdminPayrollDetailScreen({ route }: any) {
         ListFooterComponent={
           dayRows.length > 0 ? (
             <View style={styles.footerRow}>
-              <Text style={[styles.tf, { flex: 0.14 }]}>Total</Text>
-              <Text style={[styles.tf, { flex: 0.13 }]}>{fmtHrs(totals.totalHours)}</Text>
-              <Text style={[styles.tf, { flex: 0.13, color: colors.infoText }]}>{fmtHrs(totals.overtimeHours)}</Text>
-              <Text style={[styles.tf, { flex: 0.13 }]}>{totals.breakMinutes > 0 ? formatHoursMinutes(totals.breakMinutes) : '—'}</Text>
-              <Text style={[styles.tf, { flex: 0.17 }]}>
+              <Text style={[styles.tf, { flex: 0.16 }]}>Total</Text>
+              <Text style={[styles.tf, { flex: 0.15 }]}>{fmtHrs(totals.totalHours)}</Text>
+              <Text style={[styles.tf, { flex: 0.15, color: colors.infoText }]}>{fmtHrs(totals.overtimeHours)}</Text>
+              <Text style={[styles.tf, { flex: 0.19 }]}>
                 <Text style={{ color: colors.goodText }}>{totals.presentDays}P</Text> <Text style={{ color: colors.accent }}>{totals.paidOffDays}W</Text>{' '}
                 <Text style={{ color: colors.criticalText }}>{totals.absentDays}A</Text>
               </Text>
-              <Text style={[styles.tf, { flex: 0.3, color: colors.goodText }]}>{Math.round(totals.totalSalary).toLocaleString()}</Text>
+              <Text style={[styles.tf, { flex: 0.35, color: colors.goodText }]}>{Math.round(totals.totalSalary).toLocaleString()}</Text>
             </View>
           ) : null
         }
@@ -277,6 +311,19 @@ const styles = StyleSheet.create({
   headerCard: { marginBottom: 12 },
   empName: { fontSize: 17, fontWeight: '700', color: colors.ink },
   empMeta: { fontSize: 12, color: colors.slate500, marginTop: 2 },
+  otToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    backgroundColor: colors.white,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.slate200,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  otToggleLabel: { fontSize: 11, fontWeight: '700', color: colors.slate500, textTransform: 'uppercase' },
   statsRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   statCard: { flex: 1, borderRadius: 10, padding: 10, alignItems: 'center' },
   statLabel: { fontSize: 9, fontWeight: '700', textTransform: 'uppercase' },

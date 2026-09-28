@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { supabase } from '../lib/supabase';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '../types';
+import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '../types';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '../lib/weekOff';
 import {
   applyOvernightShiftCorrection,
@@ -104,14 +105,14 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
     supabase.from('shifts').select('*').then(({ data }) => setShifts((data as Shift[]) ?? []));
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('punch_time', since)
       .order('punch_time', { ascending: true })
       .then(({ data }) => setLogs((data as AttendanceLog[]) ?? []));
     supabase
       .from('payroll_summaries')
-      .select('*')
+      .select(PAYROLL_SUMMARY_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('work_date', since.slice(0, 10))
       .then(({ data }) => setSummaries((data as PayrollSummary[]) ?? []));
@@ -146,8 +147,8 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   const companyWeekOffDates = useMemo(() => {
     const since = new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
-    return weekOffDatesInRange(since, today, weeklyOffDay, holidays);
-  }, [weeklyOffDay, holidays]);
+    return weekOffDatesInRange(since, today, weeklyOffDay, holidays, employee?.gender ?? null);
+  }, [weeklyOffDay, holidays, employee?.gender]);
 
   const weeklyPattern: WeeklyPatternByEmployee = useMemo(() => {
     const rows = weeklyPatternRows.map(r => ({ employee_id: employeeId, weekday: r.weekday, shift_id: r.shift_id }));
@@ -218,7 +219,11 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
 
     for (const date of visibleDates) {
       if (leaveDates.has(date) || weekOffDates.has(date) || companyWeekOffDates.has(date)) continue;
-      const summary = date !== todayKey ? summaryByDate.get(date) : undefined;
+      // A summary row with no check_in isn't a worked day (nightly job swept
+      // in a Week Off / Absent day, or the punch was claimed by the previous
+      // day's overnight shift) — ignore it here.
+      const rawSummary = date !== todayKey ? summaryByDate.get(date) : undefined;
+      const summary = rawSummary && rawSummary.check_in ? rawSummary : undefined;
       const status = dayStatus.get(date);
       if (summary || status) {
         present.push({ date, minutes: 0 });
@@ -266,7 +271,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
           return { date, onLeave: true, checkIn: null, checkOut: null, hours: 0, overtime: 0, lateMinutes: 0, earlyMinutes: 0, present: false, absent: false };
         }
         const summary = date !== todayKey ? summaryByDate.get(date) : undefined;
-        if (summary) {
+        if (summary && summary.check_in) {
           return {
             date,
             onLeave: false,
@@ -321,7 +326,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
     const end = new Date(new Date(start).getTime() + 86400000).toISOString();
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('punch_time', start)
       .lt('punch_time', end)

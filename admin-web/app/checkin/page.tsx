@@ -7,9 +7,9 @@ import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import { formatAdDate, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import { punchTypeLabel, selectDayPunches } from '@/lib/shift';
-import { fetchMyCompanyWeekOffConfig } from '@/lib/weekOff';
+import { nepalDateTimeToUtcMs, punchTypeLabel, selectDayPunches } from '@/lib/shift';
 import type { AttendanceGpsRequest, AttendanceLog, CorrectionRequest, LeaveRequest, LeaveType } from '@/lib/types';
+import { ATTENDANCE_LOG_COLUMNS } from '@/lib/types';
 
 const HISTORY_WINDOW_DAYS = 90;
 type HistoryRange = 'daily' | 'weekly' | 'monthly';
@@ -28,9 +28,15 @@ const EMPTY_CORRECTION_FORM = { work_date: '', check_in_time: '', check_out_time
 const LEAVE_TYPES: LeaveType[] = ['casual', 'sick', 'annual', 'unpaid'];
 const EMPTY_LEAVE_FORM = { leave_type: 'casual' as LeaveType, start_date: '', end_date: '', reason: '' };
 
+// Built from the fixed Nepal (UTC+5:45) offset, not the browser's own
+// timezone — new Date(`${date}T${time}:00`).toISOString() only produced a
+// correct instant when the device happened to be set to Nepal time; anyone
+// traveling, on a VPN, or with a misconfigured clock got a correction that
+// was off by however many hours their device's offset differed from +5:45,
+// and that wrong instant flowed straight into payroll once approved.
 function toTimestamp(date: string, time: string) {
   if (!date || !time) return null;
-  return new Date(`${date}T${time}:00`).toISOString();
+  return new Date(nepalDateTimeToUtcMs(date, time)).toISOString();
 }
 
 function formatTime(value: string | null) {
@@ -65,7 +71,6 @@ export default function CheckInPage() {
   const { system } = useCalendarSystem();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [view, setView] = useState<View>('menu');
-  const [breakEnabled, setBreakEnabled] = useState(false);
 
   // Live check-in/out state
   const [busy, setBusy] = useState(false);
@@ -97,7 +102,6 @@ export default function CheckInPage() {
         .single();
       setEmployeeId(profile?.employee_id ?? null);
     });
-    fetchMyCompanyWeekOffConfig().then(({ breakEnabled }) => setBreakEnabled(breakEnabled));
   }, []);
 
   useEffect(() => {
@@ -176,7 +180,7 @@ export default function CheckInPage() {
   function reloadHistory(empId: string) {
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('employee_id', empId)
       .gte('punch_time', new Date(Date.now() - HISTORY_WINDOW_DAYS * 86400000).toISOString())
       .order('punch_time', { ascending: false })
@@ -355,24 +359,6 @@ export default function CheckInPage() {
             >
               📍 Check Out
             </button>
-            {breakEnabled && (
-              <>
-                <button
-                  onClick={() => openPunchModal('2')}
-                  disabled={!employeeId}
-                  className="rounded-xl bg-amber-500 py-4 text-base font-semibold text-white shadow-sm hover:bg-amber-600 disabled:opacity-50"
-                >
-                  ☕ Start Break
-                </button>
-                <button
-                  onClick={() => openPunchModal('3')}
-                  disabled={!employeeId}
-                  className="rounded-xl bg-amber-600 py-4 text-base font-semibold text-white shadow-sm hover:bg-amber-700 disabled:opacity-50"
-                >
-                  ☕ End Break
-                </button>
-              </>
-            )}
             <button
               onClick={() => setView('fix')}
               className="rounded-xl bg-green-600 py-4 text-base font-semibold text-white shadow-sm hover:bg-green-700"

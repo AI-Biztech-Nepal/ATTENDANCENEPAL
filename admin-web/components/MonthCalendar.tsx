@@ -150,7 +150,7 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
               : flags.checkedInOnly
                 ? 'bg-pink-50'
                 : flags.absent
-                  ? 'bg-slate-100'
+                  ? 'bg-critical-bg'
                   : '';
           return (
             <button
@@ -209,7 +209,7 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
           <span className="h-2.5 w-2.5 rounded-sm bg-yellow-50" /> On leave / Week Off
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-slate-100" /> Absent
+          <span className="h-2.5 w-2.5 rounded-sm bg-critical-bg" /> Absent
         </span>
         <span className="flex items-center gap-1.5">
           <span className="rounded-full bg-warning px-1.5 py-px text-[8px] font-bold uppercase leading-none text-white">Late</span> Late in

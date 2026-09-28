@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin, supabaseAdminConfigured } from '@/lib/supabase-admin';
+import { getSupabaseAdmin, listAllUsers, supabaseAdminConfigured } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 
@@ -50,9 +50,9 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!bridgeProfiles || bridgeProfiles.length === 0) return NextResponse.json({ credentials: [] });
 
-  const { data: usersPage, error: usersError } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  const { users, error: usersError } = await listAllUsers(admin);
   if (usersError) return NextResponse.json({ error: usersError.message }, { status: 500 });
-  const emailById = new Map(usersPage.users.map(u => [u.id, u.email ?? '']));
+  const emailById = new Map(users.map(u => [u.id, u.email ?? '']));
 
   const credentials = bridgeProfiles.map(p => ({
     id: p.id,

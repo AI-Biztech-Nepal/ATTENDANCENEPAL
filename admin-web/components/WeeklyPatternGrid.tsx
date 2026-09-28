@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/Avatar';
-import RosterModeSwitch from '@/components/RosterModeSwitch';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
+import { useConfirm } from '@/components/ConfirmDialog';
 import type { Employee, Shift } from '@/lib/types';
-import type { RosterMode } from '@/lib/weekOff';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** Same UNSET / Week-Off sentinel convention as WeeklyRosterGrid /
@@ -21,15 +21,9 @@ type PatternRow = { employee_id: string; weekday: number; shift_id: string | nul
  * (see resolveShiftForDate() in lib/shift.ts), so unlike WeeklyRosterGrid
  * there's no "copy this week to the rest of the month" button and no week
  * paging; the pattern already covers every future week on its own. */
-export default function WeeklyPatternGrid({
-  companyId,
-  rosterMode,
-  onRosterModeChange,
-}: {
-  companyId: string | null;
-  rosterMode: RosterMode;
-  onRosterModeChange: (mode: RosterMode) => void;
-}) {
+export default function WeeklyPatternGrid() {
+  const confirm = useConfirm();
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [patternRows, setPatternRows] = useState<PatternRow[]>([]);
@@ -55,11 +49,11 @@ export default function WeeklyPatternGrid({
   function reload() {
     setLoading(true);
     Promise.all([
-      supabase.from('employees').select('*').eq('status', 'active').order('name'),
+      supabase.from('employees').select('*').eq('status', 'active'),
       supabase.from('shifts').select('*'),
       supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id'),
     ]).then(([empRes, shiftsRes, patternRes]) => {
-      setEmployees(empRes.data ?? []);
+      setEmployees((empRes.data ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
       setShifts(shiftsRes.data ?? []);
       setPatternRows(patternRes.data ?? []);
       setLoading(false);
@@ -91,9 +85,11 @@ export default function WeeklyPatternGrid({
     if (!copiedEmployeeId || copiedEmployeeId === targetId) return;
     const sourceName = employees.find(e => e.id === copiedEmployeeId)?.name ?? 'the copied employee';
     const targetName = employees.find(e => e.id === targetId)?.name ?? 'this employee';
-    if (!confirm(`Paste ${sourceName}'s pattern onto ${targetName}? This overwrites their matching weekdays right away.`)) {
-      return;
-    }
+    const proceed = await confirm(
+      `Paste ${sourceName}'s pattern onto ${targetName}? This overwrites their matching weekdays right away.`,
+      { title: 'Overwrite weekly pattern?', confirmLabel: 'Overwrite', tone: 'danger' }
+    );
+    if (!proceed) return;
     setPastingEmployeeId(targetId);
     setPasteError(null);
     const upserts: { employee_id: string; weekday: number; shift_id: string | null }[] = [];
@@ -174,7 +170,6 @@ export default function WeeklyPatternGrid({
           <span className="text-sm font-semibold text-ink">Recurring Weekly Pattern</span>
           <p className="text-xs text-slate-500">Set once — applies to every coming week automatically.</p>
         </div>
-        <RosterModeSwitch companyId={companyId} mode={rosterMode} onChange={onRosterModeChange} />
       </div>
 
       {pendingCount > 0 && (
@@ -223,10 +218,12 @@ export default function WeeklyPatternGrid({
             one of those to each employee per weekday.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <>
+          <HorizontalScrollButtons targetRef={tableScrollRef} />
+          <div ref={tableScrollRef} className="max-h-[65vh] overflow-auto rounded-xl border border-slate-200">
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 font-medium">Employee</th>
                   {weekdays.map(wd => (
                     <th key={wd} className="whitespace-nowrap px-1.5 py-2.5 text-center font-medium">
@@ -310,6 +307,7 @@ export default function WeeklyPatternGrid({
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         {saveError && <p className="mt-3 text-sm text-critical">Could not save: {saveError}</p>}

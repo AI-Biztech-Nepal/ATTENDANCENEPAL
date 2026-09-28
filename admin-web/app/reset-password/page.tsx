@@ -19,12 +19,20 @@ export default function ResetPasswordPage() {
     if (!supabaseConfigured) return;
     // The recovery link lands here with a token in the URL; supabase-js
     // parses it automatically and fires PASSWORD_RECOVERY once the session
-    // from that token is established.
+    // from that token is established. Recovery links include `type=recovery`
+    // in the URL — checked below so the getSession() fallback (needed for a
+    // real race: the shared `supabase` client can parse the token and fire
+    // this event before this page's own listener has attached) only trusts
+    // an existing session when the URL actually shows this was a recovery
+    // link, not just "the visitor happens to already be logged in" (e.g. a
+    // stale reset link opened in a tab where they never logged out).
+    const cameFromRecoveryLink =
+      window.location.hash.includes('type=recovery') || new URLSearchParams(window.location.search).get('type') === 'recovery';
     const { data: sub } = supabase.auth.onAuthStateChange(event => {
       if (event === 'PASSWORD_RECOVERY') setReady(true);
     });
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setReady(true);
+      if (data.session && cameFromRecoveryLink) setReady(true);
     });
     return () => sub.subscription.unsubscribe();
   }, []);

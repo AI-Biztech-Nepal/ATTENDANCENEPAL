@@ -1,24 +1,28 @@
 import type { AttendanceLog, Employee, Shift } from './types';
-import { isWeekOff, resolveShiftForDate, type DailyShiftByDate, type WeeklyPatternByEmployee } from './shift';
+import {
+  isWeekOff,
+  nepalDateKey,
+  nepalTodayIso,
+  punchMinuteOfDay,
+  resolveShiftForDate,
+  type DailyShiftByDate,
+  type WeeklyPatternByEmployee,
+} from './shift';
 
-export function dateKey(iso: string) {
-  return iso.slice(0, 10);
-}
-
-function minutesOfDayUTC(iso: string) {
-  const d = new Date(iso);
-  return d.getUTCHours() * 60 + d.getUTCMinutes();
-}
+// Nepal-local, not a raw UTC slice — a punch between Nepal midnight and
+// 5:44 AM is still the previous UTC calendar date, so `iso.slice(0, 10)`
+// bucketed those punches under the wrong day.
+export const dateKey = nepalDateKey;
 
 function toMinutes(hhmm: string) {
   const [h, m] = hhmm.slice(0, 5).split(':').map(Number);
   return h * 60 + m;
 }
 
-// Mirrors calc.js: earliest '0' punch, else earliest punch overall — break
-// punches ('2'/'3') are excluded from the fallback so a Start Break with no
-// prior check-in never gets mistaken for one (same fix as shift.ts's
-// selectDayPunches).
+// Mirrors calc.js: earliest '0' punch, else earliest punch overall — legacy
+// break punches ('2'/'3', no longer created) are excluded from the fallback
+// so an old Start Break with no prior check-in never gets mistaken for one
+// (same filter as shift.ts's selectDayPunches).
 export function firstCheckIn(logsForDay: AttendanceLog[]): AttendanceLog | undefined {
   const sorted = logsForDay
     .filter(l => l.punch_type !== '2' && l.punch_type !== '3')
@@ -42,7 +46,7 @@ export function isLate(
   // Week Off: nothing scheduled, so there's no start time to be late against.
   if (isWeekOff(shift)) return false;
   const startMin = toMinutes(shift.start_time);
-  return minutesOfDayUTC(checkIn.punch_time) > startMin + shift.grace_minutes;
+  return punchMinuteOfDay(checkIn.punch_time) > startMin + shift.grace_minutes;
 }
 
 export function presentEmployeeIds(logs: AttendanceLog[], day: string) {
@@ -54,11 +58,16 @@ export function presentEmployeeIds(logs: AttendanceLog[], day: string) {
 }
 
 export function last7Days(): string[] {
+  // Anchored on Nepal-local "today", not a raw UTC Date — for roughly six
+  // hours a day (Nepal midnight through 5:44 AM is still the previous UTC
+  // calendar date), a UTC anchor would generate the wrong 7-day window
+  // relative to what's actually "today" in Nepal.
+  const today = nepalTodayIso();
+  const [y, m, d] = today.split('-').map(Number);
   const days: string[] = [];
   for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setUTCDate(d.getUTCDate() - i);
-    days.push(d.toISOString().slice(0, 10));
+    const day = new Date(Date.UTC(y, m - 1, d - i));
+    days.push(day.toISOString().slice(0, 10));
   }
   return days;
 }

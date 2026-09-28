@@ -1,27 +1,21 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import type { CalendarSystem } from './calendar';
-
-const STORAGE_KEY = 'attendance-nepal-calendar-system';
 
 const CalendarSystemContext = createContext<{
   system: CalendarSystem;
   setSystem: (system: CalendarSystem) => void;
-}>({ system: 'AD', setSystem: () => {} });
+}>({ system: 'BS', setSystem: () => {} });
 
+/** BS (Bikram Sambat) is the calendar for the whole admin site. Every load
+ * starts in BS — the AD/BS switch in the page header still works for an
+ * ad-hoc look at Gregorian dates, but the choice is deliberately NOT
+ * persisted: a refresh (or a new tab) always comes back to BS. It does
+ * survive client-side navigation within one session, since this provider
+ * stays mounted at the layout level. */
 export function CalendarSystemProvider({ children }: { children: React.ReactNode }) {
-  const [system, setSystemState] = useState<CalendarSystem>('AD');
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored === 'AD' || stored === 'BS') setSystemState(stored);
-  }, []);
-
-  function setSystem(next: CalendarSystem) {
-    setSystemState(next);
-    window.localStorage.setItem(STORAGE_KEY, next);
-  }
+  const [system, setSystem] = useState<CalendarSystem>('BS');
 
   return <CalendarSystemContext.Provider value={{ system, setSystem }}>{children}</CalendarSystemContext.Provider>;
 }

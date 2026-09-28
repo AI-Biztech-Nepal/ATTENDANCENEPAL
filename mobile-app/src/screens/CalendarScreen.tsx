@@ -15,10 +15,10 @@ export default function CalendarScreen() {
       .from('employees')
       .select('*')
       .eq('status', 'active')
-      .order('name')
       .then(({ data }) => {
-        setEmployees((data as Employee[]) ?? []);
-        if (data && data.length > 0) setEmployeeId(data[0].id);
+        const sorted = ((data as Employee[]) ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        setEmployees(sorted);
+        if (sorted.length > 0) setEmployeeId(sorted[0].id);
       });
   }, []);
 

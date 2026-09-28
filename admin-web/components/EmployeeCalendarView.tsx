@@ -9,6 +9,10 @@ import { formatAdDate, formatDdMmYyyy, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   applyOvernightShiftCorrection,
+  dropPunchesClaimedBySummaries,
+  isDeletedDay,
+  nepalTodayIso,
+  withoutSupersededSummaries,
   buildWeeklyPatternByEmployee,
   computeDayStatusForResolvedShift,
   formatHoursMinutes,
@@ -17,6 +21,7 @@ import {
 } from '@/lib/shift';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
+import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
 const WINDOW_DAYS = 400;
 
@@ -69,18 +74,16 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ weekday: number; shift_id: string | null }[]>([]);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay }) => {
       setWeeklyOffDay(weeklyOffDay);
-      // Not date-scoped (a pattern applies to every week), and only ever
-      // relevant in 'weekly' roster_mode — see resolveShiftForDate().
-      if (rosterMode === 'weekly') {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('weekday, shift_id')
-          .eq('employee_id', employeeId)
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    supabase
+      .from('employee_weekly_pattern')
+      .select('weekday, shift_id')
+      .eq('employee_id', employeeId)
+      .then(({ data }) => setWeeklyPatternRows(data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 
@@ -93,13 +96,13 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
       supabase.from('shifts').select('*'),
       supabase
         .from('attendance_logs')
-        .select('*')
+        .select(ATTENDANCE_LOG_COLUMNS)
         .eq('employee_id', employeeId)
         .gte('punch_time', windowStart.toISOString())
         .order('punch_time', { ascending: true }),
       supabase
         .from('payroll_summaries')
-        .select('*')
+        .select(PAYROLL_SUMMARY_COLUMNS)
         .eq('employee_id', employeeId)
         .gte('work_date', windowStart.toISOString().slice(0, 10)),
       supabase.from('leave_requests').select('*').eq('employee_id', employeeId).eq('status', 'approved'),
@@ -113,7 +116,8 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
       setEmployee(emp ?? null);
       setShifts(shiftRows ?? []);
       setLogs(rows ?? []);
-      setSummaries(summaryRows ?? []);
+      // Rows a correction on another date has superseded are left out.
+      setSummaries(withoutSupersededSummaries(summaryRows ?? []));
       setLeaveRequests(leaveRows ?? []);
       setDailyShiftRows(rosterRows ?? []);
       setHolidays(holidayRows ?? []);
@@ -141,8 +145,8 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   const companyWeekOffDates = useMemo(() => {
     const windowStart = new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
-    return weekOffDatesInRange(windowStart, today, weeklyOffDay, holidays);
-  }, [weeklyOffDay, holidays]);
+    return weekOffDatesInRange(windowStart, today, weeklyOffDay, holidays, employee?.gender ?? null);
+  }, [weeklyOffDay, holidays, employee?.gender]);
 
   const dayStatus = useMemo(() => {
     const byDate = new Map<string, AttendanceLog[]>();
@@ -155,12 +159,16 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
     const map = new Map<string, ReturnType<typeof computeDayStatusForResolvedShift>>();
     if (!employee) return map;
     applyOvernightShiftCorrection(byDate, logs, employee, shifts, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
+    // A punch another day's saved row owns isn't this day's too, and a day an
+    // admin deleted (a corrected row with no times) has no attendance at all.
+    dropPunchesClaimedBySummaries(byDate, summaries, nepalTodayIso());
+    for (const s of summaries) if (isDeletedDay(s)) byDate.delete(s.work_date);
     for (const [date, dayLogs] of byDate) {
       const resolved = resolveShiftForDate(employee, shifts, date, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
       map.set(date, computeDayStatusForResolvedShift(dayLogs, resolved));
     }
     return map;
-  }, [logs, employee, shifts, dailyShiftByDate, companyWeekOffDates, weeklyPattern]);
+  }, [logs, employee, shifts, dailyShiftByDate, companyWeekOffDates, weeklyPattern, summaries]);
 
   const leaveByDate = useMemo(() => {
     const map = new Map<string, LeaveRequest>();
@@ -173,10 +181,10 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   const leaveDates = useMemo(() => new Set(leaveByDate.keys()), [leaveByDate]);
 
   // Dates this employee has an explicit Week Off roster entry for (a row
-  // exists in employee_daily_shifts with shift_id null), plus — in 'weekly'
-  // roster_mode — any date whose weekday matches a Week Off in the
-  // recurring pattern and has no exact-date roster row of its own (an
-  // exact date always wins, same priority resolveShiftForDate uses). Both
+  // exists in employee_daily_shifts with shift_id null), plus any date whose
+  // weekday matches a Week Off in the recurring pattern and has no
+  // exact-date roster row of its own (an exact date always wins, same
+  // priority resolveShiftForDate uses). Both
   // treated the same way as approved leave: never counted toward
   // Present/Hours/Late/Early/Overtime, never "Absent" on a day nothing was
   // expected.
@@ -236,7 +244,11 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
       // perfectly valid summary row but no matching live log loaded (a
       // fetch-window edge, logs pruned after the summary was computed,
       // etc.) silently dropped its whole day, hours and overtime included.
-      const summary = date !== todayKey ? summaryByDate.get(date) : undefined;
+      // A summary row with no check_in isn't a worked day — the nightly job
+      // swept in a Week Off / Absent day, or the only punch was claimed by an
+      // overnight shift the day before. Ignore it here.
+      const rawSummary = date !== todayKey ? summaryByDate.get(date) : undefined;
+      const summary = rawSummary && rawSummary.check_in ? rawSummary : undefined;
       const status = dayStatus.get(date);
       if (summary || status) {
         present.push({ date, minutes: 0 });
@@ -301,7 +313,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
         // Same fix as monthSummary above: check the summary row first,
         // independent of whether dayStatus has a matching live entry.
         const summary = date !== todayKey ? summaryByDate.get(date) : undefined;
-        if (summary) {
+        if (summary && summary.check_in) {
           return {
             date,
             onLeave: false,
@@ -369,7 +381,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
     const end = new Date(new Date(start).getTime() + 86400000).toISOString();
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('punch_time', start)
       .lt('punch_time', end)

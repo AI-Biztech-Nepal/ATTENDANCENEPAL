@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Modal } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
-import { punchTypeLabel, selectDayPunches } from '../lib/shift';
+import { nepalDateKey, nepalDateTimeToUtcMs, punchTypeLabel, selectDayPunches } from '../lib/shift';
 import type { AttendanceGpsRequest, AttendanceLog, CorrectionRequest } from '../types';
+import { ATTENDANCE_LOG_COLUMNS } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
 import { formatAdDate, localDateKey } from '../lib/calendar';
@@ -11,7 +12,7 @@ import type { CalendarSystem } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import DatePicker from '../components/DatePicker';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '../lib/weekOff';
-import type { CompanyHoliday } from '../types';
+import type { CompanyHoliday, Gender } from '../types';
 
 type ViewMode = 'menu' | 'fix';
 type PunchModal = {
@@ -58,27 +59,30 @@ export default function CheckInScreen({ navigation }: any) {
   const [correctionError, setCorrectionError] = useState<string | null>(null);
   const [weeklyOffDay, setWeeklyOffDay] = useState<number | null>(null);
   const [todayHoliday, setTodayHoliday] = useState<CompanyHoliday | null>(null);
-  const [breakEnabled, setBreakEnabled] = useState(false);
+  const [myGender, setMyGender] = useState<Gender | null>(null);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, breakEnabled }) => {
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay }) => {
       setWeeklyOffDay(weeklyOffDay);
-      setBreakEnabled(breakEnabled);
     });
     supabase.from('company_holidays').select('*').eq('holiday_date', today).maybeSingle().then(({ data }) => setTodayHoliday((data as CompanyHoliday) ?? null));
   }, []);
 
   const todayIsWeekOff = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
-    return weekOffDatesInRange(today, today, weeklyOffDay, todayHoliday ? [todayHoliday] : []).has(today);
-  }, [weeklyOffDay, todayHoliday]);
+    return weekOffDatesInRange(today, today, weeklyOffDay, todayHoliday ? [todayHoliday] : [], myGender).has(today);
+  }, [weeklyOffDay, todayHoliday, myGender]);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       const { data: profile } = await supabase.from('profiles').select('employee_id').eq('id', data.user.id).single();
       setEmployeeId(profile?.employee_id ?? null);
+      if (profile?.employee_id) {
+        const { data: emp } = await supabase.from('employees').select('gender').eq('id', profile.employee_id).single();
+        setMyGender((emp?.gender as Gender) ?? null);
+      }
     });
   }, []);
 
@@ -97,7 +101,7 @@ export default function CheckInScreen({ navigation }: any) {
   function reloadHistory(empId: string) {
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('employee_id', empId)
       .gte('punch_time', new Date(Date.now() - HISTORY_WINDOW_DAYS * 86400000).toISOString())
       .order('punch_time', { ascending: false })
@@ -119,7 +123,7 @@ export default function CheckInScreen({ navigation }: any) {
   const acceptedPunchIds = useMemo(() => {
     const byDate = new Map<string, AttendanceLog[]>();
     for (const log of history) {
-      const key = log.punch_time.slice(0, 10);
+      const key = nepalDateKey(log.punch_time);
       const list = byDate.get(key);
       if (list) list.push(log);
       else byDate.set(key, [log]);
@@ -214,8 +218,8 @@ export default function CheckInScreen({ navigation }: any) {
     const { error } = await supabase.from('attendance_correction_requests').insert({
       employee_id: employeeId,
       work_date: workDate,
-      requested_check_in: checkInTime ? new Date(`${workDate}T${checkInTime}:00`).toISOString() : null,
-      requested_check_out: checkOutTime ? new Date(`${workDate}T${checkOutTime}:00`).toISOString() : null,
+      requested_check_in: checkInTime ? new Date(nepalDateTimeToUtcMs(workDate, checkInTime)).toISOString() : null,
+      requested_check_out: checkOutTime ? new Date(nepalDateTimeToUtcMs(workDate, checkOutTime)).toISOString() : null,
       reason: reason || null,
       lat: coords?.lat ?? null,
       lng: coords?.lng ?? null,
@@ -316,16 +320,6 @@ export default function CheckInScreen({ navigation }: any) {
             <TouchableOpacity style={[styles.punchBtn, { backgroundColor: colors.good }]} disabled={!employeeId} onPress={() => openPunchModal('1')}>
               <Text style={styles.punchBtnText}>📍 Check Out</Text>
             </TouchableOpacity>
-            {breakEnabled && (
-              <>
-                <TouchableOpacity style={[styles.punchBtn, { backgroundColor: '#f59e0b' }]} disabled={!employeeId} onPress={() => openPunchModal('2')}>
-                  <Text style={styles.punchBtnText}>☕ Start Break</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.punchBtn, { backgroundColor: '#d97706' }]} disabled={!employeeId} onPress={() => openPunchModal('3')}>
-                  <Text style={styles.punchBtnText}>☕ End Break</Text>
-                </TouchableOpacity>
-              </>
-            )}
             <TouchableOpacity style={[styles.punchBtn, { backgroundColor: colors.good }]} onPress={() => setView('fix')}>
               <Text style={styles.punchBtnText}>🔧 Fix a Missed Punch</Text>
             </TouchableOpacity>

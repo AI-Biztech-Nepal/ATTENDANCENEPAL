@@ -7,6 +7,54 @@ html, body {
   background-color: #f8fafc;
 }
 
+/* ── Custom Scrollbar Styles ────────────────────────────────────── */
+
+/* Slim, modern scrollbar for Webkit browsers (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 99px;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+/* Dark sidebar scrollbar — blends into the dark sidebar background */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  margin-block: 8px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
 @media print {
   /* Browsers skip background colors/badges in print by default unless the
      user manually enables "background graphics" — force it so exported
@@ -15,42 +63,201 @@ html, body {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  /* No fixed `size` here on purpose — setting one (e.g. landscape) makes
-     Chrome's print dialog hide its own Portrait/Landscape toggle entirely,
-     since it assumes the page has no reason to offer a choice it would
-     just override. Leaving size unset keeps that dropdown available; the
-     rest of this block shrinks text/padding small enough that either
-     orientation the user picks still fits one page. */
+  /* The default (unnamed) page stays size-less on purpose — setting one
+     (e.g. landscape) makes Chrome's print dialog hide its own Portrait/
+     Landscape toggle entirely for that page. Leaving it unset keeps that
+     dropdown available for every other report; the rest of this block
+     shrinks text/padding small enough that either orientation the user
+     picks still fits one page. */
   @page {
-    margin: 8mm;
+    margin: 6mm;
   }
+  /* The payroll Salary Report is the one exception: its 16 columns never fit
+     upright, so /payroll injects its own `@page { size: A4 landscape }` at
+     render time (an UNNAMED @page — the only form Chrome honours for
+     orientation; a named `@page payrollLandscape` is silently ignored). */
   /* Every exported table gets visible gridlines, and shrinks down to
      something that actually fits a page even in Portrait — much easier to
      read as a printed/PDF report than the screen's whitespace-only row
-     separation. */
+     separation. 9px (not the previous 7px) is the largest size that still
+     keeps the widest report (Attendance Report, 11 columns) inside one A4
+     Portrait page's width; table-layout: auto (not fixed) still lets short
+     columns like ID/Break stay narrow so that budget goes to columns that
+     actually need it (Shift, In/Out).
+
+     border-collapse: separate (not collapse) is deliberate — Chromium has a
+     long-standing print bug where a `border-collapse: collapse` table whose
+     rows use `break-inside: avoid` mis-measures row height across page
+     breaks, occasionally rendering one row stretched to fill the rest of a
+     page (a near-empty "giant row") and inflating the page count by 5-10x.
+     `separate` with `border-spacing: 0` avoids that entirely; the only
+     trade-off is adjoining cell borders sit side-by-side instead of fusing
+     into one hairline, which at 1px is not visually distinguishable. */
   table {
-    border-collapse: collapse !important;
-    font-size: 7px !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    font-size: 9px !important;
     width: 100% !important;
     table-layout: auto !important;
   }
   th, td {
     border: 1px solid #cbd5e1 !important;
-    padding: 1px 3px !important;
+    padding: 1px 2px !important;
     white-space: nowrap !important;
+  }
+  /* Opt-out for the rare column (e.g. Device, whose real-world names run
+     longer than any other cell) whose forced nowrap above is exactly what
+     pushes the table past the page's width — lets that one column's text
+     wrap onto a second line instead of stretching the whole table. */
+  .print-wrap {
+    white-space: normal !important;
+    word-break: break-word;
   }
   /* Column headers are the widest text relative to their data (e.g. "Late
      By (min)", "Calculated Salary") — letting them wrap to two lines saves
      far more horizontal room than the data cells below them would if they
-     wrapped instead. */
+     wrapped instead. word-break stays `normal` (not `break-word`) here on
+     purpose — a single-word header with no space to wrap at (e.g. "BREAK",
+     "DEVICE") would otherwise get chopped mid-letter into "BRE/AK" whenever
+     a wide report leaves that column narrow; `normal` instead lets the
+     table's auto layout give that one column the little extra width it
+     needs and take it back from a column with an actual space to wrap at. */
   th {
     white-space: normal !important;
-    word-break: break-word;
+    word-break: normal;
+    overflow-wrap: normal;
     line-height: 1.15;
   }
   /* Row striping/hover states rely on screen-only inline JS state or take
      up visual space meant for scanning on a monitor, not a printed page. */
   tr {
     break-inside: avoid;
+  }
+
+  /* ── Payroll Salary Report ──────────────────────────────────────────
+     Printed as a document, not a screen grab: plain near-black text with
+     no status colours, flat white rows, a slightly smaller type size,
+     and none of the screen-only affordances (avatars, edit pencils —
+     those carry print:hidden in the markup). */
+  /* The report's on-screen box is a `max-h-[65vh] overflow-auto` scroller.
+     Kill it outright for print — the whole roster must lay out and paginate
+     onto the paper, never sit inside a scrollbar. */
+  .print-report {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .print-report table {
+    font-size: 8px !important;
+  }
+  .print-report th,
+  .print-report td,
+  .print-report th *,
+  .print-report td * {
+    color: #0f172a !important;
+    background: #fff !important;
+  }
+  .print-report thead th {
+    background: #f1f5f9 !important;
+    font-weight: 700 !important;
+  }
+
+  /* ── Payroll Salary Report — fit-to-page ────────────────────────────
+     The standard (hourly) report's print layout, for a company set back to
+     payroll_format 'standard'. Two fixes over the `.print-report` baseline:
+
+     1. The report can carry up to ~16 columns (all deduction columns on).
+        The baseline's forced `white-space: nowrap` then pushes the last
+        few columns (SSF / Overtime Allowance / Net Payable) off the right
+        edge of the page. Here every cell is allowed to wrap and the type
+        drops to 7px so `table-layout: auto` can squeeze the whole width
+        onto one A4 Portrait page.
+
+     2. The ID / Employee / Net Payable columns are `position: sticky` for
+        the on-screen horizontal scroll. In paged print (where the scroll
+        container is `overflow: visible`) a sticky column re-anchors to the
+        page box and paints shifted / doubled across page breaks — which is
+        the stray blank column and the smeared "Employee" header seen in
+        the PDF. Pinning them back to static removes both. */
+  /* The payroll report's landscape @page is injected by /payroll itself.
+     These rules make its table print IDENTICALLY to the Staff Salary Sheet:
+     a hairline card, horizontal row rules only (NO vertical grid), a plain
+     grey header, roomy cells, headers that wrap only at spaces, and the same
+     two accents — deductions red, take-home green. */
+  .print-report-fit,
+  .print-report-fit table {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .print-report-fit {
+    border: 1px solid #e2e8f0 !important;
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  .print-report-fit table {
+    font-size: 7.5px !important;
+    table-layout: auto !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+  }
+  /* No box around every cell — only a rule under each row. */
+  .print-report-fit th,
+  .print-report-fit td {
+    padding: 3px 5px !important;
+    border: 0 !important;
+    border-bottom: 1px solid #eef2f6 !important;
+  }
+  .print-report-fit tbody tr:last-child td {
+    border-bottom: 0 !important;
+  }
+  .print-report-fit thead th {
+    background: #f8fafc !important;
+    color: #64748b !important;
+    font-weight: 700 !important;
+    border-bottom: 1.5px solid #cbd5e1 !important;
+    vertical-align: bottom !important;
+    /* Wrap between words, never inside one. */
+    white-space: normal !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    hyphens: none !important;
+  }
+  .print-report-fit tbody td {
+    white-space: nowrap !important;
+  }
+  .print-report-fit tfoot td {
+    border-top: 2px solid #cbd5e1 !important;
+    border-bottom: 0 !important;
+    font-weight: 700 !important;
+    background: #f8fafc !important;
+  }
+  /* The same two accents the Sheet uses. */
+  .print-report-fit .text-critical-text,
+  .print-report-fit .text-critical-text * {
+    color: #b91c1c !important;
+  }
+  .print-report-fit .text-good-text,
+  .print-report-fit .text-good-text * {
+    color: #0f766e !important;
+  }
+  .print-report-fit .sticky,
+  .print-report-fit thead tr,
+  .print-report-fit tfoot tr {
+    position: static !important;
+    box-shadow: none !important;
+  }
+}
+
+@layer utilities {
+  .animate-float {
+    animation: float 4s ease-in-out infinite;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
   }
 }

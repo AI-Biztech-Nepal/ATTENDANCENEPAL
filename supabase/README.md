@@ -24,14 +24,24 @@ what's already been run by hand in the SQL editor. **New schema changes now go i
 10. Run `007_hr_role_and_corrections.sql` — adds the **HR** role (same access as admin except
     Devices/Shifts, which stay admin-only) and `attendance_correction_requests` (employees
     requesting a fix for a missed punch). Depends on `payroll.sql` already being applied.
-11. In Storage, create a public bucket named `attendance-selfies`.
-12. In Authentication, enable email/password sign-in and create your **admin** user, then:
+11. **Run every file in `migrations/`, in filename (timestamp) order** — either
+    `supabase db push` (recommended; applies them all in order automatically once linked to your
+    project), or by pasting each one into the SQL editor in order if not using the CLI. This is
+    not optional: it's what actually brings the schema up to multi-tenancy (`companies`,
+    `company_id` on every table, tenant-scoped RLS), roster-driven payroll, week-off, break
+    punches, and — critically — `find_employee_shift()`/`calc_payroll_fields()`/
+    `compute_payroll_summaries()` redefinitions that fix real bugs in the versions shipped in
+    `payroll.sql` (a stale UTC-vs-Asia/Kathmandu timezone bug and a null-department shift-matching
+    bug, among others — see the `2026082*` migrations). Skipping this step leaves a fresh
+    environment on the buggy, pre-multi-tenancy versions of those functions with no warning.
+12. In Storage, create a public bucket named `attendance-selfies`.
+13. In Authentication, enable email/password sign-in and create your **admin** user, then:
     ```sql
     insert into profiles (id, role) values ('<admin-auth-uuid>', 'admin');
     ```
     Create an **HR** user the same way with `role = 'hr'` if you need one.
-13. Copy your project URL + anon key into `../mobile-app/.env` and `../admin-web/.env.local`.
-14. Copy your project URL + **service role key** (Settings → API → `service_role` secret) into
+14. Copy your project URL + anon key into `../mobile-app/.env` and `../admin-web/.env.local`.
+15. Copy your project URL + **service role key** (Settings → API → `service_role` secret) into
     `SUPABASE_SERVICE_ROLE_KEY` in `../admin-web/.env.local` and in Vercel's Environment
     Variables — this powers the "Create login" button on the admin-web Employees page (see
     below). Never prefix it with `NEXT_PUBLIC_`, and never put it in `../mobile-app/.env`.
@@ -60,6 +70,10 @@ real. To test QR check-in, encode the `qr_token_id` value (not the `token` text)
   admins (`profiles.role = 'admin'`) have full access.
 
 ## What's in `payroll.sql`
+
+**The three functions below are all redefined later, more than once, by files in `migrations/`
+— what's live in any real environment is whichever migration ran last, not this file. Treat this
+section as historical context for how they started, not documentation of their current behavior.**
 
 - `find_employee_shift(employee_id)` — employee's own shift, else their department's, else a
   09:00–18:00 / 10-minute-grace default. Mirrors `findShiftForEmployee()` in `calc.js`.

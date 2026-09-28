@@ -2,10 +2,18 @@ export type Branch = {
   id: string;
   name: string;
   branch_code: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   radius_meters: number;
 };
+
+/** employees.gender — nullable; a null/unset gender gets company-wide ('all')
+ * holidays only, never a gender-scoped one. */
+export type Gender = 'male' | 'female';
+
+/** company_holidays.applies_to — 'all' is the default and every holiday's
+ * behaviour before gender scoping existed. */
+export type HolidayScope = 'all' | 'male' | 'female';
 
 export type Department = {
   id: string;
@@ -31,14 +39,12 @@ export type Employee = {
   fingerprint_id: string | null;
   username: string | null;
   profile_photo_url: string | null;
+  gender: Gender | null;
   status: 'active' | 'inactive';
   date_of_joining: string | null;
   resigned_at: string | null;
   salary: number | null;
   allowance: number | null;
-  pf_rate: number | null;
-  ssf_rate: number | null;
-  tds_rate: number | null;
   emergency_contact_name: string | null;
   emergency_contact_relationship: string | null;
   emergency_contact_phone: string | null;
@@ -46,6 +52,10 @@ export type Employee = {
   pan_no: string | null;
   ssf_no: string | null;
   attendance_exempt: boolean;
+  /** Paid-leave days this employee gets each fiscal year, set on the Leave
+   * page. Null = none (there is no company-wide default).
+   * Optional: the column comes from 20260911110000 and may not exist yet. */
+  annual_leave_days?: number | null;
   created_at: string;
 };
 
@@ -132,6 +142,12 @@ export type AttendanceLog = {
   verification_mode: string | null;
 };
 
+/** Column list for `.from('attendance_logs').select(...)` — exactly the
+ * AttendanceLog fields. The table also has lat/lng/accuracy_m/qr_token_id/
+ * selfie_url/match_score/created_at, which nothing reads; `select('*')` pulled
+ * those on every punch row (a big chunk of egress on the payroll/report pages). */
+export const ATTENDANCE_LOG_COLUMNS = 'id, employee_id, device_id, punch_time, punch_type, method, verification_mode';
+
 export type LeaveType = 'sick' | 'casual' | 'annual' | 'unpaid';
 
 export type LeaveRequest = {
@@ -160,6 +176,9 @@ export type CorrectionRequest = {
   created_at: string;
   lat: number | null;
   lng: number | null;
+  /** Which device the requester says the correction should be attributed
+   * to — optional, set from the Attendance Report's correction dialog. */
+  device_id: string | null;
 };
 
 export type AttendanceGpsRequest = {
@@ -220,6 +239,7 @@ export type CompanyHoliday = {
   company_id: string;
   holiday_date: string;
   name: string;
+  applies_to: HolidayScope;
   created_by: string | null;
   created_at: string;
 };
@@ -237,10 +257,18 @@ export type PayrollSummary = {
   is_early_departure: boolean;
   early_departure_minutes: number;
   overtime_hours: number;
-  /** Completed-break minutes for this day (20260820100000_break_punches.sql)
-   * — paid, NOT subtracted from total_hours/overtime_hours, display only. */
-  break_minutes: number;
   manually_corrected: boolean;
   overtime_approved: boolean;
+  /** Which device a manually-corrected day is attributed to — set only via
+   * the Attendance Report's correction dialog (see AttendanceReportTable's
+   * device picker); null for every ordinary, punch-derived day, where the
+   * Device column is read live off attendance_logs instead. */
+  device_id: string | null;
   computed_at: string;
 };
+
+/** Column list for `.from('payroll_summaries').select(...)` — exactly the
+ * PayrollSummary fields, so `select(PAYROLL_SUMMARY_COLUMNS)` is identical to
+ * `select('*')` for the code but future-proof against wide columns. */
+export const PAYROLL_SUMMARY_COLUMNS =
+  'id, employee_id, work_date, shift_name, check_in, check_out, total_hours, is_late, late_minutes, is_early_departure, early_departure_minutes, overtime_hours, manually_corrected, overtime_approved, device_id, computed_at';

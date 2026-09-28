@@ -40,7 +40,12 @@ To ship a new version:
 3. Upload those three files to `~/app/admin-web/public/desktop-updates/` on the VPS, overwriting
    what's there (this folder is intentionally outside git — these installer files are far too
    large to belong in a git repo; `scp` them up directly instead).
-4. Restart `admin-web` (`pm2 restart admin-web`) — Next.js only picks up a *new* file under
+4. Prune the superseded installers: `deploy/prune-desktop-updates.sh`. Each release is ~80 MB
+   and nothing ever reads an older one again — electron-updater builds its differential update
+   from the copy already installed on the client, not from an older file here. The script keeps
+   only the version `latest.yml` advertises, and refuses to run if that version's `.exe` is
+   missing, so a half-finished upload can't empty the folder.
+5. Restart `admin-web` (`pm2 restart admin-web`) — Next.js only picks up a *new* file under
    `public/` once the server restarts; files added to an already-known folder without restarting
    won't be served until it does.
 

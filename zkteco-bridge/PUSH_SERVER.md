@@ -67,18 +67,42 @@ lightweight Node process, no GPU/heavy compute needed):
 
 ## Pointing a device at it
 
-On the ZKTeco terminal itself (not in this app), find its **Cloud Server /
-ADMS** network settings and set:
+**Use port 80, not `PUSH_PORT` (8088), unless this device is one of the
+known clock-skew units.** Two separate customer sites (Gokarna Hillside,
+Safe Driving) both had a device whose settings looked completely correct —
+server reachable, serial registered — that still never sent a single
+packet, confirmed all the way down at `tcpdump`. Root cause in both cases:
+their router/ISP silently drops outbound traffic to non-standard ports like
+`8088`, while ordinary web traffic on 80/443 goes through fine. Nothing on
+this server or in the device's config was actually broken; it just never
+got a chance to send anything.
+
+nginx already proxies `/iclock/` on port 80 (and 443) straight through to
+this server (see `admin-web`'s nginx site config) — that path has been
+available the whole time, this was previously just never documented as the
+one to use. So, on the ZKTeco terminal's **Cloud Server / ADMS** settings:
 
 - Server address: this server's public domain or IP
-- Server port: your `PUSH_PORT` (default `8088`)
+- Server port: **`80`** (falls back to `8088` only if you specifically need
+  the clock-display correction below, which requires bypassing nginx)
 - Enable "Cloud Server" / ADMS mode
 
-The device will then start POSTing to `http://<your-server>:<port>/iclock/cdata`
+The device will then start POSTing to `http://<your-server>/iclock/cdata`
 on its own. Confirm it worked by watching this server's logs for
 `[push] device <name> initializing` and `[push] <name>: N punch(es) upserted`,
 and by checking that device's `status`/`last_sync` update on the admin
 Devices page.
+
+**When to still use port `8088` directly**: only a device known to need
+the on-screen clock correction in `push-server.js` (see
+`CLOCK_OFFSET_MINUTES_BY_SERIAL`) requires connecting straight to
+`PUSH_PORT`, bypassing nginx — nginx regenerates the HTTP `Date` header on
+every response and can't be made to pass the server's spoofed one through,
+which is what that correction depends on. This only affects the device's
+own on-screen clock display, never the actual attendance data recorded
+(`correctDeviceTimestamp()` corrects the stored punch time independently
+of that header) — so a device not on that list has no reason to ever use
+`8088`, and one that is should stay on it rather than move to port 80.
 
 ## Migration safety
 

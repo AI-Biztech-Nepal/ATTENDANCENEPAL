@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/Avatar';
-import RosterModeSwitch from '@/components/RosterModeSwitch';
+import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import type { Employee, Shift } from '@/lib/types';
-import type { RosterMode } from '@/lib/weekOff';
+import { holidayDatesByGender } from '@/lib/weekOff';
+import type { CompanyHoliday, Employee, Shift } from '@/lib/types';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** Two sentinel cell values, distinct from any real shift_id: "no row for
@@ -19,28 +19,28 @@ const UNSET = 'unset';
 const WEEK_OFF_VALUE = 'week-off';
 
 type RosterRow = { employee_id: string; work_date: string; shift_id: string | null };
+type PatternRow = { employee_id: string; weekday: number; shift_id: string | null };
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-/** Same grid/data model as WeeklyRosterGrid (employee_daily_shifts, one exact
- * date per column) just spanning a whole AD/BS month instead of one week —
- * filling in a month of exceptions (someone covering nights all month, a
- * rotating crew, etc.) without paging through 4-5 separate weeks. */
-export default function MonthlyRosterGrid({
-  companyId,
-  rosterMode,
-  onRosterModeChange,
-}: {
-  companyId: string | null;
-  rosterMode: RosterMode;
-  onRosterModeChange: (mode: RosterMode) => void;
-}) {
+/** One exact date per column (employee_daily_shifts), spanning a whole AD/BS
+ * month — for filling in exceptions (someone covering nights all month, a
+ * rotating crew, etc.) without paging through 4-5 separate weeks. A blank
+ * day isn't Absent by default: it inherits that weekday's pick from the
+ * Recurring Weekly Pattern (employee_weekly_pattern, read-only here, see
+ * patternValue()) — the same fallback resolveShiftForDate() uses for real
+ * attendance/payroll — so setting up the pattern once is enough for every
+ * month going forward. Explicitly picking a day here overrides the pattern
+ * for that one date only, without changing the pattern itself. */
+export default function MonthlyRosterGrid() {
   const { system } = useCalendarSystem();
-  const isInactive = rosterMode === 'weekly';
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState(todayAnchor);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [rosterRows, setRosterRows] = useState<RosterRow[]>([]);
+  const [patternRows, setPatternRows] = useState<PatternRow[]>([]);
+  const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [loading, setLoading] = useState(true);
   // "employeeId|date" -> a real shift_id, WEEK_OFF_VALUE, or UNSET — staged
   // here until Save is clicked, not written on every pick.
@@ -52,30 +52,27 @@ export default function MonthlyRosterGrid({
   const [copying, setCopying] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [copyDone, setCopyDone] = useState(false);
-  const [copyingRowId, setCopyingRowId] = useState<string | null>(null);
-  // Clipboard-style copy/paste between employees: Copy marks a source
-  // employee, then Paste on any other employee's row writes that source's
-  // whole month onto them immediately — no modal, no separate Save step.
-  // Stays set across multiple pastes so one Copy can go out to several
-  // employees one click at a time.
-  const [copiedEmployeeId, setCopiedEmployeeId] = useState<string | null>(null);
-  const [pastingEmployeeId, setPastingEmployeeId] = useState<string | null>(null);
-  const [pasteError, setPasteError] = useState<string | null>(null);
-
   const month = useMemo(() => buildMonth(system, anchor), [system, anchor]);
   const monthCells = useMemo(() => month.weeks.flat().filter(c => c.inMonth), [month]);
   const dates = useMemo(() => monthCells.map(c => c.adKey), [monthCells]);
   const templateShifts = useMemo(() => shifts.filter(s => s.employee_id === null), [shifts]);
   const shiftById = useMemo(() => new Map(templateShifts.map(s => [s.id, s])), [templateShifts]);
   const today = todayIso();
+  // Gender-scoped holidays (e.g. Teej) count only for the employees they
+  // cover — same per-gender lookup the Attendance Report uses.
+  const holidayDatesFor = useMemo(() => holidayDatesByGender(holidays), [holidays]);
+  const holidayNameByDate = useMemo(() => new Map(holidays.map(h => [h.holiday_date, h.name])), [holidays]);
 
   const copyTargetMonth = useMemo(() => (copyTargetAnchor ? buildMonth(system, copyTargetAnchor) : null), [system, copyTargetAnchor]);
   const copyTargetIsSameMonth = useMemo(
     () => (copyTargetAnchor ? monthDateRange(system, copyTargetAnchor).start === dates[0] : false),
     [system, copyTargetAnchor, dates]
   );
+  // Only an EXPLICIT pick counts as something to copy — a day inherited from
+  // the Weekly Pattern needs no copying, since the target month already
+  // inherits the same pattern on its own.
   const copyCandidateCount = useMemo(
-    () => employees.filter(emp => dates.some(date => currentValue(emp.id, date) !== UNSET)).length,
+    () => employees.filter(emp => dates.some(date => explicitValue(emp.id, date) !== UNSET)).length,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [employees, dates, rosterRows, pending]
   );
@@ -86,13 +83,17 @@ export default function MonthlyRosterGrid({
     const start = dates[0];
     const end = dates[dates.length - 1];
     Promise.all([
-      supabase.from('employees').select('*').eq('status', 'active').order('name'),
+      supabase.from('employees').select('*').eq('status', 'active'),
       supabase.from('shifts').select('*'),
       supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end),
-    ]).then(([empRes, shiftsRes, rosterRes]) => {
-      setEmployees(empRes.data ?? []);
+      supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id'),
+      supabase.from('company_holidays').select('*').gte('holiday_date', start).lte('holiday_date', end),
+    ]).then(([empRes, shiftsRes, rosterRes, patternRes, holidaysRes]) => {
+      setEmployees((empRes.data ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })));
       setShifts(shiftsRes.data ?? []);
       setRosterRows(rosterRes.data ?? []);
+      setPatternRows(patternRes.data ?? []);
+      setHolidays(holidaysRes.data ?? []);
       setLoading(false);
     });
   }
@@ -104,7 +105,10 @@ export default function MonthlyRosterGrid({
     setSaveError(null);
   }, [dates.join(',')]);
 
-  function currentValue(employeeId: string, date: string): string {
+  // The exact-date pick for this cell only — UNSET when nothing is staged or
+  // saved for this specific date, whether or not the Weekly Pattern would
+  // otherwise cover it. This is what actually gets written on Save.
+  function explicitValue(employeeId: string, date: string): string {
     const key = `${employeeId}|${date}`;
     if (key in pending) return pending[key];
     const row = rosterRows.find(r => r.employee_id === employeeId && r.work_date === date);
@@ -112,80 +116,62 @@ export default function MonthlyRosterGrid({
     return row.shift_id === null ? WEEK_OFF_VALUE : row.shift_id;
   }
 
+  // The Recurring Weekly Pattern's pick for this employee on this weekday, in
+  // the same UNSET / WEEK_OFF_VALUE / shift_id shape as explicitValue() —
+  // read-only here, this grid never writes employee_weekly_pattern.
+  function patternValue(employeeId: string, weekday: number): string {
+    const row = patternRows.find(r => r.employee_id === employeeId && r.weekday === weekday);
+    if (!row) return UNSET;
+    return row.shift_id === null ? WEEK_OFF_VALUE : row.shift_id;
+  }
+
+  // Whether this date is a company holiday for this employee specifically
+  // (gender-scoped — e.g. Teej only covers female employees).
+  function isHoliday(employeeId: string, date: string): boolean {
+    const emp = employees.find(e => e.id === employeeId);
+    return holidayDatesFor(emp?.gender).has(date);
+  }
+
+  // What the cell actually shows: the exact-date pick if there is one,
+  // else the Weekly Pattern's pick for that weekday, else a company holiday
+  // reads as Week Off — mirrors resolveShiftForDate()'s own priority, so
+  // this grid never disagrees with what attendance/payroll will actually
+  // use for the day.
+  function currentValue(employeeId: string, date: string): string {
+    const explicit = explicitValue(employeeId, date);
+    if (explicit !== UNSET) return explicit;
+    const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+    const pattern = patternValue(employeeId, weekday);
+    if (pattern !== UNSET) return pattern;
+    return isHoliday(employeeId, date) ? WEEK_OFF_VALUE : UNSET;
+  }
+
+  // True only when a blank cell's Week Off comes from a company holiday
+  // rather than an actual Week Off pick — shown as "Holiday" instead, in its
+  // own colour, so it reads differently from a real day off.
+  function isHolidayFallback(employeeId: string, date: string): boolean {
+    if (explicitValue(employeeId, date) !== UNSET) return false;
+    const weekday = new Date(date + 'T00:00:00Z').getUTCDay();
+    if (patternValue(employeeId, weekday) !== UNSET) return false;
+    return isHoliday(employeeId, date);
+  }
+
+  // True when what's shown came from the Weekly Pattern, not a pick made for
+  // this specific date — used to give inherited cells a lighter, dashed
+  // style so it's clear at a glance which days are "real" exact-date rows.
+  function isInherited(employeeId: string, date: string): boolean {
+    return explicitValue(employeeId, date) === UNSET && currentValue(employeeId, date) !== UNSET;
+  }
+
   function setCell(employeeId: string, date: string, value: string) {
     setPending(p => ({ ...p, [`${employeeId}|${date}`]: value }));
   }
 
-  // Writes the month's first day's pick onto every other day in that row
-  // straight to Supabase — deliberately NOT staged into `pending` (unlike a
-  // manual per-cell pick): staging it made the button feel like it did
-  // nothing until a separate, easy-to-miss "Save changes" click, which is
-  // exactly the "I can copy but can't paste" complaint this replaced.
-  // Overwrites every other day unconditionally (there's no "leave day 2
-  // alone" concept for a single source value), so it confirms first.
-  async function copyRowToAll(employeeId: string) {
-    const sourceValue = currentValue(employeeId, dates[0]);
-    if (sourceValue === UNSET) return;
-    const emp = employees.find(e => e.id === employeeId);
-    if (
-      !confirm(
-        `Copy ${emp?.name ?? 'this employee'}'s day-1 pick to every other day this month? This overwrites all ${
-          dates.length - 1
-        } remaining days in their row right away.`
-      )
-    ) {
-      return;
-    }
-    setCopyingRowId(employeeId);
-    const shiftId = sourceValue === WEEK_OFF_VALUE ? null : sourceValue;
-    const upserts = dates.slice(1).map(date => ({ employee_id: employeeId, work_date: date, shift_id: shiftId }));
-    const { error } = await supabase.from('employee_daily_shifts').upsert(upserts, { onConflict: 'employee_id,work_date' });
-    setCopyingRowId(null);
-    if (error) {
-      setSaveError(error.message);
-      return;
-    }
-    reload();
-  }
-
-  // Writes the copied employee's whole month onto `targetId` straight to
-  // Supabase — but only after an explicit confirm, so nothing changes
-  // without the admin actually saying so. Only a source day that actually
-  // has a pick (not —) writes anything, leaving whatever's already on that
-  // target day alone. Also drops any of the target's own still-unsaved
-  // manual picks on the days just written, so the grid doesn't keep
-  // showing a stale pending value that no longer matches what Paste just
-  // saved underneath it.
-  async function pasteToEmployee(targetId: string) {
-    if (!copiedEmployeeId || copiedEmployeeId === targetId) return;
-    const sourceName = employees.find(e => e.id === copiedEmployeeId)?.name ?? 'the copied employee';
-    const targetName = employees.find(e => e.id === targetId)?.name ?? 'this employee';
-    if (!confirm(`Paste ${sourceName}'s month onto ${targetName}? This overwrites their matching days right away.`)) {
-      return;
-    }
-    setPastingEmployeeId(targetId);
-    setPasteError(null);
-    const upserts: { employee_id: string; work_date: string; shift_id: string | null }[] = [];
-    for (const date of dates) {
-      const value = currentValue(copiedEmployeeId, date);
-      if (value !== UNSET) upserts.push({ employee_id: targetId, work_date: date, shift_id: value === WEEK_OFF_VALUE ? null : value });
-    }
-    if (upserts.length === 0) {
-      setPastingEmployeeId(null);
-      return;
-    }
-    const { error } = await supabase.from('employee_daily_shifts').upsert(upserts, { onConflict: 'employee_id,work_date' });
-    setPastingEmployeeId(null);
-    if (error) {
-      setPasteError(error.message);
-      return;
-    }
-    setPending(p => {
-      const next = { ...p };
-      for (const u of upserts) delete next[`${targetId}|${u.work_date}`];
-      return next;
-    });
-    reload();
+  // The day columns run a whole month wide, so dragging the native
+  // scrollbar while also trying to open a shift dropdown further along the
+  // row is fiddly — these jump a week at a time instead.
+  function scrollDays(days: number) {
+    scrollRef.current?.scrollBy({ left: days * 100, behavior: 'smooth' });
   }
 
   function openCopyModal() {
@@ -213,7 +199,9 @@ export default function MonthlyRosterGrid({
       dates.forEach((date, i) => {
         const targetCell = targetCells[i];
         if (!targetCell) return;
-        const value = currentValue(emp.id, date);
+        // Explicit only — a day inherited from the Weekly Pattern needs no
+        // copying, since the target month already inherits the same pattern.
+        const value = explicitValue(emp.id, date);
         if (value === UNSET) return;
         upserts.push({ employee_id: emp.id, work_date: targetCell.adKey, shift_id: value === WEEK_OFF_VALUE ? null : value });
       });
@@ -274,11 +262,30 @@ export default function MonthlyRosterGrid({
     reload();
   }
 
-  function cellTone(value: string, dirty: boolean) {
+  // `inherited` gives a day pulled from the Weekly Pattern a lighter, dashed
+  // border than one explicitly picked for this exact date, so it's clear at
+  // a glance which days are a real employee_daily_shifts row. `holiday`
+  // colours a blank-and-nothing-inherited cell as a company holiday instead
+  // of an ordinary Week Off; `onHoliday` rings a cell that's ALSO a holiday
+  // even though the employee has a real shift that day (rostered to work
+  // through it), so that's visible without hiding the shift itself.
+  function cellTone(value: string, dirty: boolean, inherited: boolean, holiday: boolean, onHoliday: boolean) {
     if (dirty) return 'border-accent bg-accent/10 text-ink font-medium';
-    if (value === WEEK_OFF_VALUE) return 'border-warning/30 bg-warning-bg text-warning-text font-semibold';
-    if (value === UNSET) return 'border-slate-200 text-slate-400';
-    return 'border-accent/30 bg-accent/5 text-ink font-medium';
+    if (holiday) return 'border-dashed border-purple-300 bg-purple-50 text-purple-700';
+    const ring = onHoliday ? ' ring-1 ring-inset ring-purple-300' : '';
+    if (value === WEEK_OFF_VALUE) {
+      return (
+        (inherited
+          ? 'border-dashed border-warning/40 bg-warning-bg/50 text-warning-text'
+          : 'border-warning/30 bg-warning-bg text-warning-text font-semibold') + ring
+      );
+    }
+    if (value === UNSET) return 'border-slate-200 text-slate-400' + ring;
+    return (
+      (inherited
+        ? 'border-dashed border-accent/30 bg-accent/5 text-slate-600'
+        : 'border-accent/30 bg-accent/5 text-ink font-medium') + ring
+    );
   }
 
   return (
@@ -301,7 +308,7 @@ export default function MonthlyRosterGrid({
           <button
             type="button"
             onClick={openCopyModal}
-            disabled={isInactive || copyCandidateCount === 0 || pendingCount > 0}
+            disabled={copyCandidateCount === 0 || pendingCount > 0}
             title={
               pendingCount > 0
                 ? 'Save this month’s changes first'
@@ -313,18 +320,10 @@ export default function MonthlyRosterGrid({
           >
             ⧉ Copy this month to…
           </button>
-          <RosterModeSwitch companyId={companyId} mode={rosterMode} onChange={onRosterModeChange} />
         </div>
       </div>
 
-      {isInactive && (
-        <div className="border-b border-warning/20 bg-warning-bg px-4 py-3 text-sm text-warning-text sm:px-6">
-          Monthly Roster is inactive — Recurring Weekly mode is driving shifts right now. Switch to Exact Dates above to edit
-          specific days. Nothing here is deleted; switching back restores it.
-        </div>
-      )}
-
-      {!isInactive && pendingCount > 0 && (
+      {pendingCount > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-accent/20 bg-accent/5 px-4 py-3 sm:px-6">
           <span className="text-sm font-medium text-ink">
             {pendingCount} unsaved change{pendingCount === 1 ? '' : 's'}
@@ -344,21 +343,6 @@ export default function MonthlyRosterGrid({
         </div>
       )}
 
-      {!isInactive && copiedEmployeeId && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-good/20 bg-good-bg px-4 py-2.5 text-sm sm:px-6">
-          <span className="font-medium text-good-text">
-            📋 Copied {employees.find(e => e.id === copiedEmployeeId)?.name ?? 'an employee'}&apos;s month — click{' '}
-            <strong>📋 Paste</strong> on any other employee below to apply it. Saves immediately, as many times as you like.
-          </span>
-          <button onClick={() => setCopiedEmployeeId(null)} className="shrink-0 text-xs font-medium text-slate-600 hover:underline">
-            ✕ Clear
-          </button>
-        </div>
-      )}
-      {pasteError && (
-        <div className="border-b border-critical/20 bg-critical-bg px-4 py-2.5 text-sm text-critical-text sm:px-6">Could not paste: {pasteError}</div>
-      )}
-
       <div className="p-4 sm:p-6">
         {loading ? (
           <p className="text-center text-sm text-slate-400">Loading…</p>
@@ -370,17 +354,49 @@ export default function MonthlyRosterGrid({
             those to each employee per day.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <>
+          <div className="mb-2 flex items-center justify-end gap-2">
+            <span className="text-xs text-slate-400">Scroll days:</span>
+            <button
+              type="button"
+              onClick={() => scrollDays(-7)}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500 shadow-sm hover:border-accent/40 hover:text-accent"
+            >
+              ‹ Back
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollDays(7)}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500 shadow-sm hover:border-accent/40 hover:text-accent"
+            >
+              Forward ›
+            </button>
+          </div>
+          <HorizontalScrollButtons targetRef={scrollRef} step={700} />
+          <div ref={scrollRef} className="max-h-[65vh] overflow-auto rounded-xl border border-slate-200">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr className="sticky top-0 z-20 border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <th className="sticky left-0 z-10 whitespace-nowrap bg-slate-50 px-3 py-2.5 font-medium">Employee</th>
-                  {monthCells.map(cell => (
-                    <th key={cell.adKey} className={`whitespace-nowrap px-1 py-2.5 text-center font-medium ${cell.adKey === today ? 'bg-accent/10 text-accent' : ''}`}>
-                      {WEEKDAY_LABELS[new Date(cell.adKey + 'T00:00:00Z').getUTCDay()]}
-                      <div className="text-[11px] font-normal normal-case text-slate-400">{cell.displayDay}</div>
-                    </th>
-                  ))}
+                  {monthCells.map(cell => {
+                    // Company-wide holidays only (no gender filter) for the
+                    // shared header tint — a gender-scoped one (e.g. Teej)
+                    // still shows correctly per employee in each cell below.
+                    const holidayName = holidayDatesFor(null).has(cell.adKey) ? holidayNameByDate.get(cell.adKey) : undefined;
+                    return (
+                      <th
+                        key={cell.adKey}
+                        title={holidayName}
+                        className={`whitespace-nowrap px-1 py-2.5 text-center font-medium ${
+                          holidayName ? 'bg-purple-50 text-purple-700' : cell.adKey === today ? 'bg-accent/10 text-accent' : ''
+                        }`}
+                      >
+                        {WEEKDAY_LABELS[new Date(cell.adKey + 'T00:00:00Z').getUTCDay()]}
+                        <div className="text-[11px] font-normal normal-case text-slate-400">{cell.displayDay}</div>
+                        {holidayName && <div className="max-w-[5.5rem] truncate text-[9px] font-semibold normal-case text-purple-600">{holidayName}</div>}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -392,70 +408,45 @@ export default function MonthlyRosterGrid({
                         <div className="flex items-center gap-2">
                           <Avatar name={emp.name} photoUrl={emp.profile_photo_url} className="h-12 w-12 text-sm" />
                           <span className="truncate font-medium text-ink">{emp.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => copyRowToAll(emp.id)}
-                            disabled={isInactive || currentValue(emp.id, dates[0]) === UNSET || copyingRowId === emp.id}
-                            title="Copy the first day's pick to every day this month — saves immediately"
-                            className="ml-1 shrink-0 rounded-md border border-slate-200 px-1.5 py-1 text-[10px] font-semibold text-slate-500 hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
-                          >
-                            {copyingRowId === emp.id ? 'Copying…' : '⧉ Copy all'}
-                          </button>
-                          {copiedEmployeeId === emp.id ? (
-                            <button
-                              type="button"
-                              onClick={() => setCopiedEmployeeId(null)}
-                              title="This employee's month is copied — click to clear"
-                              className="shrink-0 rounded-md border border-good/30 bg-good-bg px-1.5 py-1 text-[10px] font-semibold text-good-text"
-                            >
-                              📋 Copied ✓
-                            </button>
-                          ) : copiedEmployeeId ? (
-                            <button
-                              type="button"
-                              onClick={() => pasteToEmployee(emp.id)}
-                              disabled={isInactive || pastingEmployeeId === emp.id}
-                              title={`Paste ${employees.find(e => e.id === copiedEmployeeId)?.name ?? "the copied employee"}'s month onto ${emp.name} — saves immediately`}
-                              className="shrink-0 rounded-md border border-accent/40 bg-accent/5 px-1.5 py-1 text-[10px] font-semibold text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {pastingEmployeeId === emp.id ? 'Pasting…' : '📋 Paste'}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setCopiedEmployeeId(emp.id)}
-                              disabled={isInactive || !dates.some(date => currentValue(emp.id, date) !== UNSET)}
-                              title="Copy this employee's whole month — then click Paste on another employee"
-                              className="shrink-0 rounded-md border border-slate-200 px-1.5 py-1 text-[10px] font-semibold text-slate-500 hover:border-accent/40 hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
-                            >
-                              📋 Copy
-                            </button>
-                          )}
                         </div>
                       </td>
                       {dates.map(date => {
                         const value = currentValue(emp.id, date);
                         const dirty = `${emp.id}|${date}` in pending;
+                        const inherited = !dirty && isInherited(emp.id, date);
+                        const holidayFallback = !dirty && isHolidayFallback(emp.id, date);
+                        const onHoliday = isHoliday(emp.id, date);
+                        const holidayName = holidayNameByDate.get(date);
+                        const shiftTitle = shiftById.get(value)
+                          ? `${shiftById.get(value)!.name} (${shiftById.get(value)!.start_time.slice(0, 5)}–${shiftById
+                              .get(value)!
+                              .end_time.slice(0, 5)})`
+                          : value === WEEK_OFF_VALUE
+                            ? holidayFallback
+                              ? (holidayName ?? 'Company holiday')
+                              : 'Week Off'
+                            : undefined;
+                        const title = onHoliday && !holidayFallback && shiftTitle
+                          ? `${shiftTitle} — rostered to work through ${holidayName ?? 'a company holiday'}`
+                          : inherited && shiftTitle
+                            ? `${shiftTitle} — from the Weekly Pattern`
+                            : shiftTitle;
                         return (
                           <td key={date} className={`px-0.5 py-1.5 text-center ${date === today ? 'bg-accent/5' : rowBg}`}>
                             <select
                               value={value}
                               onChange={e => setCell(emp.id, date, e.target.value)}
-                              disabled={isInactive}
-                              title={
-                                shiftById.get(value)
-                                  ? `${shiftById.get(value)!.name} (${shiftById.get(value)!.start_time.slice(0, 5)}–${shiftById
-                                      .get(value)!
-                                      .end_time.slice(0, 5)})`
-                                  : undefined
-                              }
+                              title={title}
                               className={`w-24 rounded-md border px-1 py-1 text-[11px] shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50 ${cellTone(
                                 value,
-                                dirty
+                                dirty,
+                                inherited,
+                                holidayFallback,
+                                onHoliday && !holidayFallback
                               )}`}
                             >
                               <option value={UNSET}>—</option>
-                              <option value={WEEK_OFF_VALUE}>Week Off</option>
+                              <option value={WEEK_OFF_VALUE}>{holidayFallback ? 'Holiday' : 'Week Off'}</option>
                               {templateShifts.map(s => (
                                 <option key={s.id} value={s.id}>
                                   {s.name} {s.start_time.slice(0, 2)}-{s.end_time.slice(0, 2)}
@@ -471,6 +462,11 @@ export default function MonthlyRosterGrid({
               </tbody>
             </table>
           </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
+            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-slate-300" /> Dashed = inherited from the Weekly Pattern</span>
+            <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-purple-300 bg-purple-50" /> Company holiday</span>
+          </div>
+          </>
         )}
 
         {saveError && <p className="mt-3 text-sm text-critical">Could not save: {saveError}</p>}
@@ -501,11 +497,12 @@ export default function MonthlyRosterGrid({
               <p className="mb-4 text-sm text-critical">Pick a different month — this is the month you&apos;re already viewing.</p>
             ) : (
               <p className="mb-4 text-sm text-slate-600">
-                {copyCandidateCount} employee{copyCandidateCount === 1 ? '' : 's'} with a pick this month will get that same
-                plan applied to {copyTargetMonth?.label}, matched by day-of-month position (the 1st here → the 1st there, and
-                so on). If the two months are different lengths, the extra days at the end are left alone. A day here left
-                blank (—) leaves any existing pick on the matching day untouched — this only fills in, it never clears. You
-                can still hand-edit any single day afterward.
+                {copyCandidateCount} employee{copyCandidateCount === 1 ? '' : 's'} with an exact-date pick this month will get
+                that same plan applied to {copyTargetMonth?.label}, matched by day-of-month position (the 1st here → the 1st
+                there, and so on). A day only inherited from the Weekly Pattern (dashed border) isn't copied — the target
+                month already inherits the same pattern on its own. If the two months are different lengths, the extra days
+                at the end are left alone, and an existing pick on the matching target day is left untouched — this only
+                fills in, it never clears. You can still hand-edit any single day afterward.
               </p>
             )}
             {copyError && <p className="mb-3 text-sm text-critical">Could not copy: {copyError}</p>}

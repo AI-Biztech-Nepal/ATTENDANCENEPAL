@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, Image, Modal } from 'react-native';
 import { supabase } from '../lib/supabase';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, Shift } from '../types';
+import { ATTENDANCE_LOG_COLUMNS } from '../types';
 import { colors } from '../theme';
 import StatCard from '../components/StatCard';
 import SimpleLineChart from '../components/SimpleLineChart';
@@ -18,7 +19,9 @@ import {
   type DailyShiftByDate,
   type WeeklyPatternByEmployee,
 } from '../lib/shift';
-import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '../lib/weekOff';
+import { fetchMyCompanyWeekOffConfig, weekOffDatesByGender } from '../lib/weekOff';
+import { formatAdDate } from '../lib/calendar';
+import { useCalendarSystem } from '../lib/CalendarSystemContext';
 
 type EmployeeLite = Pick<Employee, 'name' | 'profile_photo_url'>;
 type DetailRow = { id: string; primary: string; secondary?: string };
@@ -45,6 +48,7 @@ function last7Days(): string[] {
 }
 
 export default function DashboardScreen({ navigation }: any) {
+  const { system } = useCalendarSystem();
   const [feed, setFeed] = useState<AttendanceLog[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeLookup, setEmployeeLookup] = useState<Record<string, EmployeeLite>>({});
@@ -101,7 +105,7 @@ export default function DashboardScreen({ navigation }: any) {
       .then(({ data }) => setTodayRoster(data ?? []));
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .gte('punch_time', since.toISOString())
       .order('punch_time', { ascending: false })
       .then(({ data }) => {
@@ -154,10 +158,14 @@ export default function DashboardScreen({ navigation }: any) {
   // wherever a resolved shift matters, so someone who does show up on a
   // company-wide off day isn't marked Late against a shift they were never
   // expecting to work.
-  const companyWeekOffDates = useMemo(
-    () => weekOffDatesInRange(today, today, weeklyOffDay, holidays),
+  // Per-employee: a gender-scoped holiday today (e.g. Teej) is a day off only
+  // for the employees it covers. The base set (no gender) drives the plain
+  // "today is a company off-day" banner.
+  const weekOffDatesFor = useMemo(
+    () => weekOffDatesByGender(today, today, weeklyOffDay, holidays),
     [today, weeklyOffDay, holidays]
   );
+  const companyWeekOffDates = useMemo(() => weekOffDatesFor(null), [weekOffDatesFor]);
   const todayIsWeekOff = companyWeekOffDates.has(today);
 
   const weeklyPattern: WeeklyPatternByEmployee = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
@@ -166,7 +174,7 @@ export default function DashboardScreen({ navigation }: any) {
     const rows: DetailRow[] = [];
     for (const emp of activeEmployees) {
       const empLogs = todayLogs.filter(l => l.employee_id === emp.id);
-      if (!empLogs.length || !isLate(emp, shifts, empLogs, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern)) continue;
+      if (!empLogs.length || !isLate(emp, shifts, empLogs, today, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern)) continue;
       const checkIn = firstCheckIn(empLogs);
       rows.push({
         id: emp.id,
@@ -175,7 +183,7 @@ export default function DashboardScreen({ navigation }: any) {
       });
     }
     return rows;
-  }, [activeEmployees, todayLogs, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern]);
+  }, [activeEmployees, todayLogs, shifts, today, dailyShiftByDate, weekOffDatesFor, weeklyPattern]);
   const lateCount = lateEmployees.length;
 
   // todayIsWeekOff only covers the COMPANY-wide off day — an employee can
@@ -194,10 +202,10 @@ export default function DashboardScreen({ navigation }: any) {
               emp =>
                 !presentIds.has(emp.id) &&
                 !onLeaveIds.has(emp.id) &&
-                !isWeekOff(resolveShiftForDate(emp, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern))
+                !isWeekOff(resolveShiftForDate(emp, shifts, today, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern))
             )
             .map(emp => ({ id: emp.id, primary: emp.name, secondary: emp.department ?? undefined })),
-    [activeEmployees, presentIds, onLeaveIds, todayIsWeekOff, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern]
+    [activeEmployees, presentIds, onLeaveIds, todayIsWeekOff, shifts, today, dailyShiftByDate, weekOffDatesFor, weeklyPattern]
   );
   const absentCount = absentRows.length;
 
@@ -225,9 +233,9 @@ export default function DashboardScreen({ navigation }: any) {
     return onLeave.map(l => ({
       id: l.id,
       primary: byId.get(l.employee_id) ?? 'Unknown',
-      secondary: `${l.leave_type} · until ${l.end_date}`,
+      secondary: `${l.leave_type} · until ${formatAdDate(l.end_date, system)}`,
     }));
-  }, [onLeave, employees]);
+  }, [onLeave, employees, system]);
 
   const todayDayStatus = useMemo(() => {
     const map = new Map<string, ReturnType<typeof computeDayStatusForResolvedShift>>();
@@ -241,14 +249,15 @@ export default function DashboardScreen({ navigation }: any) {
         if (list) list.push(log);
         else byDate.set(key, [log]);
       }
-      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
+      const weekOffDates = weekOffDatesFor(emp.gender);
+      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDates, weeklyPattern);
       const dayLogs = byDate.get(today);
       if (!dayLogs || dayLogs.length === 0) continue;
-      const resolved = resolveShiftForDate(emp, shifts, today, dailyShiftByDate, companyWeekOffDates, weeklyPattern);
+      const resolved = resolveShiftForDate(emp, shifts, today, dailyShiftByDate, weekOffDates, weeklyPattern);
       map.set(emp.id, computeDayStatusForResolvedShift(dayLogs, resolved));
     }
     return map;
-  }, [activeEmployees, weekLogs, shifts, dailyShiftByDate, today, companyWeekOffDates, weeklyPattern]);
+  }, [activeEmployees, weekLogs, shifts, dailyShiftByDate, today, weekOffDatesFor, weeklyPattern]);
 
   const workHoursRows = useMemo<DetailRow[]>(() => {
     const entries: { id: string; name: string; hours: number }[] = [];
@@ -350,7 +359,6 @@ export default function DashboardScreen({ navigation }: any) {
           const emp = employeeLookup[item.employee_id];
           const name = emp?.name ?? 'Unknown';
           const isIn = item.punch_type === '0';
-          const isBreak = item.punch_type === '2' || item.punch_type === '3';
           return (
             <View style={styles.row}>
               {emp?.profile_photo_url && !photoFailed.has(item.employee_id) ? (
@@ -370,8 +378,8 @@ export default function DashboardScreen({ navigation }: any) {
                   {new Date(item.punch_time).toLocaleTimeString()} · {item.method}
                 </Text>
               </View>
-              <View style={[styles.typeBadge, isIn ? styles.typeInBg : isBreak ? styles.typeBreakBg : styles.typeOutBg]}>
-                <Text style={isIn ? styles.typeInText : isBreak ? styles.typeBreakText : styles.typeOutText}>
+              <View style={[styles.typeBadge, isIn ? styles.typeInBg : styles.typeOutBg]}>
+                <Text style={isIn ? styles.typeInText : styles.typeOutText}>
                   {punchTypeLabel(item.punch_type)}
                 </Text>
               </View>
@@ -443,10 +451,8 @@ const styles = StyleSheet.create({
   typeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   typeInBg: { backgroundColor: colors.goodBg },
   typeOutBg: { backgroundColor: colors.infoBg },
-  typeBreakBg: { backgroundColor: colors.warningBg },
   typeInText: { fontSize: 11, fontWeight: '700', color: colors.goodText },
   typeOutText: { fontSize: 11, fontWeight: '700', color: colors.infoText },
-  typeBreakText: { fontSize: 11, fontWeight: '700', color: colors.warningText },
   empty: { textAlign: 'center', marginTop: 40, color: colors.slate400 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', padding: 20 },
   detailSheet: { backgroundColor: colors.white, borderRadius: 16, padding: 20, maxHeight: '75%' },

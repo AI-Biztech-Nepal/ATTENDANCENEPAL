@@ -2,7 +2,7 @@
   "expo": {
     "name": "Attendance",
     "slug": "attendance-mobile",
-    "version": "1.0.110",
+    "version": "1.0.114",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
@@ -19,8 +19,14 @@
     },
     "android": {
       "package": "com.attendancenepal.mobile",
-      "versionCode": 110,
-      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION"],
+      "versionCode": 114,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
@@ -53,8 +59,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+        "projectId": "460a2da0-e33b-4dd6-8dfd-7457d1e46753"
       }
-    }
+    },
+    "owner": "aibiztechnepal"
   }
 }

@@ -3,14 +3,19 @@ import { View, Text, FlatList, ScrollView, StyleSheet, ActivityIndicator, TextIn
 import * as ImagePicker from 'expo-image-picker';
 import { compressPhoto } from '../lib/compressPhoto';
 import { supabase } from '../lib/supabase';
-import type { Branch, Department, Employee, Profile, Shift } from '../types';
+import type { Branch, Department, Employee, Gender, Profile, Shift } from '../types';
 import { resolveShift, formatShiftHours } from '../lib/shift';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
+import DatePicker from '../components/DatePicker';
 import { ChevronIcon, EditIcon, KeyIcon } from '../components/icons';
 import { createLogin, fetchAccounts, resetPassword, updateLoginEmail } from '../lib/accountsApi';
 
 const EMPTY_ADD_FORM = { employee_code: '', name: '', phone: '', email: '', address: '', designation: '', fingerprint_id: '', date_of_joining: '' };
+const GENDER_OPTIONS: { value: Gender; label: string }[] = [
+  { value: 'female', label: 'Female' },
+  { value: 'male', label: 'Male' },
+];
 const PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
 function generatePassword(length = 10) {
   let out = '';
@@ -35,6 +40,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
   const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
   const [addDepartment, setAddDepartment] = useState<string | null>(null);
   const [addBranchId, setAddBranchId] = useState<string | null>(null);
+  const [addGender, setAddGender] = useState<Gender | null>(null);
   const [saving, setSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -60,6 +66,11 @@ export default function EmployeesScreen({ route, navigation }: any) {
   const [forceDeleteConfirmText, setForceDeleteConfirmText] = useState('');
   const [forceDeleting, setForceDeleting] = useState(false);
   const [forceDeleteError, setForceDeleteError] = useState<string | null>(null);
+
+  const [resignEmployee, setResignEmployee] = useState<Employee | null>(null);
+  const [resignDate, setResignDate] = useState('');
+  const [resigning, setResigning] = useState(false);
+  const [resignError, setResignError] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState<Set<string>>(new Set());
   const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
 
@@ -135,6 +146,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
       designation: addForm.designation || null,
       fingerprint_id: addForm.fingerprint_id || null,
       branch_id: addBranchId,
+      gender: addGender,
       date_of_joining: addForm.date_of_joining || null,
       status: 'active',
     });
@@ -146,26 +158,32 @@ export default function EmployeesScreen({ route, navigation }: any) {
     setAddForm(EMPTY_ADD_FORM);
     setAddDepartment(null);
     setAddBranchId(null);
+    setAddGender(null);
     setShowAddForm(false);
     reload();
   }
 
-  async function handleMarkResigned(emp: Employee) {
-    Alert.alert('Mark Resigned', `Mark ${emp.name} as resigned? They'll be removed from active views but their history is kept.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Mark Resigned',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase
-            .from('employees')
-            .update({ status: 'inactive', resigned_at: new Date().toISOString().slice(0, 10) })
-            .eq('id', emp.id);
-          if (error) Alert.alert('Could not update', error.message);
-          reload();
-        },
-      },
-    ]);
+  function openResignModal(emp: Employee) {
+    setResignEmployee(emp);
+    setResignDate(emp.resigned_at ?? new Date().toISOString().slice(0, 10));
+    setResignError(null);
+  }
+
+  async function handleConfirmResign() {
+    if (!resignEmployee || !resignDate) return;
+    setResigning(true);
+    setResignError(null);
+    const { error } = await supabase
+      .from('employees')
+      .update({ status: 'inactive', resigned_at: resignDate })
+      .eq('id', resignEmployee.id);
+    setResigning(false);
+    if (error) {
+      setResignError(error.message);
+      return;
+    }
+    setResignEmployee(null);
+    reload();
   }
   async function handleRestore(emp: Employee) {
     Alert.alert('Restore', `Restore ${emp.name} to active? They'll show up in active views again.`, [
@@ -485,7 +503,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
                   </TouchableOpacity>
                 )}
                 {item.status === 'active' ? (
-                  <TouchableOpacity style={[styles.actionTile, styles.actionWarning]} onPress={() => handleMarkResigned(item)}>
+                  <TouchableOpacity style={[styles.actionTile, styles.actionWarning]} onPress={() => openResignModal(item)}>
                     <Text style={[styles.actionText, { color: colors.warningText }]}>Resign</Text>
                   </TouchableOpacity>
                 ) : (
@@ -497,9 +515,14 @@ export default function EmployeesScreen({ route, navigation }: any) {
                   <Text style={[styles.actionText, { color: colors.criticalText }]}>Remove</Text>
                 </TouchableOpacity>
                 {item.status !== 'active' && (
-                  <TouchableOpacity style={[styles.actionTile, styles.actionCritical]} onPress={() => openForceDelete(item)}>
-                    <Text style={[styles.actionText, { color: colors.criticalText }]}>Delete forever</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity style={[styles.actionTile, styles.actionWarning]} onPress={() => openResignModal(item)}>
+                      <Text style={[styles.actionText, { color: colors.warningText }]}>Edit date</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.actionTile, styles.actionCritical]} onPress={() => openForceDelete(item)}>
+                      <Text style={[styles.actionText, { color: colors.criticalText }]}>Delete forever</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
             </View>
@@ -531,6 +554,19 @@ export default function EmployeesScreen({ route, navigation }: any) {
                 <TextInput style={styles.input} value={addForm.fingerprint_id} onChangeText={v => setAddForm(f => ({ ...f, fingerprint_id: v }))} />
                 <Text style={styles.label}>Date of joining (YYYY-MM-DD)</Text>
                 <TextInput style={styles.input} value={addForm.date_of_joining} onChangeText={v => setAddForm(f => ({ ...f, date_of_joining: v }))} placeholder="2026-01-15" placeholderTextColor={colors.slate400} />
+
+                <Text style={styles.label}>Gender</Text>
+                <View style={styles.chipsRow}>
+                  <TouchableOpacity style={[styles.pickChip, addGender === null && styles.pickChipActive]} onPress={() => setAddGender(null)}>
+                    <Text style={[styles.pickChipText, addGender === null && styles.pickChipTextActive]}>Not set</Text>
+                  </TouchableOpacity>
+                  {GENDER_OPTIONS.map(g => (
+                    <TouchableOpacity key={g.value} style={[styles.pickChip, addGender === g.value && styles.pickChipActive]} onPress={() => setAddGender(g.value)}>
+                      <Text style={[styles.pickChipText, addGender === g.value && styles.pickChipTextActive]}>{g.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.hint}>Used for gender-specific holidays (e.g. Teej).</Text>
 
                 <Text style={styles.label}>Department</Text>
                 <View style={styles.chipsRow}>
@@ -729,6 +765,38 @@ export default function EmployeesScreen({ route, navigation }: any) {
                 style={[styles.saveModalBtn, { backgroundColor: colors.critical, opacity: forceDeleteConfirmText !== forceDeleteEmployee?.name ? 0.5 : 1 }]}
               >
                 <Text style={styles.saveModalBtnText}>{forceDeleting ? 'Deleting…' : 'Permanently delete'}</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={!!resignEmployee} transparent animationType="fade" onRequestClose={() => setResignEmployee(null)}>
+        <TouchableOpacity style={styles.modalBackdropCenter} activeOpacity={1} onPress={() => setResignEmployee(null)}>
+          <TouchableOpacity activeOpacity={1} style={styles.formSheet}>
+            <Text style={styles.formTitle}>
+              {resignEmployee?.status === 'active' ? `Mark ${resignEmployee?.name} as resigned?` : `Resignation date for ${resignEmployee?.name}`}
+            </Text>
+            <Text style={styles.hint}>
+              {resignEmployee?.status === 'active'
+                ? "They'll be removed from active views but their history is kept."
+                : 'Update the date their resignation takes effect.'}
+            </Text>
+            <Text style={styles.label}>Resignation date</Text>
+            <DatePicker value={resignDate} onChange={setResignDate} />
+            {resignError && <Text style={styles.errorText}>{resignError}</Text>}
+            <View style={styles.formActions}>
+              <TouchableOpacity onPress={() => setResignEmployee(null)} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleConfirmResign}
+                disabled={resigning || !resignDate}
+                style={[styles.saveModalBtn, { backgroundColor: colors.critical, opacity: resigning || !resignDate ? 0.5 : 1 }]}
+              >
+                <Text style={styles.saveModalBtnText}>
+                  {resigning ? 'Saving…' : resignEmployee?.status === 'active' ? 'Mark resigned' : 'Save date'}
+                </Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>

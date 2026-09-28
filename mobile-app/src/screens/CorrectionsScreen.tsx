@@ -6,6 +6,7 @@ import { colors } from '../theme';
 import Badge from '../components/Badge';
 import { formatAdDate } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
+import { nepalDateKey } from '../lib/shift';
 
 const FILTERS = ['pending', 'approved', 'rejected', 'All'] as const;
 
@@ -94,7 +95,7 @@ export default function CorrectionsScreen() {
                   <Text style={styles.name}>{employeeName(item.employee_id)}</Text>
                   <Text style={styles.type}>
                     {item.kind === 'correction' ? 'Missed Punch' : item.data.punch_type === '0' ? 'Check In' : 'Check Out'} ·{' '}
-                    {formatAdDate(item.kind === 'correction' ? item.data.work_date : item.data.punch_time.slice(0, 10), system)}
+                    {formatAdDate(item.kind === 'correction' ? item.data.work_date : nepalDateKey(item.data.punch_time), system)}
                   </Text>
                 </View>
                 <Badge tone={item.status === 'approved' ? 'good' : item.status === 'rejected' ? 'critical' : 'warning'}>{item.status}</Badge>

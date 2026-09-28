@@ -7,6 +7,7 @@ import EmployeeShell from '@/components/EmployeeShell';
 import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { SKILL_CATEGORIES } from '@/lib/skillCategories';
@@ -32,6 +33,7 @@ function statusTone(status: string) {
 
 export default function MyProfilePage() {
   const { system } = useCalendarSystem();
+  const confirm = useConfirm();
   const router = useRouter();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -263,7 +265,7 @@ export default function MyProfilePage() {
 
   async function handleDeleteEducation(id: string) {
     if (!employee) return;
-    if (!confirm('Remove this education entry?')) return;
+    if (!(await confirm('Remove this education entry?', { title: 'Remove entry?', confirmLabel: 'Remove', tone: 'danger' }))) return;
     await supabase.from('employee_education').delete().eq('id', id);
     reload(employee.id);
   }
@@ -292,7 +294,7 @@ export default function MyProfilePage() {
 
   async function handleDeleteExperience(id: string) {
     if (!employee) return;
-    if (!confirm('Remove this work experience entry?')) return;
+    if (!(await confirm('Remove this work experience entry?', { title: 'Remove entry?', confirmLabel: 'Remove', tone: 'danger' }))) return;
     await supabase.from('employee_work_experience').delete().eq('id', id);
     reload(employee.id);
   }

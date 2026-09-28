@@ -3,6 +3,7 @@ export default function StatCard({
   value,
   hint,
   icon,
+  iconClassName,
   className,
   onClick,
 }: {
@@ -10,6 +11,8 @@ export default function StatCard({
   value: string;
   hint?: string;
   icon?: React.ReactNode;
+  /** Overrides the icon badge's default `bg-slate-50 text-accent` — e.g. `'bg-violet-50 text-violet-600'`. */
+  iconClassName?: string;
   className?: string;
   onClick?: () => void;
 }) {
@@ -34,7 +37,7 @@ export default function StatCard({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-slate-500 sm:text-sm">{label}</span>
-        {icon && <span className="shrink-0 rounded-lg bg-slate-50 p-2 text-accent">{icon}</span>}
+        {icon && <span className={`shrink-0 rounded-lg p-2 ${iconClassName ?? 'bg-slate-50 text-accent'}`}>{icon}</span>}
       </div>
       <div className="mt-2 text-2xl font-bold text-ink sm:mt-3 sm:text-3xl">{value}</div>
       {hint && (

@@ -1,40 +1,73 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TextInput, TouchableOpacity, Switch, Modal, FlatList } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TextInput, TouchableOpacity, Modal, FlatList, Switch } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '../types';
-import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesInRange } from '../lib/weekOff';
+import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '../types';
+import { fetchMyCompanyWeekOffConfig, leaveDatesByEmployee, weekOffDatesByGender } from '../lib/weekOff';
 import {
   applyOvernightShiftCorrection,
   buildWeeklyPatternByEmployee,
   computeDayStatusForResolvedShift,
   formatHoursMinutes,
   isWeekOff,
+  nepalDateKey,
   nepalTodayIso,
   resolveShiftForDate,
   type DailyShiftByDate,
   type WeeklyPatternByEmployee,
 } from '../lib/shift';
+import { buildEmployeeDayRows } from '../lib/payrollDetail';
+import { fetchStaffSheetConfig } from '../lib/payrollFormat';
+import {
+  NO_LEAVE_POLICY,
+  coveredDaysInRange,
+  fetchLeavePolicy,
+  formatLeaveDays,
+  leavePolicyActive,
+  loadLeaveLedgers,
+  type LeaveLedger,
+  type LeavePolicy,
+} from '../lib/leaveBalance';
 import { colors } from '../theme';
 import { ChevronIcon } from '../components/icons';
 import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPeriod } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 
+const PAID_LEAVE_KEY = 'payrollPaidLeaveOn';
+
+function money(n: number) {
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function fmtHrs(hours: number) {
   return formatHoursMinutes(Math.round(hours * 60));
 }
 
+// The Staff Salary Sheet's row, same figures as the dashboard's table:
+// Basic is what has been EARNED to yesterday (Basic / working days x days
+// present, plus any day the leave balance paid for), then the SSF gross-up.
 type Row = {
   id: string;
   enrollId: string;
   name: string;
   salary: number | null;
+  allowance: number;
   days: number;
   hours: number;
   overtime: number;
-  breakMinutes: number;
   lateDays: number;
   earlyDays: number;
   paidOffDays: number;
+  /** Absent / leave days the yearly balance paid for, in this period. */
+  paidLeaveDays: number;
+  workingDays: number;
+  basic: number;
+  ssfEmployer: number;
+  ssfEmployee: number;
+  mgs: number;
+  totalSsf: number;
+  net: number;
 };
 
 export default function PayrollScreen({ navigation }: any) {
@@ -56,18 +89,36 @@ export default function PayrollScreen({ navigation }: any) {
   const [pendingSalary, setPendingSalary] = useState<Record<string, string>>({});
   const [editingSalaryId, setEditingSalaryId] = useState<string | null>(null);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
+  // Seeded from (and savable back to) the company's own saved default
+  // (companies.ot_hours_per_day/ot_multiplier) rather than a hardcoded
+  // 8h/1.5x, so a chosen OT policy actually sticks between sessions.
+  const [companyId, setCompanyId] = useState<string | null>(null);
   const [otHoursPerDay, setOtHoursPerDay] = useState('8');
   const [otMultiplier, setOtMultiplier] = useState('1.5');
-  const [overtimeEnabled, setOvertimeEnabled] = useState<Record<string, boolean>>({});
+  const [otDefaultsDirty, setOtDefaultsDirty] = useState(false);
+  const [savingOtDefaults, setSavingOtDefaults] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [weeklyOffDay, setWeeklyOffDay] = useState<number | null>(null);
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
+  const [rosterMode, setRosterMode] = useState<'weekly' | 'monthly' | null>(null);
+  // The sheet's SSF rates come from the company record, same as the web.
+  const [ssfEmployerRate, setSsfEmployerRate] = useState(0);
+  const [ssfEmployeeRate, setSsfEmployeeRate] = useState(0);
+  // Yearly paid-leave balance. The Paid Leave switch below turns its effect
+  // on this report off, exactly like the cog on the dashboard.
+  const [leavePolicy, setLeavePolicy] = useState<LeavePolicy>(NO_LEAVE_POLICY);
+  const [leaveLedgers, setLeaveLedgers] = useState<Map<string, LeaveLedger>>(new Map());
+  const [paidLeaveOn, setPaidLeaveOn] = useState(true);
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchMyCompanyWeekOffConfig().then(({ companyId, weeklyOffDay, rosterMode, otHoursPerDay, otMultiplier }) => {
+      setCompanyId(companyId);
       setWeeklyOffDay(weeklyOffDay);
+      setOtHoursPerDay(String(otHoursPerDay));
+      setOtMultiplier(String(otMultiplier));
+      setRosterMode(rosterMode);
       // Not date-scoped (a pattern applies to every week), and only ever
       // relevant in 'weekly' roster_mode — see resolveShiftForDate().
       if (rosterMode === 'weekly') {
@@ -79,11 +130,55 @@ export default function PayrollScreen({ navigation }: any) {
     });
   }, []);
 
+  useEffect(() => {
+    fetchStaffSheetConfig().then(c => {
+      setSsfEmployerRate(c.ssfEmployerRate);
+      setSsfEmployeeRate(c.ssfEmployeeRate);
+    });
+    fetchLeavePolicy().then(setLeavePolicy);
+    AsyncStorage.getItem(PAID_LEAVE_KEY).then(v => setPaidLeaveOn(v === null ? true : v === '1'));
+  }, []);
+
+  const leaveAvailable = leavePolicyActive(leavePolicy, employees);
+  const leaveOn = paidLeaveOn && leaveAvailable;
+
+  function togglePaidLeave(next: boolean) {
+    setPaidLeaveOn(next);
+    AsyncStorage.setItem(PAID_LEAVE_KEY, next ? '1' : '0').catch(() => {});
+  }
+
+  // Walked from 1 Shrawan, not just this period, so an absence earlier in the
+  // year has already used its share of the balance before this month's days.
+  useEffect(() => {
+    if (!rosterMode || !leaveOn || employees.length === 0) {
+      setLeaveLedgers(new Map());
+      return;
+    }
+    let cancelled = false;
+    loadLeaveLedgers({ employees, policy: leavePolicy, weeklyOffDay, rosterMode, until: end, periodStart: start }).then(m => {
+      if (!cancelled) setLeaveLedgers(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [employees, leaveOn, leavePolicy, weeklyOffDay, rosterMode, start, end]);
+
+  async function saveOtDefaults() {
+    if (!companyId) return;
+    setSavingOtDefaults(true);
+    const { error } = await supabase
+      .from('companies')
+      .update({ ot_hours_per_day: Number(otHoursPerDay) || 0, ot_multiplier: Number(otMultiplier) || 0 })
+      .eq('id', companyId);
+    setSavingOtDefaults(false);
+    if (!error) setOtDefaultsDirty(false);
+  }
+
   function reload() {
     setLoading(true);
     Promise.all([
-      supabase.from('payroll_summaries').select('*').gte('work_date', start).lte('work_date', end),
-      supabase.from('attendance_logs').select('*').gte('punch_time', `${start}T00:00:00Z`).lte('punch_time', `${end}T23:59:59Z`),
+      supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', start).lte('work_date', end),
+      supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).gte('punch_time', `${start}T00:00:00Z`).lte('punch_time', `${end}T23:59:59Z`),
       supabase.from('shifts').select('*'),
       supabase.from('employees').select('*').eq('status', 'active'),
       supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', start).lte('work_date', end),
@@ -102,7 +197,9 @@ export default function PayrollScreen({ navigation }: any) {
   }
   useEffect(reload, [start, end]);
 
-  const weekOffDateSet = useMemo(() => weekOffDatesInRange(start, end, weeklyOffDay, holidays), [start, end, weeklyOffDay, holidays]);
+  // A per-employee lookup: gender-scoped holidays (e.g. Teej) are a paid day
+  // off only for the employees they cover.
+  const weekOffDatesFor = useMemo(() => weekOffDatesByGender(start, end, weeklyOffDay, holidays), [start, end, weeklyOffDay, holidays]);
   const leaveByEmployee = useMemo(() => leaveDatesByEmployee(leaveRequests), [leaveRequests]);
   const weeklyPattern: WeeklyPatternByEmployee = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
@@ -126,88 +223,105 @@ export default function PayrollScreen({ navigation }: any) {
     return start > elapsedEnd ? 0 : (new Date(elapsedEnd).getTime() - new Date(start).getTime()) / 86400000 + 1;
   }, [start, end]);
 
+  // One pass per employee over the same day rows the dashboard builds, then
+  // the Staff Salary Sheet's figures on top — so a row here matches the web
+  // to the rupee.
   const byEmployee: Row[] = useMemo(() => {
-    const days: string[] = [];
-    const cur = new Date(start + 'T00:00:00Z');
-    const endDate = new Date(end + 'T00:00:00Z');
-    while (cur <= endDate) {
-      days.push(cur.toISOString().slice(0, 10));
-      cur.setUTCDate(cur.getUTCDate() + 1);
-    }
-    const map = new Map<string, Row>();
-    for (const emp of employees) {
-      map.set(emp.id, { id: emp.id, enrollId: emp.fingerprint_id ?? '—', name: emp.name, salary: emp.salary, days: 0, hours: 0, overtime: 0, breakMinutes: 0, lateDays: 0, earlyDays: 0, paidOffDays: 0 });
-    }
     const today = nepalTodayIso();
-    const logsByEmployeeDay = new Map<string, Map<string, AttendanceLog[]>>();
+    const rows: Row[] = [];
     for (const emp of employees) {
-      const empLogs = logs.filter(l => l.employee_id === emp.id);
-      const byDate = new Map<string, AttendanceLog[]>();
-      for (const day of days) {
-        const dayLogs = empLogs.filter(l => l.punch_time.slice(0, 10) === day);
-        if (dayLogs.length > 0) byDate.set(day, dayLogs);
-      }
-      applyOvernightShiftCorrection(byDate, empLogs, emp, shifts, dailyShiftByDate, weekOffDateSet, weeklyPattern);
-      logsByEmployeeDay.set(emp.id, byDate);
-    }
-    for (const day of days) {
-      for (const emp of employees) {
-        const row = map.get(emp.id);
-        if (!row) continue;
-        const summary = day === today ? undefined : summaries.find(s => s.employee_id === emp.id && s.work_date === day);
-        if (summary) {
-          row.days += 1;
-          row.hours += Number(summary.total_hours);
-          row.overtime += Number(summary.overtime_hours);
-          row.breakMinutes += summary.break_minutes;
-          if (summary.is_late) row.lateDays += 1;
-          if (summary.is_early_departure) row.earlyDays += 1;
-          continue;
+      const weekOffDates = weekOffDatesFor(emp.gender);
+      const dayRows = buildEmployeeDayRows(
+        emp,
+        shifts,
+        summaries,
+        logs,
+        start,
+        end,
+        dailyShiftByDate,
+        weekOffDates,
+        leaveByEmployee.get(emp.id),
+        weeklyPattern
+      );
+      const offDay = (date: string) => isWeekOff(resolveShiftForDate(emp, shifts, date, dailyShiftByDate, weekOffDates, weeklyPattern));
+      let days = 0;
+      let hours = 0;
+      let overtime = 0;
+      let paidOffDays = 0;
+      let paidDaysToYesterday = 0;
+      let paidLeaveDays = 0;
+      let lateDays = 0;
+      let earlyDays = 0;
+      for (const d of dayRows) {
+        const finished = d.date < today;
+        const attended = d.status === 'Present' || d.status === 'Late';
+        // Week Off work that earns leave is paid in leave days only — not as
+        // an extra day of Basic, and not as overtime.
+        const earnsLeave = leaveOn && leavePolicy.weekOffWorkEarnsLeave && attended && offDay(d.date);
+        if (attended) {
+          days += 1;
+          if (finished && !earnsLeave) paidDaysToYesterday += 1;
+          if (d.status === 'Late') lateDays += 1;
+          if (d.earlyMinutes > 0) earlyDays += 1;
         }
-        const dayLogs = (logsByEmployeeDay.get(emp.id)?.get(day) ?? []).sort((a, b) => a.punch_time.localeCompare(b.punch_time));
-        if (dayLogs.length === 0) {
-          // No punch, but still a paid day: company Week-off, a per-employee
-          // Week Off from the roster or recurring weekly pattern (checked
-          // via the same resolveShiftForDate() a day WITH punches already
-          // uses below — a roster/pattern row wins over the company-wide
-          // date), or approved Leave.
-          const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
-          if (isWeekOff(resolved) || leaveByEmployee.get(emp.id)?.has(day)) row.paidOffDays += 1;
-          continue;
-        }
-        const resolved = resolveShiftForDate(emp, shifts, day, dailyShiftByDate, weekOffDateSet, weeklyPattern);
-        const live = computeDayStatusForResolvedShift(dayLogs, resolved);
-        row.days += 1;
-        row.hours += live.totalMinutes / 60;
-        row.overtime += live.overtimeMinutes / 60;
-        row.breakMinutes += live.breakMinutes;
-        if (live.isLate) row.lateDays += 1;
-        if (live.isEarly) row.earlyDays += 1;
+        if (d.paidOff) paidOffDays += 1;
+        if (!leaveOn && finished && d.status === 'Leave' && !offDay(d.date)) paidLeaveDays += 1;
+        hours += d.hours;
+        if (!earnsLeave) overtime += d.overtime;
       }
+      if (leaveOn) paidLeaveDays = coveredDaysInRange(leaveLedgers.get(emp.id), start, end);
+
+      const workingDays = Math.max(1, Math.round(daysInRange) - weekOffDates.size);
+      const basic = emp.salary != null ? (emp.salary / workingDays) * (paidDaysToYesterday + paidLeaveDays) : 0;
+      const allowance = Number(emp.allowance ?? 0) || 0;
+      const ssfEmployer = (basic * ssfEmployerRate) / 100;
+      const ssfEmployee = (basic * ssfEmployeeRate) / 100;
+      const mgs = basic + allowance + ssfEmployer;
+      const totalSsf = ssfEmployer + ssfEmployee;
+      rows.push({
+        id: emp.id,
+        enrollId: emp.fingerprint_id ?? '—',
+        name: emp.name,
+        salary: emp.salary,
+        allowance,
+        days,
+        hours,
+        overtime,
+        lateDays,
+        earlyDays,
+        paidOffDays,
+        paidLeaveDays,
+        workingDays,
+        basic,
+        ssfEmployer,
+        ssfEmployee,
+        mgs,
+        totalSsf,
+        net: mgs - totalSsf,
+      });
     }
-    return Array.from(map.values()).sort((a, b) => a.enrollId.localeCompare(b.enrollId, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [summaries, logs, shifts, employees, start, end, dailyShiftByDate, weekOffDateSet, leaveByEmployee, weeklyPattern]);
+    return rows.sort((a, b) => a.enrollId.localeCompare(b.enrollId, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [
+    summaries,
+    logs,
+    shifts,
+    employees,
+    start,
+    end,
+    daysInRange,
+    dailyShiftByDate,
+    weekOffDatesFor,
+    leaveByEmployee,
+    weeklyPattern,
+    leaveOn,
+    leavePolicy,
+    leaveLedgers,
+    ssfEmployerRate,
+    ssfEmployeeRate,
+  ]);
 
   const otHours = Number(otHoursPerDay) || 0;
   const otMult = Number(otMultiplier) || 0;
-
-  function calculatedSalary(row: Row): number | null {
-    if (row.salary == null || !otHours) return null;
-    const hourlyRate = row.salary / (daysInRange * otHours);
-    const regularHours = Math.max(0, row.hours - row.overtime);
-    return Math.round(hourlyRate * regularHours + hourlyRate * otHours * row.paidOffDays);
-  }
-  function overtimeSalary(row: Row): number | null {
-    if (row.salary == null || !otHours) return null;
-    if (row.overtime <= 0 || !(overtimeEnabled[row.id] ?? true)) return 0;
-    const hourlyRate = row.salary / (daysInRange * otHours);
-    return Math.round(hourlyRate * otMult * row.overtime);
-  }
-  function totalSalary(row: Row): number | null {
-    const calculated = calculatedSalary(row);
-    if (calculated == null) return null;
-    return calculated + (overtimeSalary(row) ?? 0);
-  }
 
   const totals = useMemo(() => {
     const totalHours = byEmployee.reduce((s, r) => s + r.hours, 0);
@@ -218,11 +332,12 @@ export default function PayrollScreen({ navigation }: any) {
     const absentDays = Math.max(0, possibleDays - workedDays - paidOffDays);
     const attendancePct = possibleDays ? Math.round((workedDays / possibleDays) * 1000) / 10 : 0;
     const totalEmployeeSalary = byEmployee.reduce((s, r) => s + (r.salary ?? 0), 0);
-    const totalSalaryPayable = byEmployee.reduce((s, r) => s + (calculatedSalary(r) ?? 0), 0);
-    const totalOvertimeSalary = byEmployee.reduce((s, r) => s + (overtimeSalary(r) ?? 0), 0);
-    return { totalHours, overtimeHours, workedDays, paidOffDays, absentDays, attendancePct, totalEmployeeSalary, totalSalaryPayable, totalOvertimeSalary };
+    const totalBasic = byEmployee.reduce((s, r) => s + r.basic, 0);
+    const totalNet = byEmployee.reduce((s, r) => s + r.net, 0);
+    const totalPaidLeave = byEmployee.reduce((s, r) => s + r.paidLeaveDays, 0);
+    return { totalHours, overtimeHours, workedDays, paidOffDays, absentDays, attendancePct, totalEmployeeSalary, totalBasic, totalNet, totalPaidLeave };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [byEmployee, employees.length, elapsedDaysInRange, otHours, otMult, overtimeEnabled]);
+  }, [byEmployee, employees.length, elapsedDaysInRange, otHours, otMult]);
 
   async function saveSalaryRow(employeeId: string) {
     const draft = pendingSalary[employeeId];
@@ -266,19 +381,42 @@ export default function PayrollScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={{ padding: 16 }}>
         <View style={styles.statsGrid}>
           <View style={[styles.statCard, { backgroundColor: colors.warningBg }]}>
-            <Text style={[styles.statLabel, { color: colors.warningText }]}>Overtime Salary</Text>
-            <Text style={[styles.statValue, { color: colors.warningText }]}>{Math.round(totals.totalOvertimeSalary).toLocaleString()}</Text>
+            <Text style={[styles.statLabel, { color: colors.warningText }]}>Net Monthly (all staff)</Text>
+            <Text style={[styles.statValue, { color: colors.warningText }]}>{Math.round(totals.totalNet).toLocaleString()}</Text>
             <View style={styles.otInputsRow}>
-              <TextInput style={styles.otInput} value={otHoursPerDay} onChangeText={setOtHoursPerDay} keyboardType="numeric" />
+              <TextInput
+                style={styles.otInput}
+                value={otHoursPerDay}
+                onChangeText={v => {
+                  setOtHoursPerDay(v);
+                  setOtDefaultsDirty(true);
+                }}
+                keyboardType="numeric"
+              />
               <Text style={styles.otInputLabel}>h/day ×</Text>
-              <TextInput style={styles.otInput} value={otMultiplier} onChangeText={setOtMultiplier} keyboardType="numeric" />
+              <TextInput
+                style={styles.otInput}
+                value={otMultiplier}
+                onChangeText={v => {
+                  setOtMultiplier(v);
+                  setOtDefaultsDirty(true);
+                }}
+                keyboardType="numeric"
+              />
               <Text style={styles.otInputLabel}>x</Text>
             </View>
+            {otDefaultsDirty && (
+              <TouchableOpacity onPress={saveOtDefaults} disabled={savingOtDefaults || !companyId}>
+                <Text style={[styles.otInputLabel, { textDecorationLine: 'underline', marginTop: 4, opacity: savingOtDefaults ? 0.5 : 1 }]}>
+                  {savingOtDefaults ? 'Saving…' : 'Save as company default'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
           <View style={[styles.statCard, { backgroundColor: colors.goodBg }]}>
-            <Text style={[styles.statLabel, { color: colors.goodText }]}>Total Salary Payable</Text>
-            <Text style={[styles.statValue, { color: colors.goodText }]}>{Math.round(totals.totalSalaryPayable).toLocaleString()}</Text>
-            <Text style={[styles.statHint, { color: colors.goodText }]}>Earned so far this period</Text>
+            <Text style={[styles.statLabel, { color: colors.goodText }]}>Basic Salary Earned</Text>
+            <Text style={[styles.statValue, { color: colors.goodText }]}>{Math.round(totals.totalBasic).toLocaleString()}</Text>
+            <Text style={[styles.statHint, { color: colors.goodText }]}>Earned to yesterday, all staff</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: colors.infoBg }]}>
             <Text style={[styles.statLabel, { color: colors.infoText }]}>Total Employees Salary</Text>
@@ -332,6 +470,20 @@ export default function PayrollScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
 
+        {leaveAvailable && (
+          <View style={styles.paidLeaveBar}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.paidLeaveLabel}>Paid Leave</Text>
+              <Text style={styles.paidLeaveHint}>
+                {leaveOn
+                  ? 'Absences are paid from the yearly leave balance; Week Off work earns leave, not overtime.'
+                  : 'Off — paid as if there were no leave balance.'}
+              </Text>
+            </View>
+            <Switch value={paidLeaveOn} onValueChange={togglePaidLeave} trackColor={{ true: colors.accent }} />
+          </View>
+        )}
+
         <View>
           {byEmployee.map(item => (
             <View key={item.id} style={styles.card}>
@@ -343,8 +495,8 @@ export default function PayrollScreen({ navigation }: any) {
                   <Text style={styles.cardSub}>ID {item.enrollId}</Text>
                 </TouchableOpacity>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={styles.gridLabel}>Total</Text>
-                  <Text style={styles.cardTotal}>{totalSalary(item) != null ? totalSalary(item)!.toLocaleString() : '—'}</Text>
+                  <Text style={styles.gridLabel}>Net Monthly</Text>
+                  <Text style={styles.cardTotal}>{item.salary != null ? money(item.net) : '—'}</Text>
                 </View>
               </View>
 
@@ -360,10 +512,6 @@ export default function PayrollScreen({ navigation }: any) {
                 <View style={styles.gridItem}>
                   <Text style={styles.gridLabel}>Overtime</Text>
                   <Text style={[styles.gridValue, { color: colors.infoText }]}>{fmtHrs(item.overtime)}</Text>
-                </View>
-                <View style={styles.gridItem}>
-                  <Text style={styles.gridLabel}>Break</Text>
-                  <Text style={styles.gridValue}>{item.breakMinutes > 0 ? formatHoursMinutes(item.breakMinutes) : '—'}</Text>
                 </View>
                 <View style={styles.gridItem}>
                   <Text style={styles.gridLabel}>Late / Early</Text>
@@ -399,21 +547,31 @@ export default function PayrollScreen({ navigation }: any) {
                   )}
                 </View>
                 <View style={styles.gridItem}>
-                  <Text style={styles.gridLabel}>Calculated</Text>
-                  <Text style={styles.gridValue}>{calculatedSalary(item) != null ? calculatedSalary(item)!.toLocaleString() : '—'}</Text>
+                  <Text style={styles.gridLabel}>Basic Earned</Text>
+                  <Text style={styles.gridValue}>{item.salary != null ? money(item.basic) : '—'}</Text>
                 </View>
                 <View style={styles.gridItem}>
-                  <Text style={styles.gridLabel}>OT Salary</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Switch
-                      value={overtimeEnabled[item.id] ?? true}
-                      onValueChange={v => setOvertimeEnabled(m => ({ ...m, [item.id]: v }))}
-                      trackColor={{ false: colors.slate200, true: colors.good }}
-                      style={{ transform: [{ scale: 0.8 }] }}
-                    />
-                    <Text style={styles.gridValue}>{overtimeSalary(item) != null ? overtimeSalary(item)!.toLocaleString() : '—'}</Text>
-                  </View>
+                  <Text style={styles.gridLabel}>Allowance</Text>
+                  <Text style={styles.gridValue}>{money(item.allowance)}</Text>
                 </View>
+                <View style={styles.gridItem}>
+                  <Text style={styles.gridLabel}>SSF by Employer {ssfEmployerRate}%</Text>
+                  <Text style={styles.gridValue}>{item.salary != null ? money(item.ssfEmployer) : '—'}</Text>
+                </View>
+                <View style={styles.gridItem}>
+                  <Text style={styles.gridLabel}>SSF by Employee {ssfEmployeeRate}%</Text>
+                  <Text style={[styles.gridValue, { color: colors.criticalText }]}>{item.salary != null ? money(item.ssfEmployee) : '—'}</Text>
+                </View>
+                <View style={styles.gridItem}>
+                  <Text style={styles.gridLabel}>Monthly Gross</Text>
+                  <Text style={styles.gridValue}>{item.salary != null ? money(item.mgs) : '—'}</Text>
+                </View>
+                {leaveOn && (
+                  <View style={styles.gridItem}>
+                    <Text style={styles.gridLabel}>Paid Leave</Text>
+                    <Text style={styles.gridValue}>{formatLeaveDays(item.paidLeaveDays)}</Text>
+                  </View>
+                )}
               </View>
             </View>
           ))}
@@ -427,6 +585,14 @@ export default function PayrollScreen({ navigation }: any) {
             <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>{totals.paidOffDays} paid week-off/leave</Text>
             <Text style={{ color: colors.slate400 }}> · </Text>
             <Text style={{ color: colors.criticalText, fontWeight: '700', fontSize: 12 }}>{totals.absentDays} absent days</Text>
+            {leaveOn && totals.totalPaidLeave > 0 && (
+              <>
+                <Text style={{ color: colors.slate400 }}> · </Text>
+                <Text style={{ color: colors.infoText, fontWeight: '700', fontSize: 12 }}>
+                  {formatLeaveDays(totals.totalPaidLeave)} paid from leave
+                </Text>
+              </>
+            )}
           </View>
         )}
       </ScrollView>
@@ -472,6 +638,19 @@ const styles = StyleSheet.create({
   periodArrow: { padding: 8 },
   periodLabel: { fontSize: 19, fontWeight: '700', color: colors.ink },
   periodSub: { fontSize: 12, color: colors.slate400, marginTop: 2 },
+  paidLeaveBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.white,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.slate200,
+  },
+  paidLeaveLabel: { fontSize: 13, fontWeight: '700', color: colors.ink },
+  paidLeaveHint: { fontSize: 11, color: colors.slate400, marginTop: 2 },
   card: { backgroundColor: colors.white, borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: colors.slate200 },
   cardTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.slate100 },
   cardName: { fontSize: 15, fontWeight: '700', color: colors.ink },

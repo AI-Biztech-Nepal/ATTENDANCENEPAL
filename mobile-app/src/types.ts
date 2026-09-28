@@ -1,5 +1,12 @@
 export type PunchMethod = 'zkteco' | 'gps' | 'qr' | 'selfie';
 
+/** employees.gender — nullable; a null/unset gender gets company-wide ('all')
+ * holidays only, never a gender-scoped one. */
+export type Gender = 'male' | 'female';
+
+/** company_holidays.applies_to — 'all' is the default. */
+export type HolidayScope = 'all' | 'male' | 'female';
+
 export type Profile = {
   id: string;
   employee_id: string | null;
@@ -17,13 +24,14 @@ export type Employee = {
   address: string | null;
   branch_id: string | null;
   fingerprint_id: string | null;
+  /** Paid-leave days this employee gets each fiscal year, set on the
+   * dashboard's Leave page. Null = none (there is no company-wide default). */
+  annual_leave_days?: number | null;
   username: string | null;
+  gender: Gender | null;
   status: 'active' | 'inactive';
   salary: number | null;
   allowance: number | null;
-  pf_rate: number | null;
-  ssf_rate: number | null;
-  tds_rate: number | null;
   profile_photo_url: string | null;
   date_of_joining: string | null;
   resigned_at: string | null;
@@ -96,9 +104,6 @@ export type PayrollSummary = {
   check_out: string | null;
   total_hours: number;
   overtime_hours: number;
-  /** Completed-break minutes for this day — paid, NOT subtracted from
-   * total_hours/overtime_hours, display only. */
-  break_minutes: number;
   is_late: boolean;
   late_minutes: number;
   is_early_departure: boolean;
@@ -117,6 +122,15 @@ export type AttendanceLog = {
   selfie_url?: string | null;
   match_score?: number | null;
 };
+
+/** Columns to request for a fetched AttendanceLog. Only these are read from
+ * fetched rows; lat/lng/selfie_url/match_score/accuracy_m/etc. that `select('*')`
+ * also pulled are never read back, just written on insert. */
+export const ATTENDANCE_LOG_COLUMNS = 'id, employee_id, device_id, punch_time, punch_type, method';
+
+/** Columns to request for a fetched PayrollSummary — exactly the type's fields. */
+export const PAYROLL_SUMMARY_COLUMNS =
+  'id, employee_id, work_date, check_in, check_out, total_hours, overtime_hours, is_late, late_minutes, is_early_departure, early_departure_minutes';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'submitted' | 'approved' | 'rejected';
 export type TaskSource = 'assigned' | 'self';
@@ -177,6 +191,7 @@ export type CompanyHoliday = {
   company_id: string;
   holiday_date: string;
   name: string;
+  applies_to: HolidayScope;
   created_by: string | null;
   created_at: string;
 };

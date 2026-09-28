@@ -7,7 +7,7 @@ import * as Application from 'expo-application';
 // versionCode/downloadUrl there after each EAS build (see mobile-app/eas.json);
 // no GitHub involved anywhere in this loop.
 const UPDATE_CHECK_URL =
-  process.env.EXPO_PUBLIC_UPDATE_CHECK_URL ?? 'https://YOUR-VERCEL-DOMAIN.vercel.app/mobile-update.json';
+  process.env.EXPO_PUBLIC_UPDATE_CHECK_URL ?? 'https://attendancenepal.vercel.app/mobile-update.json';
 
 type UpdateInfo = { versionCode: number; downloadUrl: string };
 

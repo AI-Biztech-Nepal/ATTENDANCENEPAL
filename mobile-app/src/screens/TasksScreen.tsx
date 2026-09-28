@@ -37,7 +37,13 @@ export default function TasksScreen() {
 
   function reload() {
     supabase.from('tasks').select('*').order('created_at', { ascending: false }).then(({ data }) => setTasks((data as Task[]) ?? []));
-    supabase.from('employees').select('*').eq('status', 'active').order('name').then(({ data }) => setEmployees((data as Employee[]) ?? []));
+    supabase
+      .from('employees')
+      .select('*')
+      .eq('status', 'active')
+      .then(({ data }) =>
+        setEmployees(((data as Employee[]) ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })))
+      );
   }
   useEffect(reload, []);
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdmin, supabaseAdminConfigured } from '@/lib/supabase-admin';
+import { getSupabaseAdmin, listAllUsers, supabaseAdminConfigured } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 
@@ -40,11 +40,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: profilesError.message }, { status: 500 });
   }
 
-  const { data: usersPage, error: usersError } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  const { users, error: usersError } = await listAllUsers(admin);
   if (usersError) {
     return NextResponse.json({ error: usersError.message }, { status: 500 });
   }
-  const emailById = new Map(usersPage.users.map(u => [u.id, u.email ?? '']));
+  const emailById = new Map(users.map(u => [u.id, u.email ?? '']));
 
   const accounts = (profiles ?? []).map(p => ({
     id: p.id,

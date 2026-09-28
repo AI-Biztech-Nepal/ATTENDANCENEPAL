@@ -7,21 +7,16 @@ import EmployeeShell from '@/components/EmployeeShell';
 import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPeriod, type CalendarPeriod } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes, nepalTodayIso, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
-import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail } from '@/lib/payrollDetail';
-import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff';
+import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail, type SalaryMode } from '@/lib/payrollDetail';
+import { fetchMyCompanyWeekOffConfig, holidayDatesInRange, weekOffDatesInRange } from '@/lib/weekOff';
+import { fetchCompanyPayrollFormat } from '@/lib/payrollFormat';
 
 /** Decimal hours -> "Xh Ym". */
 function fmtHrs(hours: number) {
   return formatHoursMinutes(Math.round(hours * 60));
 }
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSummary, Shift } from '@/lib/types';
-
-// No otHoursPerDay/otMultiplier/otOn controls on this page (those are an
-// admin-only setting on the Payroll page) — same defaults the admin side
-// starts with, so an employee's own "Received" figure matches what they'd
-// see on their detail page unless an admin has changed those.
-const OT_HOURS_PER_DAY = 8;
-const OT_MULTIPLIER = 1.5;
+import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
 export default function MyPayrollPage() {
   const { system } = useCalendarSystem();
@@ -43,22 +38,45 @@ export default function MyPayrollPage() {
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ weekday: number; shift_id: string | null }[]>([]);
+  // No otHoursPerDay/otMultiplier controls on this page (those are an
+  // admin-only setting on the Payroll page) — loaded from the same
+  // company-saved default the admin side reads/writes, so this employee's
+  // own "Received" figure actually matches what they'd see on their detail
+  // page, not just a hardcoded guess at what an admin might have set.
+  const [otHoursPerDay, setOtHoursPerDay] = useState(8);
+  const [otMultiplier, setOtMultiplier] = useState(1.5);
+  // PF/SSF/TDS are one company-wide rate each (companies.pf_rate/…), set on
+  // the admin Salary Structure page — read here so this employee's deduction
+  // lines match what the admin sees.
+  const [pfRate, setPfRate] = useState(10);
+  const [ssfRate, setSsfRate] = useState(11);
+  const [tdsRate, setTdsRate] = useState(0);
+  // Pay basis — 'flat' for the fixed-salary Staff Salary Sheet customer,
+  // per-hour for everyone else. Keeps this page's figures in step with the
+  // admin's Payroll report and the employee's own breakdown page.
+  const [salaryMode, setSalaryMode] = useState<SalaryMode>('hourly');
 
   const { start, end } = period;
 
   useEffect(() => {
-    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, rosterMode }) => {
+    fetchCompanyPayrollFormat().then(f => setSalaryMode(f === 'staff_salary_sheet' ? 'flat' : 'hourly'));
+    fetchMyCompanyWeekOffConfig().then(({ weeklyOffDay, otHoursPerDay, otMultiplier, pfRate, ssfRate, tdsRate }) => {
       setWeeklyOffDay(weeklyOffDay);
-      // Not date-scoped (a pattern applies to every week), and only ever
-      // relevant in 'weekly' roster_mode — see resolveShiftForDate().
-      if (rosterMode === 'weekly' && employeeId) {
-        supabase
-          .from('employee_weekly_pattern')
-          .select('weekday, shift_id')
-          .eq('employee_id', employeeId)
-          .then(({ data }) => setWeeklyPatternRows(data ?? []));
-      }
+      setOtHoursPerDay(otHoursPerDay);
+      setOtMultiplier(otMultiplier);
+      setPfRate(pfRate);
+      setSsfRate(ssfRate);
+      setTdsRate(tdsRate);
     });
+    // Not date-scoped (a pattern applies to every week) — see
+    // resolveShiftForDate(), which always falls back to it.
+    if (employeeId) {
+      supabase
+        .from('employee_weekly_pattern')
+        .select('weekday, shift_id')
+        .eq('employee_id', employeeId)
+        .then(({ data }) => setWeeklyPatternRows(data ?? []));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
 
@@ -119,14 +137,14 @@ export default function MyPayrollPage() {
     if (!employeeId) return;
     supabase
       .from('payroll_summaries')
-      .select('*')
+      .select(PAYROLL_SUMMARY_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('work_date', start)
       .lte('work_date', end)
       .then(({ data }) => setSummaries(data ?? []));
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('punch_time', `${start}T00:00:00Z`)
       .lte('punch_time', `${end}T23:59:59Z`)
@@ -143,14 +161,14 @@ export default function MyPayrollPage() {
     const today = nepalTodayIso();
     supabase
       .from('payroll_summaries')
-      .select('*')
+      .select(PAYROLL_SUMMARY_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('work_date', from)
       .lte('work_date', today)
       .then(({ data }) => setLifetimeSummaries(data ?? []));
     supabase
       .from('attendance_logs')
-      .select('*')
+      .select(ATTENDANCE_LOG_COLUMNS)
       .eq('employee_id', employeeId)
       .gte('punch_time', `${from}T00:00:00Z`)
       .then(({ data }) => setLifetimeLogs(data ?? []));
@@ -179,7 +197,7 @@ export default function MyPayrollPage() {
   const paidOffDates = useMemo(() => {
     if (!employee?.date_of_joining) return new Set<string>();
     const today = nepalTodayIso();
-    const set = weekOffDatesInRange(employee.date_of_joining, today, weeklyOffDay, holidays);
+    const set = weekOffDatesInRange(employee.date_of_joining, today, weeklyOffDay, holidays, employee.gender);
     for (const req of leaveRequests) {
       const cur = new Date(req.start_date + 'T00:00:00Z');
       const endDate = new Date(req.end_date + 'T00:00:00Z');
@@ -189,7 +207,16 @@ export default function MyPayrollPage() {
       }
     }
     return set;
-  }, [employee?.date_of_joining, weeklyOffDay, holidays, leaveRequests]);
+  }, [employee?.date_of_joining, employee?.gender, weeklyOffDay, holidays, leaveRequests]);
+
+  // Holiday dates only (no weekly recurring day, no leave) — so a punchless
+  // holiday gets its own 'Holiday' label instead of the generic 'Week Off'
+  // that paidOffDates (week-off + holiday + leave, all folded together for
+  // the pay math) would otherwise give it.
+  const holidayDates = useMemo(
+    () => holidayDatesInRange(holidays, employee?.gender ?? null),
+    [holidays, employee?.gender]
+  );
 
   // employeeId -> work_date -> shift_id, covering this employee's whole
   // employment history so it's valid for both the selected period's rows
@@ -217,10 +244,41 @@ export default function MyPayrollPage() {
   // version of the same numbers — both read through lib/payrollDetail.ts.
   const dayRows: DayDetail[] = useMemo(
     () =>
-      employee ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, undefined, weeklyPattern) : [],
-    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern]
+      employee
+        ? buildEmployeeDayRows(employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, undefined, weeklyPattern, holidayDates)
+        : [],
+    [employee, shifts, summaries, logs, start, end, dailyShiftByDate, paidOffDates, weeklyPattern, holidayDates]
   );
-  const daysInRange = useMemo(() => (new Date(end).getTime() - new Date(start).getTime()) / 86400000 + 1, [start, end]);
+  // Company Week-offs / holidays only (no leave), across the whole employment
+  // history — the pay math treats these as non-working days, exactly as the
+  // admin Payroll report does. `.has()` on out-of-range dates never matches.
+  const companyOffDates = useMemo(() => {
+    if (!employee?.date_of_joining) return new Set<string>();
+    return weekOffDatesInRange(employee.date_of_joining, nepalTodayIso(), weeklyOffDay, holidays, employee.gender ?? null);
+  }, [employee?.date_of_joining, employee?.gender, weeklyOffDay, holidays]);
+
+  const countOffDates = (s: string, e: string) => {
+    let n = 0;
+    for (const dt of companyOffDates) if (dt >= s && dt <= e) n += 1;
+    return n;
+  };
+  const workingDaysBetween = (s: string, e: string) =>
+    Math.max(1, Math.round((new Date(e).getTime() - new Date(s).getTime()) / 86400000 + 1) - countOffDates(s, e));
+
+  const periodWorkingDays = useMemo(() => workingDaysBetween(start, end), [start, end, companyOffDates]);
+
+  // One day's earned pay for the selected period, on the same basis as the
+  // admin's Payroll report and the employee's breakdown page.
+  const earnOf = (r: DayDetail) =>
+    dailySalaryEarning(r, employee?.salary ?? null, {
+      workingDays: periodWorkingDays,
+      otHoursPerDay,
+      otMultiplier,
+      otOn: true,
+      mode: salaryMode,
+      isCompanyOffDay: companyOffDates.has(r.date),
+      today: nepalTodayIso(),
+    });
 
   const lifetimeDayRows: DayDetail[] = useMemo(
     () =>
@@ -235,10 +293,11 @@ export default function MyPayrollPage() {
             dailyShiftByDate,
             paidOffDates,
             undefined,
-            weeklyPattern
+            weeklyPattern,
+            holidayDates
           )
         : [],
-    [employee, shifts, lifetimeSummaries, lifetimeLogs, dailyShiftByDate, paidOffDates, weeklyPattern]
+    [employee, shifts, lifetimeSummaries, lifetimeLogs, dailyShiftByDate, paidOffDates, weeklyPattern, holidayDates]
   );
 
   // Prorates each day against the actual number of days in ITS OWN calendar
@@ -258,13 +317,23 @@ export default function MyPayrollPage() {
     for (const [key, rows] of byMonth) {
       const [y, m] = key.split('-').map(Number);
       const daysInMonth = new Date(y, m, 0).getDate();
+      const mWorkingDays = workingDaysBetween(`${key}-01`, `${key}-${String(daysInMonth).padStart(2, '0')}`);
       for (const row of rows) {
-        const earning = dailySalaryEarning(row, employee.salary, daysInMonth, OT_HOURS_PER_DAY, OT_MULTIPLIER, true);
+        const earning = dailySalaryEarning(row, employee.salary, {
+          workingDays: mWorkingDays,
+          otHoursPerDay,
+          otMultiplier,
+          otOn: true,
+          mode: salaryMode,
+          isCompanyOffDay: companyOffDates.has(row.date),
+          today: nepalTodayIso(),
+        });
         if (earning) total += earning.total;
       }
     }
     return Math.round(total);
-  }, [lifetimeDayRows, employee]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lifetimeDayRows, employee, companyOffDates, otHoursPerDay, otMultiplier, salaryMode]);
 
   const totals = useMemo(() => {
     const totalHours = dayRows.reduce((s, r) => s + r.hours, 0);
@@ -273,11 +342,11 @@ export default function MyPayrollPage() {
     const earlyDays = dayRows.filter(r => r.earlyMinutes > 0).length;
     const presentDays = dayRows.filter(r => r.checkIn).length;
     const absentDays = dayRows.filter(r => r.status === 'Absent').length;
-    const paidOffDays = dayRows.filter(r => r.status === 'Week Off').length;
+    const paidOffDays = dayRows.filter(r => r.status === 'Week Off' || r.status === 'Holiday').length;
     let baseEarning = 0;
     let overtimeEarning = 0;
     for (const r of dayRows) {
-      const earning = dailySalaryEarning(r, employee?.salary ?? null, daysInRange, OT_HOURS_PER_DAY, OT_MULTIPLIER, true);
+      const earning = earnOf(r);
       if (earning) {
         baseEarning += earning.base;
         overtimeEarning += earning.overtime;
@@ -294,39 +363,40 @@ export default function MyPayrollPage() {
       totalSalary: baseEarning + overtimeEarning,
       overtimeEarning,
     };
-  }, [dayRows, employee, daysInRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayRows, employee, periodWorkingDays, companyOffDates, otHoursPerDay, otMultiplier, salaryMode]);
 
   // Payslip-style breakdown for the selected period. Basic Salary is the
   // attendance-prorated base earning (same figure "Receivable" used to show
   // before OT); Allowance scales by that same attendance fraction so a
   // partial/absent period doesn't pay a full allowance. PF/SSF/TDS are each
-  // a % of Basic Salary (not Allowance) — the common convention, and the
-  // only one we have a rate for per employee.
+  // a % of Basic Salary (not Allowance) — the common convention — at the
+  // company-wide rate set on the admin Salary Structure page.
   const breakdown = useMemo(() => {
     if (employee?.salary == null) return null;
     const basic = Math.round(totals.totalSalary - totals.overtimeEarning);
     const earnedFraction = employee.salary > 0 ? basic / employee.salary : 0;
     const allowance = Math.round((employee.allowance ?? 0) * earnedFraction);
     const total = basic + allowance;
-    const pf = Math.round((basic * (employee.pf_rate ?? 0)) / 100);
-    const ssf = Math.round((basic * (employee.ssf_rate ?? 0)) / 100);
+    const pf = Math.round((basic * pfRate) / 100);
+    const ssf = Math.round((basic * ssfRate) / 100);
     const ot = Math.round(totals.overtimeEarning);
-    const tds = Math.round((basic * (employee.tds_rate ?? 0)) / 100);
+    const tds = Math.round((basic * tdsRate) / 100);
     const totalSalary = total + ot - pf - ssf - tds;
     return { basic, allowance, total, pf, ssf, ot, tds, totalSalary };
-  }, [employee, totals]);
+  }, [employee, totals, pfRate, ssfRate, tdsRate]);
 
   const chartData = useMemo(
     () =>
       dayRows.map(r => {
-        const earning =
-          r.checkIn || r.paidOff ? dailySalaryEarning(r, employee?.salary ?? null, daysInRange, OT_HOURS_PER_DAY, OT_MULTIPLIER, true) : null;
+        const earning = r.checkIn || r.paidOff ? earnOf(r) : null;
         return {
           label: formatDdMmYyyy(r.date, system).slice(0, 2),
           earning: earning ? Math.round(earning.total) : 0,
         };
       }),
-    [dayRows, system, employee, daysInRange]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dayRows, system, employee, periodWorkingDays, companyOffDates, otHoursPerDay, otMultiplier, salaryMode]
   );
 
   return (
@@ -403,10 +473,7 @@ export default function MyPayrollPage() {
                 </thead>
                 <tbody>
                   {dayRows.map((row, i) => {
-                    const earning =
-                      row.checkIn || row.paidOff
-                        ? dailySalaryEarning(row, employee?.salary ?? null, daysInRange, OT_HOURS_PER_DAY, OT_MULTIPLIER, true)
-                        : null;
+                    const earning = row.checkIn || row.paidOff ? earnOf(row) : null;
                     return (
                       <tr key={row.date} className={`border-b border-slate-100 last:border-0 ${i % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
                         <td className="truncate px-1 py-0.5 text-ink">{formatDdMmYyyy(row.date, system).slice(0, 5)}</td>
@@ -415,6 +482,8 @@ export default function MyPayrollPage() {
                         <td className="truncate px-0.5 py-0.5 font-medium">
                           {row.checkIn ? (
                             <span className="text-good-text">Present</span>
+                          ) : row.status === 'Holiday' ? (
+                            <span className="text-accent">Holiday</span>
                           ) : row.status === 'Week Off' ? (
                             <span className="text-accent">Week Off</span>
                           ) : row.status === 'Absent' ? (
