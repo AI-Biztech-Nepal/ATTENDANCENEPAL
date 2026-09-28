@@ -31,7 +31,13 @@ const SUPABASE_URL = 'https://whaahjtqmlbwrfppogsw.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoYWFoanRxbWxid3JmcHBvZ3N3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxNDk4NzEsImV4cCI6MjEwMDcyNTg3MX0.DZiANjUeVkelmk59ttdOu-6YaHCrjtEaW9sCxo3P4D4';
 
-const SYNC_INTERVAL_MS = 15 * 1000;
+// Was 15s. A device's onboard attendance log has no "only what's new" read
+// mode — every poll re-downloads its ENTIRE stored history, and until
+// maybeClearDeviceLog() below gets a chance to run, that log can already be
+// large (days of accumulated punches). Polling less often quarters how many
+// of those full-history transfers a still-large log gets hit with while it
+// works its way back down to lean.
+const SYNC_INTERVAL_MS = 60 * 1000;
 const SYNC_REQUEST_POLL_MS = 15 * 1000;
 const MAX_BACKOFF_MS = 2 * 60 * 1000;
 // Uploading a device's whole stored history on a first sync is a lot more
@@ -166,6 +172,38 @@ async function pullDeviceLogsAndUsers(device) {
     },
     600000
   );
+}
+
+// ZKTeco terminals keep every punch in onboard memory forever — getAttendances()
+// has no "only what's new" mode, so every single poll re-downloads the
+// device's ENTIRE history over the same slow link, and that transfer only
+// grows as more punches land. node-zklib's own docs warn this eventually
+// slows the machine down; in practice this is what wedges these terminals
+// into TIMEOUT_ON_WRITING_MESSAGE after enough uptime (confirmed live: the
+// same device recovers after a power-cycle, then hangs again a day or two
+// later, every time, as the log grows back). Once a poll's upsertLogs() has
+// safely landed the device's current log in Supabase (idempotent thanks to
+// ignoreDuplicates, so re-syncing the same rows twice is harmless), it's
+// safe to wipe the device's own copy so future polls stay cheap.
+//
+// Deliberately its own short-lived connection, opened right after the read
+// finishes rather than reusing that connection or waiting on the Supabase
+// round-trip first — the only real risk here is a punch landing in the gap
+// between "device had these records" and "device was told to erase them";
+// keeping that gap to just this one connect+clearAttendanceLog() call, with
+// no Supabase call in between, keeps it as tight as this protocol allows.
+// Throttled so it doesn't add a second connection to every single
+// SYNC_INTERVAL_MS poll — every few minutes is more than often enough to
+// keep the log from ever growing large again.
+const LOG_CLEAR_INTERVAL_MS = 5 * 60 * 1000;
+const lastClearedAt = new Map();
+
+async function maybeClearDeviceLog(device, rawLogs) {
+  if (!rawLogs || rawLogs.length === 0) return;
+  if (Date.now() - (lastClearedAt.get(device.id) || 0) < LOG_CLEAR_INTERVAL_MS) return;
+  await withDevice(device, zk => zk.clearAttendanceLog(), 15000);
+  lastClearedAt.set(device.id, Date.now());
+  console.log(`[lan-bridge] ${device.name}: cleared ${rawLogs.length} already-synced record(s) off the device`);
 }
 
 // employeeIdByFingerprint can be passed in by a caller that's about to make
@@ -303,6 +341,13 @@ async function syncDevice(device) {
     await markDeviceStatus(device.id, { last_sync: new Date().toISOString(), status: 'online' });
     status.lastSyncAt = new Date().toISOString();
     status.lastError = null;
+    // Best-effort and never fatal to this sync — the records are already
+    // safely in Supabase either way; a failed clear just means the device's
+    // log stays large for one more cycle and gets picked up again once
+    // LOG_CLEAR_INTERVAL_MS is back up.
+    await maybeClearDeviceLog(device, rawLogs).catch(err =>
+      console.warn(`[lan-bridge] ${device.name}: could not clear device log (will retry later): ${describeError(err)}`)
+    );
   } catch (err) {
     const failures = (failureCounts.get(device.id) || 0) + 1;
     failureCounts.set(device.id, failures);
@@ -368,6 +413,9 @@ async function processSyncEvent(event) {
         `${device.name}: upsertUsers`
       );
       summary = `${rawLogs.length} record(s) on device, ${count} matched to an employee` + (added > 0 ? `, ${added} new employee(s) added` : '');
+      await maybeClearDeviceLog(device, rawLogs).catch(err =>
+        console.warn(`[lan-bridge] ${device.name}: could not clear device log (will retry later): ${describeError(err)}`)
+      );
     }
     console.log(`[lan-bridge] ${device.name} ${event.sync_type} sync: ${summary}`);
     await supabase
