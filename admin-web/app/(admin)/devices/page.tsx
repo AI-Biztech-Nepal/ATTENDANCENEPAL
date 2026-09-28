@@ -5,8 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
 import Badge from '@/components/Badge';
 import { useConfirm } from '@/components/ConfirmDialog';
-import type { AttendanceLog, Branch, Device, DeviceSyncEvent, Employee } from '@/lib/types';
-import { ATTENDANCE_LOG_COLUMNS } from '@/lib/types';
+import type { Branch, Device, DeviceSyncEvent, Employee } from '@/lib/types';
 
 const EMPTY_FORM = { name: '', branch_id: '', ip_address: '', port: 4370, serial_number: '' };
 
@@ -79,7 +78,13 @@ export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [logs, setLogs] = useState<AttendanceLog[]>([]);
+  // device_id -> total punches ever synced from it. A per-device exact COUNT
+  // (head: true — no rows transferred), not a fetch-everything-then-filter:
+  // that used to run one unpaginated select() across the whole company's
+  // zkteco punches, which PostgREST silently caps at 1000 rows by default —
+  // so this badge stopped climbing past 1000 forever ago regardless of how
+  // much was actually syncing. Looked exactly like a broken sync; it wasn't.
+  const [logCounts, setLogCounts] = useState<Record<string, number>>({});
   const [syncEvents, setSyncEvents] = useState<DeviceSyncEvent[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -109,11 +114,23 @@ export default function DevicesPage() {
   // render, not something that should itself trigger a re-render.
   const notOnlineSinceRef = useRef<Map<string, number>>(new Map());
 
+  async function loadLogCounts(forDevices: Device[]) {
+    const entries = await Promise.all(
+      forDevices.map(async d => {
+        const { count } = await supabase.from('attendance_logs').select('*', { count: 'exact', head: true }).eq('device_id', d.id);
+        return [d.id, count ?? 0] as const;
+      })
+    );
+    setLogCounts(Object.fromEntries(entries));
+  }
+
   function reload() {
-    supabase.from('devices').select('*').then(({ data }) => setDevices(data ?? []));
+    supabase.from('devices').select('*').then(({ data }) => {
+      setDevices(data ?? []);
+      loadLogCounts(data ?? []);
+    });
     supabase.from('branches').select('*').then(({ data }) => setBranches(data ?? []));
     supabase.from('employees').select('*').then(({ data }) => setEmployees(data ?? []));
-    supabase.from('attendance_logs').select(ATTENDANCE_LOG_COLUMNS).eq('method', 'zkteco').then(({ data }) => setLogs(data ?? []));
     supabase
       .from('device_sync_events')
       .select('*')
@@ -347,7 +364,7 @@ export default function DevicesPage() {
         {devices.map(d => {
           const branch = branches.find(b => b.id === d.branch_id);
           const registered = employees.filter(e => e.branch_id === d.branch_id && e.fingerprint_id).length;
-          const fetched = logs.filter(l => l.device_id === d.id).length;
+          const fetched = logCounts[d.id] ?? 0;
           const online = isDeviceOnline(d, now, notOnlineSinceRef.current);
           const deviceEvents = syncEvents.filter(e => e.device_id === d.id);
           const busy = (type: 'users' | 'logs') =>
