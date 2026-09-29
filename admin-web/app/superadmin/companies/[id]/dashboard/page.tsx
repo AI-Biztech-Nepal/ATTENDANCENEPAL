@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { supabase } from '@/lib/supabase';
+import { formatAdDate, localDateKey } from '@/lib/calendar';
+import { useCalendarSystem } from '@/lib/calendarSystem';
 import StatCard from '@/components/StatCard';
 import Badge from '@/components/Badge';
 
@@ -13,7 +15,7 @@ type DetailKey = 'total' | 'present' | 'late' | 'leave' | 'weekOff' | 'absent' |
 type FeedItem = { id: string; employeeName: string; punchType: '0' | '1' | '2' | '3'; punchTime: string; method: string };
 type DeviceRow = { id: string; name: string; ipAddress: string; status: 'online' | 'offline'; lastSync: string | null };
 type Data = {
-  company: { id: string; name: string };
+  company: { id: string; name: string; createdAt: string };
   stats: {
     totalEmployees: number;
     presentToday: number;
@@ -61,6 +63,7 @@ function punchTypeLabel(punchType: FeedItem['punchType']) {
 // changes data — stat cards only open a read-only detail list, same as the
 // real Dashboard's own click-to-drill-down panels.
 export default function SuperadminCompanyDashboardPreviewPage() {
+  const { system } = useCalendarSystem();
   const params = useParams<{ id: string }>();
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +106,12 @@ export default function SuperadminCompanyDashboardPreviewPage() {
 
       {data && (
         <>
-          <h1 className="mb-6 text-lg font-bold text-ink sm:text-2xl">Dashboard</h1>
+          <div className="mb-6">
+            <h1 className="text-lg font-bold text-ink sm:text-2xl">Dashboard</h1>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {data.company.name} · Registered on this platform {formatAdDate(localDateKey(data.company.createdAt), system)}
+            </p>
+          </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4">
             <StatCard label="Total Employees" value={String(data.stats.totalEmployees)} hint="Active rosters" onClick={() => setDetailKey('total')} />
