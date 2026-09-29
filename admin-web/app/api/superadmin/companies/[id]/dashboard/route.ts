@@ -44,7 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { admin } = result;
   const { id: companyId } = await params;
 
-  const { data: company } = await admin.from('companies').select('id, name, weekly_off_day').eq('id', companyId).maybeSingle();
+  const { data: company } = await admin.from('companies').select('id, name, weekly_off_day, created_at').eq('id', companyId).maybeSingle();
   if (!company) {
     return NextResponse.json({ error: 'Company not found.' }, { status: 404 });
   }
@@ -219,7 +219,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const deviceRows = devices.map(d => ({ id: d.id, name: d.name, ipAddress: d.ip_address, status: d.status, lastSync: d.last_sync }));
 
   return NextResponse.json({
-    company: { id: company.id, name: company.name },
+    company: { id: company.id, name: company.name, createdAt: company.created_at },
     stats: {
       totalEmployees: activeEmployees.length,
       presentToday: presentIds.size,
