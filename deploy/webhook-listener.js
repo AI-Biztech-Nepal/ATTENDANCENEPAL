@@ -28,6 +28,19 @@ function verifySignature(payload, signatureHeader) {
 }
 
 let deploying = false;
+let pending = false; // a push landed mid-deploy; redeploy once more when done
+
+function runDeploy() {
+  deploying = true;
+  pending = false;
+  const logFile = path.join(__dirname, 'last-deploy.log');
+  exec(`bash ${path.join(__dirname, 'redeploy.sh')} > ${logFile} 2>&1`, err => {
+    deploying = false;
+    if (err) console.error('[deploy-webhook] redeploy failed:', err.message);
+    else console.log('[deploy-webhook] redeploy succeeded');
+    if (pending) runDeploy();
+  });
+}
 
 const server = http.createServer((req, res) => {
   if (req.method !== 'POST' || req.url !== '/deploy-webhook') {
@@ -37,7 +50,10 @@ const server = http.createServer((req, res) => {
   }
 
   let body = '';
-  req.on('data', chunk => (body += chunk));
+  req.on('data', chunk => {
+    body += chunk;
+    if (body.length > 5e6) req.destroy();
+  });
   req.on('end', () => {
     if (!verifySignature(body, req.headers['x-hub-signature-256'])) {
       res.writeHead(401);
@@ -60,22 +76,14 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    res.writeHead(200);
     if (deploying) {
-      res.writeHead(200);
-      res.end('deploy already in progress, skipping');
+      pending = true;
+      res.end('deploy in progress, queued another run');
       return;
     }
-
-    deploying = true;
-    res.writeHead(200);
     res.end('deploying');
-
-    const logFile = path.join(__dirname, 'last-deploy.log');
-    exec(`bash ${path.join(__dirname, 'redeploy.sh')} > ${logFile} 2>&1`, err => {
-      deploying = false;
-      if (err) console.error('[deploy-webhook] redeploy failed:', err.message);
-      else console.log('[deploy-webhook] redeploy succeeded');
-    });
+    runDeploy();
   });
 });
 
