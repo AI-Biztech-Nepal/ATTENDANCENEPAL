@@ -1179,11 +1179,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   ))}
                 </select>
               </div>
-              {employeeId !== 'all' && (
-                <button onClick={() => guarded(() => setEmployeeId('all'))} className="text-xs font-semibold text-accent/80 hover:text-accent hover:underline transition-colors">
-                  Clear
-                </button>
-              )}
             </div>
           </div>
 
@@ -1219,21 +1214,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               setTo(t);
             })} />
           </div>
-
-          {(employeeId !== 'all' || status !== 'All' || from !== to) && (
-            <button
-              type="button"
-              onClick={() => guarded(() => {
-                setEmployeeId('all');
-                setStatus('All');
-                setFrom(isoDaysAgo(0));
-                setTo(isoDaysAgo(0));
-              })}
-              className="self-end pb-2.5 text-xs font-semibold text-slate-500 hover:text-accent hover:underline transition-colors"
-            >
-              Reset filters
-            </button>
-          )}
 
           {/* Correction mode — off is the standard report; on surfaces a Fix
               chip on every past one-punch day for a direct admin correction. */}
