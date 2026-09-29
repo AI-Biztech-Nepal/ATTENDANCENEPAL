@@ -1280,7 +1280,14 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             so it always matches the desktop web view exactly. Print gets the
             full table instead of just the scrolled-into-view slice. */}
         <HorizontalScrollButtons targetRef={tableScrollRef} />
-        <div ref={tableScrollRef} className="max-h-[65vh] overflow-auto print:max-h-none print:overflow-visible">
+        {/* A thin/overlay OS scrollbar can be easy to miss on a container that
+            scrolls both ways, which is exactly why HorizontalScrollButtons
+            exists above — but a visible, grabbable scrollbar is the more
+            direct fix, so these give it one instead of relying on that alone. */}
+        <div
+          ref={tableScrollRef}
+          className="max-h-[65vh] overflow-auto print:max-h-none print:overflow-visible [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-slate-100 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
+        >
         {/* print:-prefixed classes below only take effect inside the browser's
             print/Save-as-PDF preview — the on-screen table (colors, compact
             10-12px sizing) is untouched. Print gets a plain black-and-white
@@ -1291,9 +1298,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             globally in globals.css (not here) so there's one source of
             truth — see the comment there for why border-collapse is
             `separate`, not `collapse`. */}
-        <table className="w-full text-left text-xs">
+        <table className="w-full text-left text-sm">
           <thead>
-            <tr className="sticky top-0 z-10 border-b border-slate-200/80 bg-slate-50/90 backdrop-blur-sm text-[11px] uppercase tracking-wider text-slate-500 print:static print:text-slate-500 print:border-b-[1.5px] print:border-[#d1d5db]">
+            <tr className="sticky top-0 z-10 border-b border-slate-200/80 bg-slate-50/90 backdrop-blur-sm text-xs uppercase tracking-wider text-slate-500 print:static print:text-slate-500 print:border-b-[1.5px] print:border-[#d1d5db]">
               <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">S.N.</th>
               <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Date</th>
               <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Day</th>
@@ -1386,7 +1393,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   )}
                   {change && fmtPunch(saved.checkOut) !== fmtPunch(r.checkOut) && <WasValue>{fmtPunch(saved.checkOut)}</WasValue>}
                 </td>
-                <td className="w-px whitespace-nowrap px-4 py-3.5 text-left text-[10px] print:px-2 print:py-1 print:text-ink">
+                <td className="w-px whitespace-nowrap px-4 py-3.5 text-left text-xs print:px-2 print:py-1 print:text-ink">
                   <LateEarlyCell row={r} />
                 </td>
                 <td className="whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
@@ -1450,7 +1457,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className="print:border print:border-slate-400" />
                 <td className="whitespace-nowrap px-4 py-3.5 text-left print:px-2">{fmtHrs(totals.workHours)}</td>
                 <td className="whitespace-nowrap px-4 py-3.5 text-left print:px-2">{fmtHrs(totals.overtimeHours)}</td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-[10px] font-semibold print:w-20 print:whitespace-normal print:px-1 print:text-[10px] text-left">
+                <td className="whitespace-nowrap px-4 py-3.5 text-xs font-semibold print:w-20 print:whitespace-normal print:px-1 print:text-[10px] text-left">
                   {/* On-screen: one line, colored, joined by " · " — unchanged.
                       Print: stacked on two lines instead, so this cell doesn't
                       force the totals row (and the columns before it) wider
