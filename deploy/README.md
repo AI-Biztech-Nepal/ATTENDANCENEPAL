@@ -94,3 +94,52 @@ npm ci
 npm run build
 pm2 restart admin-web
 ```
+
+## 8. Auto-deploy on push (webhook, no manual `git pull`)
+
+`deploy/webhook-listener.js` and `deploy/redeploy.sh` already do the work — this
+wires them up so a push to `main` redeploys automatically.
+
+**On the VPS**, create `~/app/deploy/webhook.ecosystem.config.js` (not committed —
+it holds a secret):
+
+```js
+module.exports = {
+  apps: [
+    {
+      name: 'deploy-webhook',
+      cwd: __dirname,
+      script: 'webhook-listener.js',
+      env: {
+        WEBHOOK_SECRET: 'generate-a-long-random-string-here',
+      },
+    },
+  ],
+};
+```
+
+Generate the secret with `openssl rand -hex 32`, then start it:
+
+```bash
+cd ~/app/deploy
+pm2 start webhook.ecosystem.config.js
+pm2 save
+```
+
+Add the `/deploy-webhook` location from `deploy/nginx-admin-web.conf` to the
+server's nginx config (already in the template in this repo) and reload:
+
+```bash
+sudo cp ~/app/deploy/nginx-admin-web.conf /etc/nginx/sites-available/admin-web
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**On GitHub**, repo → Settings → Webhooks → Add webhook:
+- Payload URL: `https://attendance-nepal.com/deploy-webhook`
+- Content type: `application/json`
+- Secret: the same string as `WEBHOOK_SECRET` above
+- Events: just "push"
+
+Push to `main` and check `deploy/last-deploy.log` on the server (or
+`pm2 logs deploy-webhook`) to confirm it ran. GitHub's webhook page also shows
+delivery attempts and responses under "Recent Deliveries" for debugging.
