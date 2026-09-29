@@ -192,7 +192,7 @@ export default function CompanyDetailModal({
               <h3 className="text-lg font-semibold text-ink">{detail?.company.name ?? 'Loading…'}</h3>
               {detail?.company.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
             </div>
-            {detail && <p className="text-xs text-slate-500">Signed up {formatAdDate(localDateKey(detail.company.createdAt), system)}</p>}
+            {detail && <p className="text-xs text-slate-500">Registered on {formatAdDate(localDateKey(detail.company.createdAt), system)}</p>}
           </div>
           <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-600">
             ✕
