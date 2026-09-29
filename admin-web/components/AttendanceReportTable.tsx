@@ -392,7 +392,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [guardAction, setGuardAction] = useState<(() => void) | null>(null);
   const [companyName, setCompanyName] = useState<string | null>(null);
-  const [showFiltersMenu, setShowFiltersMenu] = useState(false);
 
   useEffect(() => {
     fetchCompanyName().then(setCompanyName);
@@ -1188,83 +1187,53 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </div>
           </div>
 
-          <div className="relative">
-            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-transparent select-none">&nbsp;</label>
+          <div className="group">
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Status</label>
+            <div className="relative">
+              <StatusIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
+              <select
+                value={status}
+                onChange={e => {
+                  const v = e.target.value as typeof status;
+                  guarded(() => setStatus(v));
+                }}
+                className="rounded-xl border border-slate-200/60 bg-white/80 py-2 pl-9 pr-3 text-sm font-medium text-slate-700 shadow-sm transition-all duration-300 focus:border-accent focus:bg-white focus:outline-none focus:ring-4 focus:ring-accent/15 hover:border-slate-300 cursor-pointer"
+              >
+                <option value="All">All Logs</option>
+                <option value="Present">Present</option>
+                <option value="Absent">Absent</option>
+                <option value="Late">Late</option>
+                <option value="Early">Early</option>
+                <option value="Week Off">Week Off</option>
+                <option value="Leave">Leave</option>
+                <option value="Holiday">Holiday</option>
+                <option value="Exempt">Excused</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="group">
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Date Range</label>
+            <DateRangePicker from={from} to={to} onChange={(f, t) => guarded(() => {
+              setFrom(f);
+              setTo(t);
+            })} />
+          </div>
+
+          {(employeeId !== 'all' || status !== 'All' || from !== to) && (
             <button
               type="button"
-              onClick={() => setShowFiltersMenu(!showFiltersMenu)}
-              className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium shadow-sm transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-accent/15 ${
-                showFiltersMenu || status !== 'All' || from !== to // highlighting if active
-                  ? 'border-accent/40 bg-accent/5 text-accent-dark'
-                  : 'border-slate-200/60 bg-white/80 text-slate-700 hover:border-slate-300 hover:bg-white'
-              }`}
+              onClick={() => guarded(() => {
+                setEmployeeId('all');
+                setStatus('All');
+                setFrom(isoDaysAgo(0));
+                setTo(isoDaysAgo(0));
+              })}
+              className="self-end pb-2.5 text-xs font-semibold text-slate-500 hover:text-accent hover:underline transition-colors"
             >
-              <StatusIcon className={`h-4 w-4 ${showFiltersMenu || status !== 'All' ? 'text-accent' : 'text-accent/70'}`} />
-              More Filters
-              {(status !== 'All' || from !== to) && (
-                <span className="ml-1 flex h-2 w-2 rounded-full bg-accent" />
-              )}
+              Reset filters
             </button>
-            {showFiltersMenu && (
-              <>
-                {/* Invisible backdrop to close the menu when clicking outside */}
-                <div className="fixed inset-0 z-40" onClick={() => setShowFiltersMenu(false)} />
-                <div className="absolute left-0 top-full mt-2 z-50 w-[24rem] rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_10px_40px_rgb(0,0,0,0.1)]">
-                  <div className="flex flex-col gap-5">
-                    <div className="group">
-                      <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Status</label>
-                      <div className="relative">
-                        <StatusIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
-                        <select
-                          value={status}
-                          onChange={e => {
-                            const v = e.target.value as typeof status;
-                            guarded(() => setStatus(v));
-                          }}
-                          className="w-full rounded-xl border border-slate-200/60 bg-white py-2 pl-9 pr-3 text-sm font-medium text-slate-700 shadow-sm transition-all duration-300 focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/15 hover:border-slate-300 cursor-pointer"
-                        >
-                          <option value="All">All Logs</option>
-                          <option value="Present">Present</option>
-                          <option value="Absent">Absent</option>
-                          <option value="Late">Late</option>
-                          <option value="Early">Early</option>
-                          <option value="Week Off">Week Off</option>
-                          <option value="Leave">Leave</option>
-                          <option value="Holiday">Holiday</option>
-                          <option value="Exempt">Excused</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="group">
-                      <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Date Range</label>
-                      <div className="w-full transition-transform duration-300">
-                        <DateRangePicker from={from} to={to} onChange={(f, t) => guarded(() => {
-                          setFrom(f);
-                          setTo(t);
-                        })} />
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => guarded(() => {
-                          setEmployeeId('all');
-                          setStatus('All');
-                          setFrom(isoDaysAgo(0));
-                          setTo(isoDaysAgo(0));
-                        })}
-                        className="text-xs font-semibold text-slate-500 hover:text-accent hover:underline transition-colors"
-                      >
-                        Reset All Filters
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          )}
 
           {/* Correction mode — off is the standard report; on surfaces a Fix
               chip on every past one-punch day for a direct admin correction. */}
