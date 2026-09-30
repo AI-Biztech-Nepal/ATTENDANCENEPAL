@@ -16,7 +16,6 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (!supabaseConfigured) {
@@ -26,7 +25,6 @@ export default function RegisterPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setNotice(null);
 
     if (password !== confirmPassword) {
       setError('Passwords do not match.');
@@ -38,28 +36,31 @@ export default function RegisterPage() {
     }
 
     setSubmitting(true);
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/login`,
-        data: { full_name: fullName, company_name: companyName, location: location || null },
-      },
+    // Goes through /api/register (service-role, email_confirm: true) instead
+    // of supabase.auth.signUp() so no confirmation email is sent — the
+    // account is created already-confirmed and signed in immediately below.
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName, companyName, location, email, password }),
     });
+    const body = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      setSubmitting(false);
+      setError(body.error ?? 'Could not create the account.');
+      return;
+    }
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
     setSubmitting(false);
 
-    if (signUpError) {
-      setError(signUpError.message);
+    if (signInError) {
+      setError(signInError.message);
       return;
     }
 
-    if (data.session) {
-      router.push('/');
-      return;
-    }
-
-    // Email confirmation is required before a session is issued.
-    setNotice('Account created. Check your email to confirm it, then sign in.');
+    router.push('/');
   }
 
   return (
@@ -113,7 +114,6 @@ export default function RegisterPage() {
           className="mb-2.5 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
         />
         {error && <p className="mb-4 text-sm text-critical">{error}</p>}
-        {notice && <p className="mb-4 text-sm text-good-text">{notice}</p>}
         <button
           type="submit"
           disabled={submitting}
