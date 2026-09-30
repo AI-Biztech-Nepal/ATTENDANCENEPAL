@@ -285,9 +285,12 @@ async function handleAttlog(companyId, deviceId, serialNumber, body) {
       verification_mode: verifyType ?? '1',
     });
   }
-  if (rows.length === 0) return 0;
+  if (rows.length === 0) {
+    console.warn(`[push] ${serialNumber}: ATTLOG had ${lines.length} line(s) but none usable — first line: ${JSON.stringify(lines[0] ?? '')}`);
+    return 0;
+  }
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('attendance_logs')
     .upsert(rows, { onConflict: 'employee_id,punch_time', ignoreDuplicates: true })
     .select();
@@ -295,7 +298,12 @@ async function handleAttlog(companyId, deviceId, serialNumber, body) {
     console.error('[push] attendance_logs upsert failed:', error.message);
     return 0;
   }
-  return rows.length;
+  // ignoreDuplicates makes PostgREST return only the rows actually inserted,
+  // so this is the real count — rows.length alone made a device re-sending
+  // old punches look identical to one delivering new ones.
+  const inserted = data?.length ?? 0;
+  console.log(`[push] ${serialNumber}: ${lines.length} line(s) received, ${rows.length} parsed, ${inserted} new, latest punch_time ${rows[rows.length - 1].punch_time}`);
+  return inserted;
 }
 
 // OPERLOG carries mixed line types (tab-separated, one event per line):
