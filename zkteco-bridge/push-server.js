@@ -201,6 +201,9 @@ const CLOCK_OFFSET_MINUTES_BY_SERIAL = {
   A6F5211860719: -135,
   GED7261303176: -135,
   MFP3261000484: -135,
+  // K40 (Tranquality Spa): its 2026-09-29 punch landed with punch_time exactly
+  // 2h15m after created_at — same firmware skew as the units above.
+  BKIH240105032: -135,
 };
 
 // How far a raw timestamp's apparent skew is allowed to drift from the
