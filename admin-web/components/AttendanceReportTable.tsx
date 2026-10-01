@@ -1157,9 +1157,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       </div>
 
       <div className="relative z-50 mb-2.5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl px-4 py-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)] print:hidden transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-          <div className="flex items-end gap-2.5">
-          <div className="group w-52 shrink-0">
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-3 lg:flex-nowrap">
+          <div className="flex min-w-0 flex-1 items-end gap-2">
+          <div className="group min-w-0 flex-[1.1_1_140px]">
             <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Employee</label>
             <div className="flex items-center gap-2">
               <div className="relative w-full">
@@ -1183,7 +1183,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </div>
           </div>
 
-          <div className="group w-36 shrink-0">
+          <div className="group min-w-0 flex-[0.8_1_100px]">
             <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Status</label>
             <div className="relative">
               <StatusIcon className="pointer-events-none absolute left-3 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
@@ -1208,7 +1208,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </div>
           </div>
 
-          <div className="group w-56 shrink-0">
+          <div className="group min-w-0 flex-[1.4_1_200px]">
             <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Date Range</label>
             <DateRangePicker from={from} to={to} onChange={(f, t) => guarded(() => {
               setFrom(f);
@@ -1218,7 +1218,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
           </div>
 
-          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {/* Correction mode — off is the standard report; on surfaces a Fix
               chip on every past one-punch day for a direct admin correction. */}
           <button
@@ -1229,7 +1229,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 ? 'Correction mode on — click a Fix chip to correct a missed punch, or to add attendance on an Absent / Week Off day'
                 : `Turn on to fix missed punches and add attendance on Absent / Week Off days${incompleteCount ? ` (${incompleteCount} missed punches in this range)` : ''}`
             }
-            className={`flex h-9 items-center gap-2 self-end rounded-[10px] border px-3 text-[13px] font-semibold shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
+            className={`flex h-9 items-center gap-1.5 self-end whitespace-nowrap rounded-[10px] border px-2.5 text-[13px] font-semibold shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
               correctionMode
                 ? 'border-accent/30 bg-gradient-to-r from-accent/10 to-accent/5 text-accent-dark'
                 : 'border-slate-200 bg-white/80 text-slate-600 hover:border-slate-300'
@@ -1268,7 +1268,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             onClick={() => guarded(recalculateRange)}
             disabled={recalculating}
             title="Recompute hours, late/early, overtime and status for this range from each employee's current shift — use this after changing a shift's times or a roster assignment"
-            className="flex h-9 items-center gap-2 self-end rounded-[10px] border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-600 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-md hover:text-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:-translate-y-0"
+            className="flex h-9 items-center gap-1.5 self-end whitespace-nowrap rounded-[10px] border border-slate-200 bg-white px-2.5 text-[13px] font-semibold text-slate-600 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-md hover:text-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:-translate-y-0"
           >
             <RecalculateIcon className={`h-4 w-4 transition-transform duration-700 ${recalculating ? 'animate-spin text-accent' : 'text-slate-400 group-hover:text-accent'}`} />
             {recalculating ? `Recalculating ${recalcProgress?.done ?? 0}/${recalcProgress?.total ?? 0}…` : 'Recalculate'}
