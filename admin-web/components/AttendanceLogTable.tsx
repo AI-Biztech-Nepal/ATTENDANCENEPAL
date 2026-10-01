@@ -122,7 +122,7 @@ export default function AttendanceLogTable({ rows, todayKey }: { rows: LogRow[];
     );
   }
 
-  const th = 'px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500';
+  const th = 'px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600';
 
   return (
     <>
@@ -130,7 +130,7 @@ export default function AttendanceLogTable({ rows, todayKey }: { rows: LogRow[];
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <table className="hidden w-full text-sm md:table">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
+            <tr className="divide-x divide-slate-200 border-b border-slate-300 bg-slate-100">
               <th scope="col" className={`${th} w-48`}>Date</th>
               <th scope="col" className={`${th} w-36`}>Status</th>
               <th scope="col" className={th}>Check-in</th>
@@ -139,7 +139,7 @@ export default function AttendanceLogTable({ rows, todayKey }: { rows: LogRow[];
               <th scope="col" className={`${th} pr-6 text-right`}>Overtime</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-slate-200">
             {items.map(item => {
               if (item.kind === 'gap') {
                 return (
@@ -154,7 +154,7 @@ export default function AttendanceLogTable({ rows, todayKey }: { rows: LogRow[];
               const kind = kindOf(row) as Exclude<Kind, 'upcoming'>;
               const isToday = row.date === todayKey;
               return (
-                <tr key={row.date} className={`hover:bg-slate-50 ${isToday ? 'bg-accent/5' : ''}`}>
+                <tr key={row.date} className={`divide-x divide-slate-200 hover:bg-slate-50 ${isToday ? 'bg-accent/5' : ''}`}>
                   <td className="whitespace-nowrap px-4 py-2.5">
                     <span className="font-semibold tabular-nums text-ink">{dayLabel(row.date)}</span>
                     <span className="ml-2 text-xs text-slate-500">{weekday(row.date)}</span>
@@ -182,16 +182,19 @@ export default function AttendanceLogTable({ rows, todayKey }: { rows: LogRow[];
                       </td>
                     </>
                   ) : (
-                    <td colSpan={4} className="px-4 py-2.5 text-xs text-slate-500">
-                      {kind === 'absent' ? 'No punches recorded' : ''}
-                    </td>
+                    <>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-xs text-slate-500">{kind === 'absent' ? 'No punches recorded' : ''}</td>
+                      <td className="px-4 py-2.5" />
+                      <td className="px-4 py-2.5" />
+                      <td className="px-4 py-2.5" />
+                    </>
                   )}
                 </tr>
               );
             })}
           </tbody>
           <tfoot>
-            <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-ink">
+            <tr className="divide-x divide-slate-200 border-t-2 border-slate-300 bg-slate-100 font-semibold text-ink">
               <td colSpan={2} className="px-4 py-3">
                 Month total
                 <span className="ml-2 text-xs font-medium text-slate-500">
