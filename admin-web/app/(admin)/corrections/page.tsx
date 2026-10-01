@@ -232,13 +232,6 @@ export default function CorrectionsPage() {
 
   return (
     <>
-      <p className="mb-4 max-w-2xl text-sm text-slate-500">
-        Requests from employees — a missed punch they&apos;re asking to fix, or a live check-in/check-out submitted
-        from their phone. Approving a missed punch recalculates that day&apos;s hours, late/early status, and
-        overtime, and locks the day so the nightly recompute won&apos;t overwrite it. Approving a GPS check-in
-        records it as that day&apos;s attendance.
-      </p>
-
       <div className="mb-5 flex flex-wrap items-center gap-2">
         {(['pending', 'approved', 'rejected', 'All'] as const).map(f => (
           <button

@@ -168,13 +168,6 @@ export default function WeekOffPage() {
 
   return (
     <>
-      <p className="mb-5 max-w-2xl text-sm text-slate-500">
-        Holiday dates — treated as a paid day in Payroll. &ldquo;Applies to&rdquo; is <span className="font-medium">All</span> by default, or
-        set it to <span className="font-medium">Male</span> / <span className="font-medium">Female</span> for a gender-specific holiday like Teej.
-        Every holiday stays fully editable — use <span className="font-medium">Edit</span> to change its name, date or scope. Distinct from
-        assigning one employee a Week Off on the Shifts page&apos;s Weekly Roster.
-      </p>
-
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,20rem)_1fr]">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">

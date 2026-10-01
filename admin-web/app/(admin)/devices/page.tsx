@@ -341,15 +341,7 @@ export default function DevicesPage() {
 
   return (
     <>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-2xl text-sm text-slate-500">
-          Biometric terminal integrations, synced automatically both ways — but if a device hasn&apos;t polled on its own (bridge
-          just started, missed a cycle), use <strong>Sync Now</strong> to fetch immediately instead of waiting up to 15s for the
-          next automatic poll. Renaming an employee here pushes that name back down to every device. For a cloud-connected device,
-          a punch from a fingerprint the app doesn&apos;t recognize yet creates a placeholder employee right away; for a LAN-bridge
-          device, register the employee first and set their Biometric/Registration ID to match, or its punches are skipped rather
-          than recorded — use <strong>Sync Users</strong> to pull the device&apos;s enrolled users in as new employees instead.
-        </p>
+      <div className="mb-5 flex flex-wrap items-center justify-end gap-3">
         <div className="flex gap-2">
           <button onClick={reload} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
             ⟳ Refresh
