@@ -68,7 +68,11 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
   const pathname = usePathname();
   const items = NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin');
 
-  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  // At most one dropdown is open: opening another closes the current one. It is
+  // a single value, not a set, so two can never be open together. Closing a group
+  // only collapses its list — it never navigates, so the page being viewed stays
+  // put until a link is chosen.
+  const [openHref, setOpenHref] = useState<string | null>(null);
   // Desktop rest state is a 64px icon rail; clicking any icon expands it, and it
   // folds back when the pointer leaves. The mobile drawer is unaffected (the
   // rail classes are all lg:-prefixed), and an open drawer is never a rail.
@@ -88,33 +92,30 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
   // the still-wide sidebar the moment it starts to fold.
   const rowPadding = rail ? 'pl-3 lg:pl-4' : 'pl-3';
 
-  // Auto-expand whichever group contains the page currently being viewed —
-  // including the group's own link, so a deep link straight into a page
-  // (not clicked from the sidebar itself) still shows its section open.
+  // Open whichever group contains the page being viewed when the page changes —
+  // including the group's own link, so a deep link straight into a page (not
+  // clicked from the sidebar itself) still shows its section open. It takes the
+  // one open slot, so choosing a page in another group switches the dropdown to
+  // that group. It runs on navigation only, so it never fights a manual toggle.
   useEffect(() => {
     const group = NAV_ITEMS.find(i => i.href === pathname || i.children?.some(c => c.href === pathname));
-    if (group) setOpenGroups(prev => (prev.has(group.href) ? prev : new Set(prev).add(group.href)));
+    if (group) setOpenHref(group.href);
   }, [pathname]);
 
   function toggleGroup(href: string) {
-    setOpenGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(href)) next.delete(href);
-      else next.add(href);
-      return next;
-    });
+    setOpenHref(cur => (cur === href ? null : href));
   }
 
   function openGroup(href: string) {
-    setOpenGroups(prev => (prev.has(href) ? prev : new Set(prev).add(href)));
+    setOpenHref(href);
   }
 
-  // Folding back to the rail closes every dropdown in the same render, so the
-  // groups slide shut while the width animates instead of snapping away and
+  // Folding back to the rail closes the dropdown in the same render, so it
+  // slides shut while the width animates instead of snapping away and
   // reappearing open on the next expand.
   function collapse() {
     setExpanded(false);
-    setOpenGroups(prev => (prev.size ? new Set() : prev));
+    setOpenHref(null);
   }
 
   return (
@@ -171,7 +172,7 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
               : (item.children ?? []);
             const childItems = ownChildren.filter(c => !c.adminOnly || role === 'admin');
             const hasChildren = childItems.length > 0;
-            const isOpen = openGroups.has(item.href);
+            const isOpen = openHref === item.href;
             // Open in state is not the same as showing: in the rail a group that
             // the page-load auto-expand opened stays drawn shut.
             const childrenVisible = isOpen && !rail;
