@@ -109,7 +109,7 @@ export default function TableExportBar({
         onClick={() => window.print()}
         disabled={disabled}
         title={disabled ? 'Report is still loading — wait for it to finish before printing' : undefined}
-        className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+        className="flex h-9 items-center gap-1.5 rounded-[10px] border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-600 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
       >
         🖨 Print / Save PDF
       </button>
@@ -117,7 +117,7 @@ export default function TableExportBar({
         onClick={onExportCsv}
         disabled={disabled}
         title={disabled ? 'Report is still loading — wait for it to finish before exporting' : undefined}
-        className="flex items-center gap-1 rounded-md border border-accent bg-accent/5 px-3 py-1.5 text-xs font-semibold text-accent shadow-sm transition-colors hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-accent/5 disabled:hover:text-accent"
+        className="flex h-9 items-center gap-1.5 rounded-[10px] border border-accent bg-accent/5 px-3 text-[13px] font-semibold text-accent shadow-sm transition-colors hover:bg-accent hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-accent/5 disabled:hover:text-accent"
       >
         ⭳ Export Excel
       </button>

@@ -1218,7 +1218,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
 
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
           {/* Correction mode — off is the standard report; on surfaces a Fix
               chip on every past one-punch day for a direct admin correction. */}
           <button
