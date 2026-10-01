@@ -2,12 +2,14 @@
 
 /** Which optional columns the payroll pages show — the monthly Payroll
  * report, the Staff Salary Sheet, and the Salary Structure table itself.
- * The switches all live in one place, the cog above the Salary Structure
- * table; every other surface only reads the value. Persisted in localStorage rather than the
- * database — it's a display preference, it needs no migration, and it takes
- * effect the moment it's toggled. Same-origin, so both the Salary Structure
- * page and the Payroll report (and every tab) read the one value, and the
- * `storage` event lets an open Payroll tab update live when it's changed. */
+ * One shared value: the PF / SSF / Overtime switches are offered by both the
+ * Salary Structure cog and the Payroll report's cog and flip the same column
+ * on both; the attendance switches (Worked Days, Total Hours, Late / Early,
+ * Paid Leave) have no Salary Structure column. Persisted in localStorage
+ * rather than the database — it's a display preference, it needs no
+ * migration, and it takes effect the moment it's toggled. Same-origin, so
+ * every page and tab reads the one value, and the `storage` event lets an
+ * open Payroll or Salary Structure tab update live when it's changed. */
 export type PayrollReportColumns = {
   // Attendance columns on the Payroll report / Staff Salary Sheet.
   workedDays: boolean;

@@ -20,6 +20,8 @@ import { fetchMyCompanyWeekOffConfig } from '@/lib/weekOff';
 import {
   DEFAULT_PAYROLL_REPORT_COLUMNS,
   loadPayrollReportColumns,
+  normalizePayrollReportColumns,
+  PAYROLL_REPORT_COLUMNS_KEY,
   savePayrollReportColumns,
   type PayrollReportColumns,
 } from '@/lib/payrollReportColumns';
@@ -73,14 +75,26 @@ export default function SalaryStructurePage() {
   // by the number of days in the selected period's calendar month.
   const [viewMode, setViewMode] = useState<'monthly' | 'perDay'>('monthly');
 
-  // Which optional columns the monthly Payroll report shows. Set here — the
-  // cog above this table — and read by the Payroll report. Persisted in
-  // localStorage (lib/payrollReportColumns), so it takes effect immediately
-  // and needs no migration; loaded in an effect so SSR and first render agree.
+  // Which optional columns this table and the Payroll report show — one
+  // shared value, set from the cog above this table or the Payroll report's
+  // own. Persisted in localStorage (lib/payrollReportColumns), so it takes
+  // effect immediately and needs no migration; loaded in an effect so SSR and
+  // first render agree, and a `storage` listener keeps this page in step when
+  // the Payroll report in another tab flips a switch.
   const [reportCols, setReportCols] = useState<PayrollReportColumns>(DEFAULT_PAYROLL_REPORT_COLUMNS);
 
   useEffect(() => {
     setReportCols(loadPayrollReportColumns());
+    function onStorage(e: StorageEvent) {
+      if (e.key !== PAYROLL_REPORT_COLUMNS_KEY) return;
+      try {
+        setReportCols(e.newValue ? normalizePayrollReportColumns(JSON.parse(e.newValue)) : DEFAULT_PAYROLL_REPORT_COLUMNS);
+      } catch {
+        setReportCols(DEFAULT_PAYROLL_REPORT_COLUMNS);
+      }
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // Same period model the Payroll page uses — a real calendar month in the
@@ -437,11 +451,10 @@ export default function SalaryStructurePage() {
     </div>
   );
 
-  // Only this table's own columns. The Payroll report's attendance switches
-  // used to sit here too, which meant a menu above this table was mostly
-  // controlling a different page; they now live on that report's own cog.
-  // Overtime stays here because it governs this table's Overtime column and
-  // its Net Payable, not just what the report displays.
+  // The switches for this table's own columns. They are the same shared
+  // switches the Payroll report's cog offers for its PF / SSF / Overtime
+  // columns, so flipping one here changes both. The report's attendance-only
+  // switches (Worked Days etc.) have no column here and are not listed.
   const STRUCTURE_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
     ['pf', 'PF'],
     ['ssfEmployer', 'SSF by Employer'],

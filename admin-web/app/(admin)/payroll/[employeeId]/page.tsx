@@ -86,15 +86,18 @@ function PayrollEmployeeDetailView() {
   // per-employee choice. Read from localStorage on mount (SSR-safe default of
   // on) and kept live via the same `storage` event the report and the Staff
   // Salary Sheet listen to.
-  const [otOn, setOtOn] = useState(true);
+  // The PF switch is read here too, so this page's Net Payable matches the
+  // report row it was opened from.
+  const [reportCols, setReportCols] = useState(DEFAULT_PAYROLL_REPORT_COLUMNS);
+  const otOn = reportCols.overtime;
   useEffect(() => {
-    setOtOn(loadPayrollReportColumns().overtime);
+    setReportCols(loadPayrollReportColumns());
     function onStorage(e: StorageEvent) {
       if (e.key !== PAYROLL_REPORT_COLUMNS_KEY) return;
       try {
-        setOtOn(e.newValue ? normalizePayrollReportColumns(JSON.parse(e.newValue)).overtime : DEFAULT_PAYROLL_REPORT_COLUMNS.overtime);
+        setReportCols(e.newValue ? normalizePayrollReportColumns(JSON.parse(e.newValue)) : DEFAULT_PAYROLL_REPORT_COLUMNS);
       } catch {
-        setOtOn(DEFAULT_PAYROLL_REPORT_COLUMNS.overtime);
+        setReportCols(DEFAULT_PAYROLL_REPORT_COLUMNS);
       }
     }
     window.addEventListener('storage', onStorage);
@@ -322,9 +325,11 @@ function PayrollEmployeeDetailView() {
     if (isStaffSheet) {
       return { base, allowance, pf: 0, ssfEmployer: 0, ssfEmployee, otAllowance: 0, net: base + allowance - ssfEmployee };
     }
-    const pf = Math.round((base * pfRate) / 100);
+    // PF and the flat Overtime Allowance follow the Salary Structure switches:
+    // off means out of Net Payable, as on the report (SSF is display-only).
+    const pf = reportCols.pf ? Math.round((base * pfRate) / 100) : 0;
     const ssfEmployer = Math.round((base * ssfEmployerRate) / 100);
-    const otAllowance = Math.round((base * overtimeAllowanceRate) / 100);
+    const otAllowance = otOn ? Math.round((base * overtimeAllowanceRate) / 100) : 0;
     return {
       base,
       allowance,
@@ -334,7 +339,7 @@ function PayrollEmployeeDetailView() {
       otAllowance,
       net: base + allowance - pf - ssfEmployer - ssfEmployee + otAllowance,
     };
-  }, [employee, dayTotals.totalSalary, isStaffSheet, pfRate, ssfEmployerRate, ssfEmployeeRate, overtimeAllowanceRate]);
+  }, [employee, dayTotals.totalSalary, isStaffSheet, pfRate, ssfEmployerRate, ssfEmployeeRate, overtimeAllowanceRate, reportCols.pf, otOn]);
 
   // The +Allowance / −PF / −SSF lines between Total Salary and Net Payable —
   // rendered into each per-day table's footer as a short payslip tail.

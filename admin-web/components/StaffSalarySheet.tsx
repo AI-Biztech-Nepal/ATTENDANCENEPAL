@@ -152,9 +152,14 @@ export default function StaffSalarySheet() {
   // Payroll Report page renders for a staff_salary_sheet company, so it needs
   // the same cog. Unlike the old one it had, this writes the shared value
   // rather than private state, so it cannot drift from Salary Structure.
-  const ATTENDANCE_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
+  // The SSF and Overtime switches are the Salary Structure table's too, so
+  // they cross over; the sheet has no PF column, so no PF switch here.
+  const REPORT_COLUMN_OPTIONS: [keyof PayrollReportColumns, string][] = [
     ['workedDays', 'Worked Days'],
     ['totalHours', 'Total Hours'],
+    ['overtime', 'Overtime'],
+    ['ssfEmployer', 'SSF by Employer'],
+    ['ssfEmployee', 'SSF by Employee'],
     // Only offered once the company uses the yearly leave balance.
     ...(leavePolicyActive(leavePolicy, employees) ? ([['paidLeave', 'Paid Leave']] as [keyof PayrollReportColumns, string][]) : []),
   ];
@@ -543,8 +548,8 @@ export default function StaffSalarySheet() {
       'Dearness Allowance',
       `SSF ${ssfEmployerRate}% of Basic`,
       'Monthly Gross (MGS)',
-      `SSF by Employer ${ssfEmployerRate}%`,
-      `SSF by Employee ${ssfEmployeeRate}%`,
+      ...(visibleCols.ssfEmployer ? [`SSF by Employer ${ssfEmployerRate}%`] : []),
+      ...(visibleCols.ssfEmployee ? [`SSF by Employee ${ssfEmployeeRate}%`] : []),
       'Total SSF Payable',
       'Net Monthly',
     ];
@@ -564,8 +569,8 @@ export default function StaffSalarySheet() {
           r.dearness.toFixed(2),
           r.ssfBasis.toFixed(2),
           r.mgs.toFixed(2),
-          r.ssfEmployer.toFixed(2),
-          r.ssfEmployee.toFixed(2),
+          ...(visibleCols.ssfEmployer ? [r.ssfEmployer.toFixed(2)] : []),
+          ...(visibleCols.ssfEmployee ? [r.ssfEmployee.toFixed(2)] : []),
           r.totalSsf.toFixed(2),
           r.net.toFixed(2),
         ]);
@@ -614,7 +619,8 @@ export default function StaffSalarySheet() {
   // columns; the row order is stable, so it is still followable.
   const td = 'whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-slate-700';
 
-  const colCount = 10 + visibleAttCols.length + (leaveOn ? 1 : 0);
+  const colCount =
+    10 + visibleAttCols.length + (leaveOn ? 1 : 0) - (visibleCols.ssfEmployer ? 0 : 1) - (visibleCols.ssfEmployee ? 0 : 1);
 
   return (
     <>
@@ -675,9 +681,9 @@ export default function StaffSalarySheet() {
               <PayrollColumnsMenu
                 cols={visibleCols}
                 onToggle={toggleVisibleCol}
-                options={ATTENDANCE_COLUMN_OPTIONS}
+                options={REPORT_COLUMN_OPTIONS}
                 title="Payroll report columns"
-                description="Hides the column from this sheet and its printed / PDF / Excel copy. Overtime is set on the Salary Structure page, since hiding it also takes overtime pay out of the totals there. Paid Leave off pays as if there were no leave balance: absences aren’t paid from it and Week Off work counts as a paid day and overtime again."
+                description="Hides the column from this sheet and its printed / PDF / Excel copy. SSF and Overtime are shared with the Salary Structure table — flipping one here flips it there too. Paid Leave off pays as if there were no leave balance: absences aren’t paid from it and Week Off work counts as a paid day and overtime again."
               />
             }
           />
@@ -741,14 +747,18 @@ export default function StaffSalarySheet() {
                   Monthly Gross<br />
                   Salary
                 </th>
-                <th className={thNum}>
-                  SSF by Employer<br />
-                  {ssfEmployerRate}% of Basic
-                </th>
-                <th className={thNum}>
-                  SSF by Employee<br />
-                  {ssfEmployeeRate}% of Basic
-                </th>
+                {visibleCols.ssfEmployer && (
+                  <th className={thNum}>
+                    SSF by Employer<br />
+                    {ssfEmployerRate}% of Basic
+                  </th>
+                )}
+                {visibleCols.ssfEmployee && (
+                  <th className={thNum}>
+                    SSF by Employee<br />
+                    {ssfEmployeeRate}% of Basic
+                  </th>
+                )}
                 <th className={thNum}>
                   Total SSF<br />
                   Payable
@@ -782,8 +792,8 @@ export default function StaffSalarySheet() {
                     <td className={td}>{money(item.row.dearness)}</td>
                     <td className={td}>{money(item.row.ssfBasis)}</td>
                     <td className={td}>{money(item.row.mgs)}</td>
-                    <td className={td}>{money(item.row.ssfEmployer)}</td>
-                    <td className={`${td} text-critical-text`}>{money(item.row.ssfEmployee)}</td>
+                    {visibleCols.ssfEmployer && <td className={td}>{money(item.row.ssfEmployer)}</td>}
+                    {visibleCols.ssfEmployee && <td className={`${td} text-critical-text`}>{money(item.row.ssfEmployee)}</td>}
                     <td className={td}>{money(item.row.totalSsf)}</td>
                     <td className={`${td} font-bold text-good-text`}>{money(item.row.net)}</td>
                   </tr>
@@ -829,8 +839,10 @@ export default function StaffSalarySheet() {
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{money(grand.dearness)}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{money(grand.ssfBasis)}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{money(grand.mgs)}</td>
-                  <td className="px-2.5 py-2.5 text-right tabular-nums">{money(grand.ssfEmployer)}</td>
-                  <td className="px-2.5 py-2.5 text-right tabular-nums text-critical-text">{money(grand.ssfEmployee)}</td>
+                  {visibleCols.ssfEmployer && <td className="px-2.5 py-2.5 text-right tabular-nums">{money(grand.ssfEmployer)}</td>}
+                  {visibleCols.ssfEmployee && (
+                    <td className="px-2.5 py-2.5 text-right tabular-nums text-critical-text">{money(grand.ssfEmployee)}</td>
+                  )}
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{money(grand.totalSsf)}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-good-text">{money(grand.net)}</td>
                 </tr>
