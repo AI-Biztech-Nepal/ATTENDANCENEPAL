@@ -1156,10 +1156,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         </div>
       </div>
 
-      <div className="relative z-50 mb-5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] print:hidden transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-4">
+      <div className="relative z-50 mb-2.5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl p-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)] print:hidden transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
           <div className="group">
-            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Employee</label>
+            <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Employee</label>
             <div className="flex items-center gap-2">
               <div className="relative">
                 <PersonIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
@@ -1169,7 +1169,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                     const v = e.target.value;
                     guarded(() => setEmployeeId(v));
                   }}
-                  className="min-w-[12rem] rounded-xl border border-slate-200/60 bg-white/80 py-2 pl-9 pr-3 text-sm font-medium text-slate-700 shadow-sm transition-all duration-300 focus:border-accent focus:bg-white focus:outline-none focus:ring-4 focus:ring-accent/15 hover:border-slate-300 cursor-pointer"
+                  className="min-w-[12rem] rounded-xl border border-slate-200/60 bg-white/80 py-1.5 pl-9 pr-3 text-sm font-medium text-slate-700 shadow-sm transition-all duration-300 focus:border-accent focus:bg-white focus:outline-none focus:ring-4 focus:ring-accent/15 hover:border-slate-300 cursor-pointer"
                 >
                   <option value="all">All Employees</option>
                   {employees.map(e => (
@@ -1183,7 +1183,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           </div>
 
           <div className="group">
-            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Status</label>
+            <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Status</label>
             <div className="relative">
               <StatusIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
               <select
@@ -1192,7 +1192,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   const v = e.target.value as typeof status;
                   guarded(() => setStatus(v));
                 }}
-                className="rounded-xl border border-slate-200/60 bg-white/80 py-2 pl-9 pr-3 text-sm font-medium text-slate-700 shadow-sm transition-all duration-300 focus:border-accent focus:bg-white focus:outline-none focus:ring-4 focus:ring-accent/15 hover:border-slate-300 cursor-pointer"
+                className="rounded-xl border border-slate-200/60 bg-white/80 py-1.5 pl-9 pr-3 text-sm font-medium text-slate-700 shadow-sm transition-all duration-300 focus:border-accent focus:bg-white focus:outline-none focus:ring-4 focus:ring-accent/15 hover:border-slate-300 cursor-pointer"
               >
                 <option value="All">All Logs</option>
                 <option value="Present">Present</option>
@@ -1208,7 +1208,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           </div>
 
           <div className="group">
-            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Date Range</label>
+            <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Date Range</label>
             <DateRangePicker from={from} to={to} onChange={(f, t) => guarded(() => {
               setFrom(f);
               setTo(t);
@@ -1225,7 +1225,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 ? 'Correction mode on — click a Fix chip to correct a missed punch, or to add attendance on an Absent / Week Off day'
                 : `Turn on to fix missed punches and add attendance on Absent / Week Off days${incompleteCount ? ` (${incompleteCount} missed punches in this range)` : ''}`
             }
-            className={`flex items-center gap-2.5 self-end rounded-xl border px-4 py-2 text-sm font-bold shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
+            className={`flex items-center gap-2.5 self-end rounded-xl border px-4 py-1.5 text-sm font-bold shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md ${
               correctionMode
                 ? 'border-accent/30 bg-gradient-to-r from-accent/10 to-accent/5 text-accent-dark'
                 : 'border-slate-200 bg-white/80 text-slate-600 hover:border-slate-300'
@@ -1264,7 +1264,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             onClick={() => guarded(recalculateRange)}
             disabled={recalculating}
             title="Recompute hours, late/early, overtime and status for this range from each employee's current shift — use this after changing a shift's times or a roster assignment"
-            className="flex items-center gap-2 self-end rounded-xl border border-slate-200 bg-white/80 px-4 py-2 text-sm font-bold text-slate-600 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-md hover:text-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:-translate-y-0"
+            className="flex items-center gap-2 self-end rounded-xl border border-slate-200 bg-white/80 px-4 py-1.5 text-sm font-bold text-slate-600 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-md hover:text-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:-translate-y-0"
           >
             <RecalculateIcon className={`h-4 w-4 transition-transform duration-700 ${recalculating ? 'animate-spin text-accent' : 'text-slate-400 group-hover:text-accent'}`} />
             {recalculating ? `Recalculating ${recalcProgress?.done ?? 0}/${recalcProgress?.total ?? 0}…` : 'Recalculate'}
@@ -1286,7 +1286,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             direct fix, so these give it one instead of relying on that alone. */}
         <div
           ref={tableScrollRef}
-          className="max-h-[65vh] overflow-auto print:max-h-none print:overflow-visible [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-slate-100 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
+          className="max-h-[78vh] overflow-auto print:max-h-none print:overflow-visible [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-track]:bg-slate-100 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
         >
         {/* print:-prefixed classes below only take effect inside the browser's
             print/Save-as-PDF preview — the on-screen table (colors, compact
@@ -1301,19 +1301,19 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="sticky top-0 z-10 border-b border-slate-200/80 bg-slate-50/90 backdrop-blur-sm text-xs uppercase tracking-wider text-slate-500 print:static print:text-slate-500 print:border-b-[1.5px] print:border-[#d1d5db]">
-              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">S.N.</th>
-              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Date</th>
-              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Day</th>
-              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">ID</th>
-              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Employee</th>
-              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Shift</th>
-              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Check-In</th>
-              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Check-Out</th>
-              <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Late/Early</th>
-              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Work Hours</th>
-              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Overtime</th>
-              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:w-16 print:px-1 print:py-1 text-left">Status</th>
-              <th className="whitespace-nowrap px-4 py-3.5 font-bold print:px-1 print:py-1 text-left">Device</th>
+              <th className="w-px whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">S.N.</th>
+              <th className="w-px whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Date</th>
+              <th className="w-px whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Day</th>
+              <th className="w-px whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">ID</th>
+              <th className="whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Employee</th>
+              <th className="w-px whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Shift</th>
+              <th className="w-px whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Check-In</th>
+              <th className="w-px whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Check-Out</th>
+              <th className="w-px whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Late/Early</th>
+              <th className="whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Work Hours</th>
+              <th className="whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Overtime</th>
+              <th className="whitespace-nowrap px-2.5 py-1.5 font-bold print:w-16 print:px-1 print:py-1 text-left">Status</th>
+              <th className="whitespace-nowrap px-2.5 py-1.5 font-bold print:px-1 print:py-1 text-left">Device</th>
             </tr>
           </thead>
           <tbody>
@@ -1353,23 +1353,23 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''} ${change?.kind === 'edit' ? 'bg-info-bg/50 print:bg-transparent' : change?.kind === 'delete' ? 'bg-critical-bg/40 print:bg-transparent' : ''}`}
                 style={isFirstRowForEmployee ? { breakBefore: 'page' } : undefined}
               >
-                <td className="w-px whitespace-nowrap px-4 py-3.5 tabular-nums text-slate-500 font-medium print:px-2 print:py-1 print:text-ink">{i + 1}</td>
+                <td className="w-px whitespace-nowrap px-2.5 py-1.5 tabular-nums text-slate-500 font-medium print:px-2 print:py-1 print:text-ink">{i + 1}</td>
                 {/* Numeric date (22/05/2083) rather than the spelled-out
                     "22 Bhadra 2083" — the month name is the same on every
                     row and the range is already named in the header, so the
                     words only cost width. The Day column beside it is what
                     makes a date scannable in practice. */}
-                <td className={`w-px whitespace-nowrap px-4 py-3.5 tabular-nums text-slate-600 text-left print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''} ${change?.kind === 'edit' ? 'border-l-2 border-l-info print:border-l' : change?.kind === 'delete' ? 'border-l-2 border-l-critical print:border-l' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
-                <td className="w-px whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
-                <td className="w-px whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
-                <td className="whitespace-nowrap px-4 py-3.5 font-medium text-ink text-left print:px-2 print:py-1">{r.employeeName}</td>
-                <td className="w-px px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
+                <td className={`w-px whitespace-nowrap px-2.5 py-1.5 tabular-nums text-slate-600 text-left print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''} ${change?.kind === 'edit' ? 'border-l-2 border-l-info print:border-l' : change?.kind === 'delete' ? 'border-l-2 border-l-critical print:border-l' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
+                <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
+                <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
+                <td className="whitespace-nowrap px-2.5 py-1.5 font-medium text-ink text-left print:px-2 print:py-1">{r.employeeName}</td>
+                <td className="w-px px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   <span className="flex flex-col leading-tight">
                     <span className="whitespace-nowrap">{r.shiftName}</span>
                     {r.shiftTime && <span className="whitespace-nowrap text-[10px] text-slate-400 print:text-ink">{r.shiftTime}</span>}
                   </span>
                 </td>
-                <td className="w-px whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
+                <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckInCell row={r} />
                   ) : blank === 'in' ? (
@@ -1381,7 +1381,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   )}
                   {change && fmtPunch(saved.checkIn) !== fmtPunch(r.checkIn) && <WasValue>{fmtPunch(saved.checkIn)}</WasValue>}
                 </td>
-                <td className="w-px whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
+                <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   {!canFix ? (
                     <CheckOutCell row={r} />
                   ) : blank === 'out' ? (
@@ -1393,22 +1393,22 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                   )}
                   {change && fmtPunch(saved.checkOut) !== fmtPunch(r.checkOut) && <WasValue>{fmtPunch(saved.checkOut)}</WasValue>}
                 </td>
-                <td className="w-px whitespace-nowrap px-4 py-3.5 text-left text-xs print:px-2 print:py-1 print:text-ink">
+                <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-left text-xs print:px-2 print:py-1 print:text-ink">
                   <LateEarlyCell row={r} />
                 </td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.hours)}
                   {change && fmtHrs(saved.hours) !== fmtHrs(r.hours) && <WasValue>{fmtHrs(saved.hours)}</WasValue>}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   {fmtHrs(r.overtime)}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-left print:w-20 print:px-1 print:py-1">
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-left print:w-20 print:px-1 print:py-1">
                   <span className="print:hidden">{statusBadge(r)}</span>
                   <span className="hidden print:inline print:text-ink">{r.status}</span>
                   {change && saved.status !== r.status && <WasValue>{saved.status}</WasValue>}
                 </td>
-                <td className="whitespace-nowrap print-wrap px-4 py-3.5 text-slate-600 print:px-2 print:py-1 print:text-[8px] print:text-ink">
+                <td className="whitespace-nowrap print-wrap px-2.5 py-1.5 text-slate-600 print:px-2 print:py-1 print:text-[8px] print:text-ink">
                   {canFix ? (
                     <EditablePunch onClick={() => openCorrection(saved)}>
                       <span>{r.device}</span>
@@ -1449,15 +1449,15 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           {!loading && !recalculating && rows.length > 0 && (
             <tbody className="border-t-2 border-slate-200 print:border-slate-400">
               <tr className="sticky bottom-0 bg-slate-50 text-xs font-bold text-ink print:static print:bg-white print:text-[10px] print-total-row">
-                <td colSpan={6} className="whitespace-nowrap px-4 py-3.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 print:px-2 print:text-[10px] print:text-ink">
+                <td colSpan={6} className="whitespace-nowrap px-2.5 py-1.5 text-right text-[10px] font-semibold uppercase tracking-wide text-slate-500 print:px-2 print:text-[10px] print:text-ink">
                   Total
                 </td>
                 <td className="print:border print:border-slate-400" />
                 <td className="print:border print:border-slate-400" />
                 <td className="print:border print:border-slate-400" />
-                <td className="whitespace-nowrap px-4 py-3.5 text-left print:px-2">{fmtHrs(totals.workHours)}</td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-left print:px-2">{fmtHrs(totals.overtimeHours)}</td>
-                <td className="whitespace-nowrap px-4 py-3.5 text-xs font-semibold print:w-20 print:whitespace-normal print:px-1 print:text-[10px] text-left">
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-left print:px-2">{fmtHrs(totals.workHours)}</td>
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-left print:px-2">{fmtHrs(totals.overtimeHours)}</td>
+                <td className="whitespace-nowrap px-2.5 py-1.5 text-xs font-semibold print:w-20 print:whitespace-normal print:px-1 print:text-[10px] text-left">
                   {/* On-screen: one line, colored, joined by " · " — unchanged.
                       Print: stacked on two lines instead, so this cell doesn't
                       force the totals row (and the columns before it) wider
