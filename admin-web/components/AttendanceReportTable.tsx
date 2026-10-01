@@ -1156,7 +1156,14 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
         </div>
       </div>
 
-      <div className="relative z-50 mb-2.5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl px-4 py-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)] print:hidden transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
+      {/* Deliberately no z-index. This used to be `relative z-50`, which lifted a
+          plain in-flow bar above the app's own menus: it painted over the account
+          menu (z-30), over the dimmed overlay behind the phone nav drawer (z-20)
+          and over the Edit Profile / Change Password dialogs (z-40). Nothing in
+          here needs it — the two filters are native selects, the date range
+          picker renders through a portal to <body> with its own z-[1000], and the
+          export bar has no popups. */}
+      <div className="mb-2.5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl px-4 py-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)] print:hidden transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
         <div className="flex flex-wrap items-end gap-x-3 gap-y-3 lg:flex-nowrap">
           <div className="flex min-w-0 flex-1 items-end gap-2">
           <div className="group min-w-0 flex-[1.1_1_140px]">
