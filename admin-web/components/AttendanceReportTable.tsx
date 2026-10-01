@@ -1157,9 +1157,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       </div>
 
       <div className="relative z-50 mb-2.5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl px-4 py-3 shadow-[0_8px_30px_rgb(0,0,0,0.04)] print:hidden transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
-        <div className="flex flex-wrap items-end justify-between gap-x-5 gap-y-3">
-          <div className="flex min-w-0 flex-[1_1_560px] items-end gap-2.5">
-          <div className="group min-w-0 flex-[1.2_1_150px]">
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+          <div className="flex items-end gap-2.5">
+          <div className="group w-52 shrink-0">
             <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Employee</label>
             <div className="flex items-center gap-2">
               <div className="relative w-full">
@@ -1183,7 +1183,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </div>
           </div>
 
-          <div className="group min-w-0 flex-[1_1_120px]">
+          <div className="group w-36 shrink-0">
             <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Status</label>
             <div className="relative">
               <StatusIcon className="pointer-events-none absolute left-3 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
@@ -1208,7 +1208,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             </div>
           </div>
 
-          <div className="group min-w-0 flex-[1.3_1_230px]">
+          <div className="group w-56 shrink-0">
             <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Date Range</label>
             <DateRangePicker from={from} to={to} onChange={(f, t) => guarded(() => {
               setFrom(f);
