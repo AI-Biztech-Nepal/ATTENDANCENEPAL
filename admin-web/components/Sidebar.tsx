@@ -69,6 +69,12 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
   const items = NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin');
 
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  // Desktop rest state is a 64px icon rail; clicking any icon expands it, and it
+  // folds back when the pointer leaves. The mobile drawer is unaffected (the
+  // rail classes are all lg:-prefixed).
+  const [expanded, setExpanded] = useState(false);
+  const rail = !expanded;
+  const hideWhenRail = rail ? 'lg:hidden' : '';
 
   // Auto-expand whichever group contains the page currently being viewed —
   // including the group's own link, so a deep link straight into a page
@@ -93,14 +99,19 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
         <div className="fixed inset-0 z-20 bg-black/40 lg:hidden" onClick={onCloseDrawer} aria-hidden="true" />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 flex h-screen w-60 shrink-0 -translate-x-full flex-col bg-sidebar text-slate-300 transition-transform duration-200 lg:static lg:translate-x-0 ${
-          drawerOpen ? 'translate-x-0' : ''
-        }`}
+        onMouseLeave={() => setExpanded(false)}
+        className={`fixed inset-y-0 left-0 z-30 flex h-screen w-60 shrink-0 -translate-x-full flex-col overflow-hidden bg-sidebar text-slate-300 transition-[transform,width] duration-200 lg:static lg:translate-x-0 ${
+          rail ? 'lg:w-16' : 'lg:w-60'
+        } ${drawerOpen ? 'translate-x-0' : ''}`}
       >
-        <div className="flex flex-col items-center gap-0.5 px-5 pb-1 pt-2 text-center">
+        <div className="flex flex-col items-center gap-0.5 px-3 pb-1 pt-2 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-mark.png" alt="Attendance Nepal" className="h-28 w-28 shrink-0" />
-          <span className="text-lg font-semibold text-white">Attendance Nepal</span>
+          <img
+            src="/logo-mark.png"
+            alt="Attendance Nepal"
+            className={`h-28 w-28 shrink-0 object-contain transition-all duration-200 ${rail ? 'lg:h-[30px] lg:w-[30px]' : ''}`}
+          />
+          <span className={`whitespace-nowrap text-lg font-semibold text-white ${hideWhenRail}`}>Attendance Nepal</span>
         </div>
 
         {role === 'hr' && (
@@ -115,7 +126,7 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
           </div>
         )}
 
-        <nav className="sidebar-scroll flex flex-1 flex-col gap-1 overflow-y-auto px-3 pb-4">
+        <nav className={`sidebar-scroll flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pb-4 ${rail ? 'px-3 lg:px-1.5' : 'px-3'}`}>
           {items.map(item => {
             // A grouped item's own landing page becomes the first child; the
             // group row itself no longer navigates anywhere.
@@ -134,34 +145,42 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
                   {hasChildren ? (
                     <button
                       type="button"
-                      onClick={() => toggleGroup(item.href)}
+                      onClick={() => {
+                        setExpanded(true);
+                        toggleGroup(item.href);
+                      }}
                       aria-expanded={isOpen}
                       aria-label={isOpen ? `Collapse ${item.label}` : `Expand ${item.label}`}
-                      className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                      title={item.label}
+                      className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${rail ? 'lg:justify-center lg:px-2' : ''} ${
                         active || childActive ? 'bg-sidebar-active font-medium text-accent' : 'hover:bg-sidebar-active/60 hover:text-white'
                       }`}
                     >
                       <Icon className="h-5 w-5 shrink-0" active={active || childActive} />
-                      <span className="flex-1 text-left">{item.label}</span>
-                      <ChevronIcon className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                      <span className={`flex-1 whitespace-nowrap text-left ${hideWhenRail}`}>{item.label}</span>
+                      <ChevronIcon className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''} ${hideWhenRail}`} />
                     </button>
                   ) : (
                     <Link
                       href={item.href}
-                      onClick={onCloseDrawer}
-                      className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                      onClick={() => {
+                        setExpanded(true);
+                        onCloseDrawer();
+                      }}
+                      title={item.label}
+                      className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${rail ? 'lg:justify-center lg:px-2' : ''} ${
                         active ? 'bg-sidebar-active font-medium text-accent' : 'hover:bg-sidebar-active/60 hover:text-white'
                       }`}
                     >
-                      <Icon className="h-5 w-5" active={active} />
-                      {item.label}
+                      <Icon className="h-5 w-5 shrink-0" active={active} />
+                      <span className={`whitespace-nowrap ${hideWhenRail}`}>{item.label}</span>
                     </Link>
                   )}
                 </div>
                 {hasChildren && (
                   <div
                     aria-hidden={!isOpen}
-                    className={`grid transition-all duration-200 ease-out ${
+                    className={`grid transition-all duration-200 ease-out ${hideWhenRail} ${
                       isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
                     }`}
                   >
