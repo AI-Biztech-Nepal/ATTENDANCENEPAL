@@ -71,10 +71,22 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   // Desktop rest state is a 64px icon rail; clicking any icon expands it, and it
   // folds back when the pointer leaves. The mobile drawer is unaffected (the
-  // rail classes are all lg:-prefixed).
+  // rail classes are all lg:-prefixed), and an open drawer is never a rail.
   const [expanded, setExpanded] = useState(false);
-  const rail = !expanded;
-  const hideWhenRail = rail ? 'lg:hidden' : '';
+  const rail = !expanded && !drawerOpen;
+  // Labels fade rather than switch off: they vanish at once on the way into the
+  // rail and come back only once the sidebar is about half open, so they are
+  // never drawn clipped mid-slide. (display:none would snap them away while the
+  // width is still animating.) Duration and delay live on the destination state
+  // so each direction gets its own timing.
+  const hideWhenRail = `transition-opacity ${
+    rail ? 'duration-100 lg:pointer-events-none lg:opacity-0' : 'duration-150 delay-100'
+  }`;
+  // Icon rows keep one left-aligned position and only their padding animates,
+  // landing exactly where justify-center put them in the 64px rail (22px) and
+  // at the expanded 24px, so icons glide instead of jumping to the middle of
+  // the still-wide sidebar the moment it starts to fold.
+  const rowPadding = rail ? 'pl-3 lg:pl-4' : 'pl-3';
 
   // Auto-expand whichever group contains the page currently being viewed —
   // including the group's own link, so a deep link straight into a page
@@ -93,40 +105,64 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
     });
   }
 
+  function openGroup(href: string) {
+    setOpenGroups(prev => (prev.has(href) ? prev : new Set(prev).add(href)));
+  }
+
+  // Folding back to the rail closes every dropdown in the same render, so the
+  // groups slide shut while the width animates instead of snapping away and
+  // reappearing open on the next expand.
+  function collapse() {
+    setExpanded(false);
+    setOpenGroups(prev => (prev.size ? new Set() : prev));
+  }
+
   return (
     <>
       {drawerOpen && (
         <div className="fixed inset-0 z-20 bg-black/40 lg:hidden" onClick={onCloseDrawer} aria-hidden="true" />
       )}
       <aside
-        onMouseLeave={() => setExpanded(false)}
+        onMouseLeave={() => {
+          if (!drawerOpen) collapse();
+        }}
         className={`fixed inset-y-0 left-0 z-30 flex h-screen w-60 shrink-0 -translate-x-full flex-col overflow-hidden bg-sidebar text-slate-300 transition-[transform,width] duration-200 lg:static lg:translate-x-0 ${
           rail ? 'lg:w-16' : 'lg:w-60'
         } ${drawerOpen ? 'translate-x-0' : ''}`}
       >
-        <div className="flex flex-col items-center gap-0.5 px-3 pb-1 pt-2 text-center">
+        <div className="flex flex-col items-center gap-0.5 overflow-hidden px-3 pb-1 pt-2 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/logo-mark.png"
             alt="Attendance Nepal"
             className={`h-28 w-28 shrink-0 object-contain transition-all duration-200 ${rail ? 'lg:h-[30px] lg:w-[30px]' : ''}`}
           />
-          <span className={`whitespace-nowrap text-lg font-semibold text-white ${hideWhenRail}`}>Attendance Nepal</span>
+          {/* Its height closes with the width so the nav doesn't jump up when the
+              title goes; the text itself fades via hideWhenRail. */}
+          <div className={`h-7 overflow-hidden transition-[height,margin] duration-200 ${rail ? 'lg:-mt-0.5 lg:h-0' : ''}`}>
+            <span className={`block whitespace-nowrap text-lg font-semibold text-white ${hideWhenRail}`}>Attendance Nepal</span>
+          </div>
         </div>
 
         {role === 'hr' && (
-          <div className="px-3 pb-3">
+          <div className={`pb-3 transition-[padding] duration-200 ${rail ? 'px-3 lg:px-1.5' : 'px-3'}`}>
             <Link
               href="/checkin"
               onClick={onCloseDrawer}
-              className="flex items-center justify-center gap-2 rounded-lg bg-accent/20 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/30"
+              title="My Check-In / Out"
+              className={`flex min-w-0 items-center gap-3 overflow-hidden rounded-lg bg-accent/20 py-2 pr-3 text-sm font-medium text-accent transition-[padding,background-color] duration-200 hover:bg-accent/30 ${rowPadding}`}
             >
-              My Check-In / Out
+              <CheckInIcon className="h-5 w-5 shrink-0" />
+              <span className={`whitespace-nowrap ${hideWhenRail}`}>My Check-In / Out</span>
             </Link>
           </div>
         )}
 
-        <nav className={`sidebar-scroll flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pb-4 ${rail ? 'px-3 lg:px-1.5' : 'px-3'}`}>
+        <nav
+          className={`sidebar-scroll flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pb-4 transition-[padding] duration-200 ${
+            rail ? 'px-3 lg:px-1.5' : 'px-3'
+          }`}
+        >
           {items.map(item => {
             // A grouped item's own landing page becomes the first child; the
             // group row itself no longer navigates anywhere.
@@ -136,6 +172,9 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
             const childItems = ownChildren.filter(c => !c.adminOnly || role === 'admin');
             const hasChildren = childItems.length > 0;
             const isOpen = openGroups.has(item.href);
+            // Open in state is not the same as showing: in the rail a group that
+            // the page-load auto-expand opened stays drawn shut.
+            const childrenVisible = isOpen && !rail;
             const active = pathname === item.href;
             const childActive = childItems.some(c => c.href === pathname);
             const Icon = item.icon;
@@ -147,18 +186,26 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
                       type="button"
                       onClick={() => {
                         setExpanded(true);
-                        toggleGroup(item.href);
+                        // From the rail the click opens the sidebar and this group;
+                        // toggling would shut a group the page-load auto-expand
+                        // left open out of sight.
+                        if (rail) openGroup(item.href);
+                        else toggleGroup(item.href);
                       }}
-                      aria-expanded={isOpen}
-                      aria-label={isOpen ? `Collapse ${item.label}` : `Expand ${item.label}`}
+                      aria-expanded={childrenVisible}
+                      aria-label={childrenVisible ? `Collapse ${item.label}` : `Expand ${item.label}`}
                       title={item.label}
-                      className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${rail ? 'lg:justify-center lg:px-2' : ''} ${
+                      className={`flex min-w-0 flex-1 items-center gap-3 overflow-hidden rounded-lg py-2.5 pr-3 text-sm transition-[padding,background-color,color] duration-200 ${rowPadding} ${
                         active || childActive ? 'bg-sidebar-active font-medium text-accent' : 'hover:bg-sidebar-active/60 hover:text-white'
                       }`}
                     >
                       <Icon className="h-5 w-5 shrink-0" active={active || childActive} />
                       <span className={`flex-1 whitespace-nowrap text-left ${hideWhenRail}`}>{item.label}</span>
-                      <ChevronIcon className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''} ${hideWhenRail}`} />
+                      <ChevronIcon
+                        className={`h-4 w-4 shrink-0 text-slate-400 transition-[transform,opacity] duration-200 ${isOpen ? 'rotate-180' : ''} ${
+                          rail ? 'lg:pointer-events-none lg:opacity-0' : ''
+                        }`}
+                      />
                     </button>
                   ) : (
                     <Link
@@ -168,7 +215,7 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
                         onCloseDrawer();
                       }}
                       title={item.label}
-                      className={`flex flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${rail ? 'lg:justify-center lg:px-2' : ''} ${
+                      className={`flex min-w-0 flex-1 items-center gap-3 overflow-hidden rounded-lg py-2.5 pr-3 text-sm transition-[padding,background-color,color] duration-200 ${rowPadding} ${
                         active ? 'bg-sidebar-active font-medium text-accent' : 'hover:bg-sidebar-active/60 hover:text-white'
                       }`}
                     >
@@ -178,10 +225,14 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
                   )}
                 </div>
                 {hasChildren && (
+                  // No lg:hidden here (unlike the labels): display:none would cut the
+                  // close animation, so the group slides shut with the width instead.
                   <div
-                    aria-hidden={!isOpen}
-                    className={`grid transition-all duration-200 ease-out ${hideWhenRail} ${
-                      isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                    aria-hidden={!childrenVisible}
+                    className={`grid transition-all duration-200 ease-out ${
+                      isOpen
+                        ? `grid-rows-[1fr] opacity-100 ${rail ? 'lg:grid-rows-[0fr] lg:opacity-0' : ''}`
+                        : 'grid-rows-[0fr] opacity-0'
                     }`}
                   >
                     <div className="overflow-hidden">
@@ -194,8 +245,8 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
                               key={c.href}
                               href={c.href}
                               onClick={onCloseDrawer}
-                              tabIndex={isOpen ? undefined : -1}
-                              className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
+                              tabIndex={childrenVisible ? undefined : -1}
+                              className={`flex items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors ${
                                 cActive ? 'bg-sidebar-active font-medium text-accent' : 'text-slate-300 hover:bg-sidebar-active/60 hover:text-white'
                               }`}
                             >
@@ -326,6 +377,13 @@ function ReportIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
       <path d="M14 3v5h5M9 13h6M9 17h6M9 9h2" />
+    </svg>
+  );
+}
+function CheckInIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
     </svg>
   );
 }
