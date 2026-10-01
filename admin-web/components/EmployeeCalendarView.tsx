@@ -5,6 +5,7 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { supabase } from '@/lib/supabase';
 import MonthCalendar from '@/components/MonthCalendar';
 import Badge from '@/components/Badge';
+import AttendanceLogTable, { type LogRow } from '@/components/AttendanceLogTable';
 import { formatAdDate, formatDdMmYyyy, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
@@ -294,12 +295,13 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
   // what the cards show, whatever day it is.
   const tableRows = useMemo(
     () =>
-      visibleDates.map(date => {
+      visibleDates.map((date): LogRow => {
         const onLeave = leaveDates.has(date) || weekOffDates.has(date) || companyWeekOffDates.has(date);
         if (onLeave) {
           return {
             date,
             onLeave: true,
+            offKind: leaveDates.has(date) ? 'leave' : 'dayoff',
             checkIn: null as string | null,
             checkOut: null as string | null,
             hours: 0,
@@ -317,6 +319,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
           return {
             date,
             onLeave: false,
+            offKind: null,
             checkIn: summary.check_in,
             checkOut: summary.check_out,
             hours: Number(summary.total_hours),
@@ -332,6 +335,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
           return {
             date,
             onLeave: false,
+            offKind: null,
             checkIn: null as string | null,
             checkOut: null as string | null,
             hours: 0,
@@ -345,6 +349,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
         return {
           date,
           onLeave: false,
+          offKind: null,
           checkIn: status.checkIn.punch_time,
           checkOut: status.checkOut?.punch_time ?? null,
           hours: status.totalMinutes / 60,
@@ -506,116 +511,7 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
         })}
       </div>
 
-      {tableRows.length > 0 && (
-        <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <table className="w-full table-fixed text-center text-[10px]">
-            <colgroup>
-              <col className="w-[12%]" />
-              <col className="w-[22%]" />
-              <col className="w-[11%]" />
-              <col className="w-[11%]" />
-              <col className="w-[13%]" />
-              <col className="w-[14%]" />
-              <col className="w-[17%]" />
-            </colgroup>
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500">
-                <th className="truncate px-0.5 py-1 font-medium">Date</th>
-                <th className="truncate px-0.5 py-1 font-medium">In / Out</th>
-                <th className="truncate px-0.5 py-1 font-medium">Late</th>
-                <th className="truncate px-0.5 py-1 font-medium">Early</th>
-                <th className="truncate px-0.5 py-1 font-medium">Status</th>
-                <th className="truncate px-0.5 py-1 font-medium">OT</th>
-                <th className="truncate px-0.5 py-1 font-medium">Hrs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tableRows.map((row, i) => {
-                const fmtTime = (t: string | null) =>
-                  t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '–:–';
-                return (
-                  <tr key={row.date} className={`border-b border-slate-100 last:border-0 ${i % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
-                    <td className="truncate px-0.5 py-0.5 text-ink">{formatDdMmYyyy(row.date, system).slice(0, 5)}</td>
-                    <td className="truncate px-0.5 py-0.5 text-slate-600">
-                      {row.onLeave ? '—' : `${fmtTime(row.checkIn)} – ${fmtTime(row.checkOut)}`}
-                    </td>
-                    <td className="whitespace-normal break-words px-0.5 py-0.5 font-medium leading-tight text-warning-text">
-                      {row.present && row.lateMinutes > 0 ? formatHoursMinutes(row.lateMinutes) : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="whitespace-normal break-words px-0.5 py-0.5 font-medium leading-tight text-critical-text">
-                      {row.present && row.earlyMinutes > 0 ? (
-                        formatHoursMinutes(row.earlyMinutes)
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="truncate px-0.5 py-0.5 font-medium">
-                      {row.onLeave ? (
-                        <span className="text-slate-300">—</span>
-                      ) : row.present ? (
-                        <span className="text-good-text">Present</span>
-                      ) : row.absent ? (
-                        <span className="text-critical-text">Absent</span>
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="whitespace-normal break-words px-0.5 py-0.5 leading-tight text-info-text">{row.present ? fmtHrs(row.overtime) : '—'}</td>
-                    <td className="whitespace-normal break-words px-0.5 py-0.5 leading-tight text-slate-600">{row.present ? fmtHrs(row.hours) : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              {(() => {
-                let sumHours = 0;
-                let sumOvertime = 0;
-                let sumLate = 0;
-                let sumEarly = 0;
-                let presentCount = 0;
-                let absentCount = 0;
-                for (const row of tableRows) {
-                  if (row.present) {
-                    sumHours += row.hours;
-                    sumOvertime += row.overtime;
-                    sumLate += row.lateMinutes;
-                    sumEarly += row.earlyMinutes;
-                    presentCount += 1;
-                  } else if (row.absent) {
-                    absentCount += 1;
-                  }
-                }
-                return (
-                  <>
-                    <tr className="border-t-2 border-slate-200 bg-slate-50 text-ink">
-                      <td className="truncate px-0.5 py-1 font-semibold" colSpan={2}>
-                        Total
-                      </td>
-                      <td className="whitespace-normal break-words px-0.5 py-1 font-semibold leading-tight text-warning-text">
-                        {sumLate > 0 ? formatHoursMinutes(sumLate) : '—'}
-                      </td>
-                      <td className="whitespace-normal break-words px-0.5 py-1 font-semibold leading-tight text-critical-text">
-                        {sumEarly > 0 ? formatHoursMinutes(sumEarly) : '—'}
-                      </td>
-                      <td className="px-0.5 py-1" />
-                      <td className="whitespace-normal break-words px-0.5 py-1 font-semibold leading-tight text-info-text">{fmtHrs(sumOvertime)}</td>
-                      <td className="whitespace-normal break-words px-0.5 py-1 font-semibold leading-tight">{fmtHrs(sumHours)}</td>
-                    </tr>
-                    <tr className="border-t border-slate-200 bg-slate-50 text-ink">
-                      <td className="truncate px-0.5 py-1 font-semibold" colSpan={4}>
-                        P/A
-                      </td>
-                      <td className="truncate px-0.5 py-1 font-semibold text-good-text" colSpan={3}>
-                        {presentCount} / <span className="text-critical-text">{absentCount}</span>
-                      </td>
-                    </tr>
-                  </>
-                );
-              })()}
-            </tfoot>
-          </table>
-        </div>
-      )}
+      {tableRows.length > 0 && <AttendanceLogTable rows={tableRows} todayKey={todayKey} />}
 
       <div className="mb-2 mt-4 flex items-baseline justify-between">
         <h2 className="text-sm font-semibold text-ink">Hours Trend</h2>
