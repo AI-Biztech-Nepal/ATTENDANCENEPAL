@@ -1,6 +1,7 @@
 'use client';
 
-import type { RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 
 /** A small floating ‹ › pill fixed to the bottom-right of the viewport,
  * scrolling `targetRef`'s container horizontally by `step` px per click. Stays
@@ -18,10 +19,18 @@ export default function HorizontalScrollButtons({
   step?: number;
   className?: string;
 }) {
+  // Portaled to <body>: the table cards that host this use backdrop-blur,
+  // and any backdrop-filter/transform ancestor becomes the containing block
+  // for `position: fixed` — which pinned the pill to the table instead of the
+  // viewport.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   function scroll(dir: number) {
     targetRef.current?.scrollBy({ left: dir * step, behavior: 'smooth' });
   }
-  return (
+  if (!mounted) return null;
+  return createPortal(
     <div className={`pointer-events-none fixed bottom-6 right-6 z-40 flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-lg print:hidden ${className}`}>
       <button
         type="button"
@@ -39,6 +48,7 @@ export default function HorizontalScrollButtons({
       >
         ›
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }
