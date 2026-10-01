@@ -1224,6 +1224,8 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           <button
             type="button"
             onClick={() => guarded(() => setCorrectionMode(v => !v))}
+            aria-label="Correction mode"
+            aria-pressed={correctionMode}
             title={
               correctionMode
                 ? 'Correction mode on — click a Fix chip to correct a missed punch, or to add attendance on an Absent / Week Off day'
@@ -1236,7 +1238,6 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
             }`}
           >
             <CorrectionIcon className={`h-4 w-4 transition-colors ${correctionMode ? 'text-accent' : 'text-slate-400'}`} />
-            Correction
             {incompleteCount > 0 && (
               <span
                 className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-extrabold shadow-sm ${
