@@ -1516,12 +1516,16 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       )}
 
       {/* Nothing staged in Correction mode is written until this bar's Save
-          changes — see saveAllChanges(). */}
+          changes — see saveAllChanges(). The three sticky bars below sit at
+          z-[25]: above the table's sticky cells (z-20) they float over, but
+          below the app's own menus (account menu z-30, dialogs z-40) — at z-30
+          they tied the account menu and, being later in the DOM, could paint
+          over the bottom of it on a short window. */}
       {pending.size > 0 && (
         <div
           role="region"
           aria-label="Unsaved changes"
-          className={`sticky bottom-4 z-30 mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-ink py-3 pl-4 pr-3 shadow-lg print:hidden ${
+          className={`sticky bottom-4 z-[25] mt-3 flex flex-wrap items-center gap-3 rounded-xl bg-ink py-3 pl-4 pr-3 shadow-lg print:hidden ${
             !savingAll && [...pending.values()].some(c => c.error) ? 'ring-2 ring-critical' : ''
           }`}
         >
@@ -1581,7 +1585,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       )}
 
       {savedNotice && (
-        <div role="status" className="sticky bottom-4 z-30 mx-auto mt-3 flex w-fit items-center gap-2.5 rounded-xl border border-accent/30 bg-white px-4 py-3 shadow-lg print:hidden">
+        <div role="status" className="sticky bottom-4 z-[25] mx-auto mt-3 flex w-fit items-center gap-2.5 rounded-xl border border-accent/30 bg-white px-4 py-3 shadow-lg print:hidden">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-light text-good-text">
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
               <path d="M20 6 9 17l-5-5" />
@@ -1593,7 +1597,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       )}
 
       {recalcNotice && (
-        <div role="status" className="sticky bottom-4 z-30 mx-auto mt-3 flex w-fit max-w-lg items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg print:hidden">
+        <div role="status" className="sticky bottom-4 z-[25] mx-auto mt-3 flex w-fit max-w-lg items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-lg print:hidden">
           <RecalculateIcon className="h-4 w-4 shrink-0 text-slate-400" />
           <span className="text-sm font-medium text-ink">{recalcNotice}</span>
         </div>

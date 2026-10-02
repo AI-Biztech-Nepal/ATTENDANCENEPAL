@@ -742,7 +742,15 @@ function EmployeesView() {
 
   return (
     <>
-      <div className="relative z-50 mb-5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
+      {/* Deliberately no z-index — see AttendanceReportTable.tsx's own copy of
+          this comment (5be39b2). This used to be `relative z-50`, which lifted
+          a plain in-flow bar above the app's own menus: it painted over the
+          account menu (z-30), over the dimmed overlay behind the phone nav
+          drawer (z-20) and over the Edit Profile / Change Password dialogs
+          (z-40). Nothing in here needs it — the Search box's suggestions
+          dropdown anchors to its own immediate `relative` wrapper a level
+          down (searchBoxRef), not to this outer one. */}
+      <div className="mb-5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
         <div className="flex flex-wrap items-end gap-x-4 gap-y-4">
           <div className="group">
             <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Department</label>

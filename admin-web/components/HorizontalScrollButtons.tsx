@@ -30,8 +30,13 @@ export default function HorizontalScrollButtons({
     targetRef.current?.scrollBy({ left: dir * step, behavior: 'smooth' });
   }
   if (!mounted) return null;
+  // z-[25]: above the sticky table cells it floats over (z-20), but below the
+  // app's own menus — account menu / nav drawer (z-30) and the Edit Profile /
+  // Change Password dialogs (z-40). At z-40 it tied those dialogs, and being
+  // portaled to <body> (later in the DOM) it won the tie and floated over
+  // their dimmed backdrop.
   return createPortal(
-    <div className={`pointer-events-none fixed bottom-6 right-6 z-40 flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-lg print:hidden ${className}`}>
+    <div className={`pointer-events-none fixed bottom-6 right-6 z-[25] flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 shadow-lg print:hidden ${className}`}>
       <button
         type="button"
         onClick={() => scroll(-1)}
