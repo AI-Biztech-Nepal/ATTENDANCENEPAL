@@ -23,6 +23,7 @@ import DevicesScreen from './src/screens/DevicesScreen';
 import LeaveApprovalScreen from './src/screens/LeaveApprovalScreen';
 import CorrectionsScreen from './src/screens/CorrectionsScreen';
 import BranchesScreen from './src/screens/BranchesScreen';
+import SuperadminScreen from './src/screens/SuperadminScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ShiftsScreen from './src/screens/ShiftsScreen';
 import MyCalendarScreen from './src/screens/MyCalendarScreen';
@@ -177,7 +178,7 @@ function AdminDrawerNavigator() {
 }
 
 function AppInner() {
-  const { session, profile, loading, justSignedIn, clearJustSignedIn } = useAuth();
+  const { session, profile, loading, isSuperadmin, justSignedIn, clearJustSignedIn } = useAuth();
   const updateInfo = useUpdateCheck();
 
   // Only ever true on a device that actually has biometrics set up — a
@@ -256,7 +257,7 @@ function AppInner() {
     return () => sub.remove();
   }, [biometricAvailable, authenticate]);
 
-  if (loading) {
+  if (loading || (session && isSuperadmin === null)) {
     return (
       <View style={styles.webOuter}>
         <View style={[styles.webInner, { justifyContent: 'center', alignItems: 'center' }]}>
@@ -289,6 +290,8 @@ function AppInner() {
         <NavigationContainer>
           {!session ? (
             <LoginScreen />
+          ) : isSuperadmin ? (
+            <SuperadminScreen />
           ) : profile?.role === 'admin' || profile?.role === 'hr' ? (
             <AdminDrawerNavigator />
           ) : (

@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-const API_BASE = 'https://attendancenepal.vercel.app';
+export const API_BASE = 'https://attendancenepal.vercel.app';
 
 async function authedFetch(path: string, body: object) {
   const { data } = await supabase.auth.getSession();
