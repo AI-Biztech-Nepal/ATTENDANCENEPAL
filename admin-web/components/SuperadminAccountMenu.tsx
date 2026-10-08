@@ -97,8 +97,8 @@ export default function SuperadminAccountMenu() {
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault();
     setPasswordError(null);
-    if (newPassword.length < 8) {
-      setPasswordError('Password must be at least 8 characters.');
+    if (newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -132,7 +132,7 @@ export default function SuperadminAccountMenu() {
         </button>
 
         {open && (
-          <div className="absolute right-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+          <div className="absolute right-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
             <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-violet-100 via-violet-50 to-transparent p-4">
               <div className="min-w-0 pt-1">
                 <div className="truncate text-sm font-semibold text-ink">{displayName}</div>
@@ -192,7 +192,7 @@ export default function SuperadminAccountMenu() {
 
       {showEdit && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4" onClick={() => setShowEdit(false)}>
-          <form onSubmit={handleSave} onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg">
+          <form onSubmit={handleSave} onClick={e => e.stopPropagation()} className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-4 shadow-lg sm:p-6">
             <h3 className="mb-4 text-lg font-semibold text-ink">Edit Profile</h3>
             <div className="space-y-3">
               <div>
@@ -232,7 +232,7 @@ export default function SuperadminAccountMenu() {
 
       {showPassword && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4" onClick={() => setShowPassword(false)}>
-          <form onSubmit={handleChangePassword} onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg">
+          <form onSubmit={handleChangePassword} onClick={e => e.stopPropagation()} className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-4 shadow-lg sm:p-6">
             {passwordSuccess ? (
               <>
                 <h3 className="mb-1 text-lg font-semibold text-ink">Password changed</h3>
@@ -255,7 +255,7 @@ export default function SuperadminAccountMenu() {
                 <input
                   type="password"
                   required
-                  minLength={8}
+                  minLength={6}
                   autoFocus
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
@@ -265,7 +265,7 @@ export default function SuperadminAccountMenu() {
                 <input
                   type="password"
                   required
-                  minLength={8}
+                  minLength={6}
                   value={confirmPassword}
                   onChange={e => setConfirmPassword(e.target.value)}
                   className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"

@@ -12,26 +12,26 @@ import CalendarSystemSwitch from './CalendarSystemSwitch';
 // card links straight into its own detail view.
 export default function SuperadminShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3 sm:px-6 lg:px-8">
-        <div className="flex min-w-0 items-center gap-2.5">
+    <div className="flex h-dvh flex-col overflow-hidden bg-slate-50">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2.5 sm:gap-4 sm:px-6 sm:py-3 lg:px-8">
+        <div className="flex min-w-0 items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo-mark.png" alt="Attendance Nepal" className="h-8 w-8 shrink-0 object-contain" />
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-bold text-ink">Attendance Nepal</span>
+          <div className="flex min-w-0 flex-col leading-tight">
+            <span className="hidden text-sm font-bold text-ink min-[400px]:block">Attendance Nepal</span>
             <span className="text-[9px] font-extrabold uppercase tracking-wider text-violet-600">Super Admin</span>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-4">
           <CalendarSystemSwitch />
-          <button aria-label="Notifications" className="rounded-full p-2 text-slate-500 hover:bg-slate-100">
+          <button aria-label="Notifications" className="hidden rounded-full p-2 text-slate-500 hover:bg-slate-100 sm:block">
             <BellIcon className="h-5 w-5" />
           </button>
           <div className="hidden h-8 w-px bg-slate-200 sm:block" />
           <SuperadminAccountMenu />
         </div>
       </header>
-      <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">{children}</main>
+      <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-6 lg:p-8">{children}</main>
     </div>
   );
 }

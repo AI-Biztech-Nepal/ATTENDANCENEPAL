@@ -142,18 +142,18 @@ export default function SuperadminDashboardPage() {
               </h2>
               <p className="text-xs text-slate-500">Overview of all registered companies</p>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-wrap gap-2 sm:flex-nowrap">
               <input
                 type="text"
                 placeholder="Search company…"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-accent sm:w-48"
+                className="min-w-0 basis-full rounded-lg border border-slate-200 px-3 py-2.5 text-base outline-none focus:border-accent sm:basis-auto sm:w-48 sm:py-2 sm:text-sm"
               />
               <select
                 value={sortBy}
                 onChange={e => setSortBy(e.target.value as typeof sortBy)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-accent"
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2.5 text-base outline-none focus:border-accent sm:flex-none sm:py-2 sm:text-sm"
               >
                 <option value="newest">Newest first</option>
                 <option value="name">Name (A–Z)</option>
@@ -295,7 +295,7 @@ export default function SuperadminDashboardPage() {
                     </div>
                   </div>
 
-                  <div className="flex w-32 shrink-0 flex-col items-center gap-0.5">
+                  <div className="flex shrink-0 flex-col items-start gap-0.5 sm:w-32 sm:items-center">
                     {activityByCompany.has(c.id) && (
                       <>
                         <span className="flex items-center gap-1.5 text-[11px] font-semibold text-accent">
@@ -312,7 +312,7 @@ export default function SuperadminDashboardPage() {
                     )}
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-4 sm:gap-6">
+                  <div className="flex shrink-0 items-center justify-around gap-4 rounded-lg bg-slate-50 py-2 sm:justify-start sm:gap-6 sm:bg-transparent sm:py-0">
                     <div className="text-center">
                       <div className="text-sm font-bold text-ink">{c.userCount}</div>
                       <div className="text-[11px] text-slate-500">Users</div>

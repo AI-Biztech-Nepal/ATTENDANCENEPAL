@@ -184,17 +184,20 @@ export default function CompanyDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-lg" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/30 sm:items-center sm:p-4" onClick={onClose}>
+      <div
+        className="max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-lg sm:max-h-[85dvh] sm:rounded-xl sm:p-6"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-semibold text-ink">{detail?.company.name ?? 'Loading…'}</h3>
               {detail?.company.status === 'suspended' && <Badge tone="critical">Suspended</Badge>}
             </div>
             {detail && <p className="text-xs text-slate-500">Registered on {formatAdDate(localDateKey(detail.company.createdAt), system)}</p>}
           </div>
-          <button onClick={onClose} aria-label="Close" className="text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} aria-label="Close" className="-m-2 shrink-0 p-2 text-slate-400 hover:text-slate-600">
             ✕
           </button>
         </div>
@@ -336,7 +339,7 @@ export default function CompanyDetailModal({
             <section className="rounded-lg border border-critical/30 bg-critical-bg/40 p-4">
               <h4 className="mb-3 text-sm font-semibold text-critical-text">Danger zone</h4>
 
-              <div className="mb-4 flex items-center justify-between gap-3 border-b border-critical/20 pb-4">
+              <div className="mb-4 flex flex-col gap-3 border-b border-critical/20 pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="text-sm font-medium text-ink">
                     {detail.company.status === 'active' ? 'Suspend this company' : 'Reactivate this company'}
@@ -376,7 +379,7 @@ export default function CompanyDetailModal({
               {suspendError && <p className="mb-4 text-xs text-critical">{suspendError}</p>}
 
               {deleteStep === 'closed' && (
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="text-sm font-medium text-ink">Delete this company permanently</div>
                     <p className="text-xs text-slate-500">
