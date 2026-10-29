@@ -477,7 +477,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const leaveByEmployee = useMemo(() => leaveDatesByEmployee(leaveRequests), [leaveRequests]);
   const weeklyPattern = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
-  const rows: Row[] = useMemo(() => {
+  const rangeRows: Row[] = useMemo(() => {
     // Where the day's attendance actually came from: the registered
     // terminal's own name for a machine punch (method 'zkteco'), or "App"
     // for one recorded in the mobile app (gps / qr / selfie). Read from the
@@ -712,8 +712,18 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       });
   }, [scopedEmployees, summaries, logs, devices, shifts, from, to, status, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
 
+  // "All Employees" is a one-line-per-person summary: just each employee's
+  // row for today (or, for a range that doesn't include today, the range's
+  // nearest end to it). Clicking a name switches the Employee filter to that
+  // person, which shows every day of the range. The Excel export still
+  // writes every day for everyone (rangeRows), as it always has.
+  const compact = employeeId === 'all';
+  const todayKey = nepalTodayIso();
+  const summaryDay = todayKey < from ? from : todayKey > to ? to : todayKey;
+  const rows = useMemo(() => (compact ? rangeRows.filter(r => r.date === summaryDay) : rangeRows), [compact, rangeRows, summaryDay]);
+
   // `rows` as they'll read once the staged changes are saved — what the table
-  // shows. `rows` itself stays the saved state (the Excel export writes it).
+  // shows. `rows` itself stays the saved state.
   const shownRows = useMemo(
     () =>
       rows.map(r => {
@@ -1069,7 +1079,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       'Status',
       'Device',
     ];
-    const lines = rows.map(r => [
+    const lines = rangeRows.map(r => [
       r.date,
       weekdayShort(r.date),
       r.enrollId,
@@ -1086,12 +1096,12 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       r.status,
       r.device,
     ]);
-    // lines is built from rows in the same order (rows is sorted by
-    // enrollId — see the .sort() above — so each employee's whole date
-    // range is one contiguous block), same page-break-per-employee logic
-    // as the printed table's <tr break-before>.
-    const pageBreakBeforeRowIndexes = rows
-      .map((r, i) => (i > 0 && rows[i - 1].employeeId !== r.employeeId ? i : -1))
+    // lines is built from rangeRows in the same order (sorted by enrollId —
+    // see the .sort() above — so each employee's whole date range is one
+    // contiguous block), same page-break-per-employee logic as the printed
+    // table's <tr break-before>.
+    const pageBreakBeforeRowIndexes = rangeRows
+      .map((r, i) => (i > 0 && rangeRows[i - 1].employeeId !== r.employeeId ? i : -1))
       .filter(i => i >= 0);
     downloadExcel(`attendance_${from}_to_${to}.csv`, header, lines, pageBreakBeforeRowIndexes);
   }
@@ -1358,8 +1368,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               // days, splitting one person's data across two pages with no
               // visual boundary; forcing a break here keeps every printed
               // page's content confined to a single employee. Skipped for the
-              // very first row so it doesn't waste a blank leading page.
-              const isFirstRowForEmployee = i > 0 && rows[i - 1].employeeId !== r.employeeId;
+              // very first row so it doesn't waste a blank leading page. Not in
+              // the one-line summary, where every row is a different person.
+              const isFirstRowForEmployee = !compact && i > 0 && rows[i - 1].employeeId !== r.employeeId;
               return (
               <tr
                 key={r.key}
@@ -1375,7 +1386,20 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className={`w-px whitespace-nowrap px-2.5 py-1.5 tabular-nums text-slate-600 text-left print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''} ${change?.kind === 'edit' ? 'border-l-2 border-l-info print:border-l' : change?.kind === 'delete' ? 'border-l-2 border-l-critical print:border-l' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
                 <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
                 <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 font-medium text-ink text-left print:px-2 print:py-1">{r.employeeName}</td>
+                <td className="whitespace-nowrap px-2.5 py-1.5 font-medium text-ink text-left print:px-2 print:py-1">
+                  {compact ? (
+                    <button
+                      type="button"
+                      onClick={() => guarded(() => setEmployeeId(r.employeeId))}
+                      title={`Show all of ${r.employeeName}'s days in this range`}
+                      className="font-medium text-ink hover:text-accent hover:underline"
+                    >
+                      {r.employeeName}
+                    </button>
+                  ) : (
+                    r.employeeName
+                  )}
+                </td>
                 <td className="w-px px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   <span className="flex flex-col leading-tight">
                     <span className="whitespace-nowrap">{r.shiftName}</span>
@@ -1454,7 +1478,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                     ? 'Loading…'
                     : recalculating
                       ? `Recalculating ${recalcProgress?.done ?? 0}/${recalcProgress?.total ?? 0}…`
-                      : 'No records in this range.'}
+                      : compact
+                        ? `No records for ${formatDdMmYyyy(summaryDay, system)}.`
+                        : 'No records in this range.'}
                 </td>
               </tr>
             )}
