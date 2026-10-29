@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatAdDate, formatDateTime, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
+import { viewCompanyAccount } from '@/lib/viewCompanyAccount';
 import CompanyDetailModal from '@/components/CompanyDetailModal';
 import Badge from '@/components/Badge';
 
@@ -71,6 +72,29 @@ export default function SuperadminDashboardPage() {
   const [recentActivity, setRecentActivity] = useState<RecentActivity[] | null>(null);
   const [todayAttendance, setTodayAttendance] = useState<TodayAttendance[] | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'tile'>('grid');
+  const [openingCompanyId, setOpeningCompanyId] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<{ companyId: string; message: string } | null>(null);
+
+  // One click on a card goes straight into that company's real account —
+  // the modal's "View their account" without its confirm step (the server
+  // still writes the audit row every time). Suspended or login-less
+  // companies can't be signed into, so those open the details modal
+  // instead; each card's Manage button always does.
+  async function openCompany(c: Company) {
+    if (openingCompanyId) return;
+    if (c.status === 'suspended' || c.userCount === 0) {
+      setSelectedCompanyId(c.id);
+      return;
+    }
+    setOpeningCompanyId(c.id);
+    setOpenError(null);
+    try {
+      await viewCompanyAccount(c.id);
+    } catch (e) {
+      setOpenError({ companyId: c.id, message: e instanceof Error ? e.message : 'Could not open their account.' });
+      setOpeningCompanyId(null);
+    }
+  }
 
   async function loadDashboard() {
     const { data } = await supabase.auth.getSession();
@@ -209,17 +233,19 @@ export default function SuperadminDashboardPage() {
               {filtered.map((c, i) => (
                 <div
                   key={c.id}
-                  onClick={() => setSelectedCompanyId(c.id)}
+                  onClick={() => openCompany(c)}
                   role="button"
                   tabIndex={0}
+                  title={`Open ${c.name}'s account`}
                   onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setSelectedCompanyId(c.id);
+                      openCompany(c);
                     }
                   }}
-                  className="min-w-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-accent hover:shadow-md"
+                  className="relative min-w-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-accent hover:shadow-md"
                 >
+                  {openingCompanyId === c.id && <OpeningOverlay />}
                   <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}>
@@ -267,7 +293,10 @@ export default function SuperadminDashboardPage() {
                   <TodayAttendanceBlock today={todayByCompany.get(c.id)} loaded={todayAttendance !== null} />
 
                   <div className="border-t border-slate-100 pt-3">
-                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Admin / HR users</div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Admin / HR users</span>
+                      <ManageButton onClick={() => setSelectedCompanyId(c.id)} />
+                    </div>
                     {c.adminUsers.length === 0 ? (
                       <p className="text-xs text-slate-400">None found.</p>
                     ) : (
@@ -281,6 +310,7 @@ export default function SuperadminDashboardPage() {
                       </ul>
                     )}
                   </div>
+                  {openError?.companyId === c.id && <p className="mt-2 text-xs text-critical">{openError.message}</p>}
                 </div>
               ))}
             </div>
@@ -289,17 +319,19 @@ export default function SuperadminDashboardPage() {
               {filtered.map((c, i) => (
                 <div
                   key={c.id}
-                  onClick={() => setSelectedCompanyId(c.id)}
+                  onClick={() => openCompany(c)}
                   role="button"
                   tabIndex={0}
+                  title={`Open ${c.name}'s account`}
                   onKeyDown={e => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      setSelectedCompanyId(c.id);
+                      openCompany(c);
                     }
                   }}
-                  className="flex min-w-0 cursor-pointer flex-col gap-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-accent hover:shadow-md sm:flex-row sm:items-center sm:gap-5"
+                  className="relative flex min-w-0 cursor-pointer flex-col gap-3 overflow-hidden rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-accent hover:shadow-md sm:flex-row sm:items-center sm:gap-5"
                 >
+                  {openingCompanyId === c.id && <OpeningOverlay />}
                   <div className="flex min-w-0 flex-1 items-center gap-3">
                     <span
                       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}
@@ -360,7 +392,10 @@ export default function SuperadminDashboardPage() {
                   </div>
 
                   <div className="min-w-0 shrink-0 border-t border-slate-100 pt-3 sm:w-48 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
-                    <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-slate-400">Admin / HR</div>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Admin / HR</span>
+                      <ManageButton onClick={() => setSelectedCompanyId(c.id)} />
+                    </div>
                     {c.adminUsers.length === 0 ? (
                       <p className="text-xs text-slate-400">None found.</p>
                     ) : (
@@ -369,6 +404,7 @@ export default function SuperadminDashboardPage() {
                         {c.adminUsers.length > 1 && <span className="text-xs font-normal text-slate-500"> +{c.adminUsers.length - 1} more</span>}
                       </p>
                     )}
+                    {openError?.companyId === c.id && <p className="mt-1 text-xs text-critical">{openError.message}</p>}
                   </div>
                 </div>
               ))}
@@ -417,6 +453,32 @@ export default function SuperadminDashboardPage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// Stops both click and keydown from reaching the card: the card's own Enter
+// handler calls preventDefault(), which would otherwise cancel this button's
+// keyboard click and open the account instead.
+function ManageButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={e => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onKeyDown={e => e.stopPropagation()}
+      className="shrink-0 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+    >
+      Manage
+    </button>
+  );
+}
+function OpeningOverlay() {
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/85 text-sm font-medium text-accent">
+      Opening account…
     </div>
   );
 }

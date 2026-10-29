@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { formatAdDate, formatDateTime, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
+import { viewCompanyAccount } from '@/lib/viewCompanyAccount';
 import Badge from '@/components/Badge';
 
 type User = { id: string; name: string; email: string; role: string };
@@ -116,36 +117,11 @@ export default function CompanyDetailModal({
     }
   }
 
-  // Stashes this superadmin's own tokens (so ImpersonationBanner can restore
-  // them later) before switching this tab's session to the target login via
-  // verifyOtp() — see /api/superadmin/companies/[id]/impersonate for how the
-  // token_hash it returns was minted, and lib/superadmin's requireSuperadmin
-  // for the allowlist gate on generating it in the first place.
   async function handleImpersonate() {
     setImpersonateBusy(true);
     setImpersonateError(null);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const returnSession = sessionData.session;
-      if (!returnSession) throw new Error('Your own session expired — refresh and sign in again.');
-
-      const body = await callAction(`/api/superadmin/companies/${companyId}/impersonate`, { method: 'POST' });
-
-      sessionStorage.setItem(
-        'impersonation_return',
-        JSON.stringify({
-          returnAccessToken: returnSession.access_token,
-          returnRefreshToken: returnSession.refresh_token,
-          companyName: body.company.name,
-          asEmail: body.asUser.email,
-          asRole: body.asUser.role,
-        })
-      );
-
-      const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: body.tokenHash, type: 'magiclink' });
-      if (verifyError) throw verifyError;
-
-      window.location.href = '/';
+      await viewCompanyAccount(companyId);
     } catch (e) {
       setImpersonateError(e instanceof Error ? e.message : 'Could not view their account.');
       setImpersonateBusy(false);
