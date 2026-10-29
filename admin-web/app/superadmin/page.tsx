@@ -26,6 +26,15 @@ type Stats = {
   roleCounts: { admin: number; hr: number; employee: number };
 };
 type RecentActivity = { companyId: string; companyName: string; lastPunchAt: string };
+type TodayAttendance = {
+  companyId: string;
+  totalEmployees: number;
+  present: number;
+  late: number;
+  onLeave: number;
+  absent: number;
+  todayIsWeekOff: boolean;
+};
 
 const RECENT_ACTIVITY_POLL_MS = 15000;
 
@@ -60,6 +69,7 @@ export default function SuperadminDashboardPage() {
   const [sortBy, setSortBy] = useState<'newest' | 'name' | 'employees'>('newest');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const [recentActivity, setRecentActivity] = useState<RecentActivity[] | null>(null);
+  const [todayAttendance, setTodayAttendance] = useState<TodayAttendance[] | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'tile'>('grid');
 
   async function loadDashboard() {
@@ -91,18 +101,25 @@ export default function SuperadminDashboardPage() {
   // attendance_logs would only ever see this admin's own company's rows (if
   // any), same as every other RLS-scoped table. Only the service-role API
   // route can see across every company, so live-ness here comes from
-  // refetching it on an interval instead.
+  // refetching it on an interval instead. Today's per-company counts ride
+  // the same poll, so a card's numbers move in step with its pulse.
   useEffect(() => {
-    async function loadRecentActivity() {
+    async function loadLiveActivity() {
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
       if (!token) return;
-      const res = await fetch('/api/superadmin/recent-activity', { headers: { Authorization: `Bearer ${token}` } });
-      const body = await res.json().catch(() => ({}));
-      if (res.ok) setRecentActivity(body.companies);
+      const headers = { Authorization: `Bearer ${token}` };
+      const [activityRes, todayRes] = await Promise.all([
+        fetch('/api/superadmin/recent-activity', { headers }),
+        fetch('/api/superadmin/today-attendance', { headers }),
+      ]);
+      const activityBody = await activityRes.json().catch(() => ({}));
+      const todayBody = await todayRes.json().catch(() => ({}));
+      if (activityRes.ok) setRecentActivity(activityBody.companies);
+      if (todayRes.ok) setTodayAttendance(todayBody.companies);
     }
-    loadRecentActivity();
-    const id = setInterval(loadRecentActivity, RECENT_ACTIVITY_POLL_MS);
+    loadLiveActivity();
+    const id = setInterval(loadLiveActivity, RECENT_ACTIVITY_POLL_MS);
     return () => clearInterval(id);
   }, []);
 
@@ -126,6 +143,7 @@ export default function SuperadminDashboardPage() {
   // pulse inline instead of duplicating the same company names in a
   // separate "Live Activity" list next to the one they're already in.
   const activityByCompany = new Map<string, RecentActivity>(recentActivity?.map(a => [a.companyId, a]) ?? []);
+  const todayByCompany = new Map<string, TodayAttendance>(todayAttendance?.map(t => [t.companyId, t]) ?? []);
 
   return (
     <div>
@@ -246,6 +264,8 @@ export default function SuperadminDashboardPage() {
                     </div>
                   </div>
 
+                  <TodayAttendanceBlock today={todayByCompany.get(c.id)} loaded={todayAttendance !== null} />
+
                   <div className="border-t border-slate-100 pt-3">
                     <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Admin / HR users</div>
                     {c.adminUsers.length === 0 ? (
@@ -325,6 +345,18 @@ export default function SuperadminDashboardPage() {
                       <div className="text-sm font-bold text-ink">{c.deviceCount}</div>
                       <div className="text-[11px] text-slate-500">Devices</div>
                     </div>
+                    <div className="h-8 w-px bg-slate-100" />
+                    <div className="text-center">
+                      <div className="text-sm font-bold text-good-text">
+                        {todayByCompany.get(c.id)?.present ?? '–'}
+                        <span className="text-xs font-normal text-slate-400">/{todayByCompany.get(c.id)?.totalEmployees ?? '–'}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">Present today</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-sm font-bold text-critical-text">{todayByCompany.get(c.id)?.absent ?? '–'}</div>
+                      <div className="text-[11px] text-slate-500">Absent</div>
+                    </div>
                   </div>
 
                   <div className="min-w-0 shrink-0 border-t border-slate-100 pt-3 sm:w-48 sm:border-l sm:border-t-0 sm:pl-5 sm:pt-0">
@@ -385,6 +417,52 @@ export default function SuperadminDashboardPage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// Same Present / Late / On Leave / Absent the company's own Dashboard shows.
+// Late is a subset of Present, so the bar only stacks Present, On Leave and
+// Absent; whatever's left (Week Off, attendance-exempt) stays grey.
+function TodayAttendanceBlock({ today, loaded }: { today: TodayAttendance | undefined; loaded: boolean }) {
+  if (!today) {
+    return loaded ? null : <div className="mb-3 h-[74px] animate-pulse rounded-lg bg-slate-50" />;
+  }
+  const barTotal = Math.max(today.totalEmployees, today.present + today.onLeave + today.absent, 1);
+  const pct = (n: number) => `${(n / barTotal) * 100}%`;
+  return (
+    <div className="mb-3">
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-slate-400">Today</span>
+        <span className="truncate text-xs text-slate-500">
+          {today.todayIsWeekOff ? (
+            'Week-off today'
+          ) : (
+            <>
+              <span className="font-semibold text-ink">{today.present}</span> of {today.totalEmployees} punched in
+            </>
+          )}
+        </span>
+      </div>
+      <div className="flex h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div className="bg-good" style={{ width: pct(today.present) }} />
+        <div className="bg-info" style={{ width: pct(today.onLeave) }} />
+        <div className="bg-critical" style={{ width: pct(today.absent) }} />
+      </div>
+      <div className="mt-2 grid grid-cols-4 gap-1 text-center">
+        <TodayStat value={today.present} label="Present" className="text-good-text" />
+        <TodayStat value={today.late} label="Late" className="text-warning-text" />
+        <TodayStat value={today.onLeave} label="On leave" className="text-info-text" />
+        <TodayStat value={today.absent} label="Absent" className="text-critical-text" />
+      </div>
+    </div>
+  );
+}
+function TodayStat({ value, label, className }: { value: number; label: string; className: string }) {
+  return (
+    <div>
+      <div className={`text-sm font-bold ${value === 0 ? 'text-slate-300' : className}`}>{value}</div>
+      <div className="text-[11px] text-slate-500">{label}</div>
     </div>
   );
 }
