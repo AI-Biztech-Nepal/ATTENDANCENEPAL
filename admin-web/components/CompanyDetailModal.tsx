@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { formatAdDate, formatDateTime, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { viewCompanyAccount } from '@/lib/viewCompanyAccount';
+import type { TodayStatus } from '@/lib/todayStatus';
 import Badge from '@/components/Badge';
 
 type User = { id: string; name: string; email: string; role: string };
@@ -17,6 +18,17 @@ type EmployeeRow = {
   designation: string | null;
   status: 'active' | 'inactive';
   date_of_joining: string | null;
+  /** Today's attendance (lib/todayStatus.ts); null for an inactive employee. */
+  todayStatus: TodayStatus | null;
+};
+
+const TODAY_STATUS_BADGE: Record<TodayStatus, { label: string; tone: 'good' | 'warning' | 'critical' | 'info' | 'neutral' }> = {
+  present: { label: 'Present', tone: 'good' },
+  late: { label: 'Late', tone: 'warning' },
+  leave: { label: 'On leave', tone: 'info' },
+  weekOff: { label: 'Week off', tone: 'neutral' },
+  exempt: { label: 'Exempt', tone: 'neutral' },
+  absent: { label: 'Absent', tone: 'critical' },
 };
 type SyncSummary = { at: string; status: string; error: string | null } | null;
 type DeviceRow = {
@@ -256,7 +268,11 @@ export default function CompanyDetailModal({
                           {e.designation ? ` · ${e.designation}` : ''}
                         </div>
                       </div>
-                      <Badge tone={e.status === 'active' ? 'good' : 'neutral'}>{e.status}</Badge>
+                      {e.todayStatus ? (
+                        <Badge tone={TODAY_STATUS_BADGE[e.todayStatus].tone}>{TODAY_STATUS_BADGE[e.todayStatus].label}</Badge>
+                      ) : (
+                        <Badge tone="neutral">Inactive</Badge>
+                      )}
                     </li>
                   ))}
                 </ul>

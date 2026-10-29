@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperadmin } from '@/lib/superadmin';
-import { isLate, presentEmployeeIds } from '@/lib/metrics';
+import { presentEmployeeIds } from '@/lib/metrics';
 import { fetchAll } from '@/lib/leaveBalance';
 import { weekOffDatesByGender } from '@/lib/weekOff';
-import {
-  buildWeeklyPatternByEmployee,
-  isWeekOff,
-  nepalDateTimeToUtcMs,
-  nepalTodayIso,
-  resolveShiftForDate,
-  type DailyShiftByDate,
-} from '@/lib/shift';
+import { buildWeeklyPatternByEmployee, nepalDateTimeToUtcMs, nepalTodayIso, type DailyShiftByDate } from '@/lib/shift';
+import { todayStatusByEmployee } from '@/lib/todayStatus';
 import type { AttendanceLog, CompanyHoliday, Employee, Shift } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -107,28 +101,21 @@ export async function GET(req: NextRequest) {
     const weekOffDatesFor = weekOffDatesByGender(today, today, c.weekly_off_day, holidaysByCompany.get(c.id) ?? []);
     const todayIsWeekOff = weekOffDatesFor(null).has(today);
 
-    const logsByEmployee = new Map<string, AttendanceLog[]>();
-    for (const log of companyLogs) {
-      const list = logsByEmployee.get(log.employee_id);
-      if (list) list.push(log);
-      else logsByEmployee.set(log.employee_id, [log]);
-    }
-
+    const statuses = todayStatusByEmployee({
+      activeEmployees,
+      shifts,
+      logs: companyLogs,
+      onLeaveIds,
+      today,
+      dailyShiftByDate,
+      weeklyPattern,
+      weekOffDatesFor,
+    });
     let late = 0;
     let absent = 0;
-    for (const emp of activeEmployees) {
-      const empLogs = logsByEmployee.get(emp.id);
-      const weekOffDates = weekOffDatesFor(emp.gender);
-      if (empLogs && isLate(emp, shifts, empLogs, today, dailyShiftByDate, weekOffDates, weeklyPattern)) late++;
-      if (
-        !todayIsWeekOff &&
-        !presentIds.has(emp.id) &&
-        !onLeaveIds.has(emp.id) &&
-        !emp.attendance_exempt &&
-        !isWeekOff(resolveShiftForDate(emp, shifts, today, dailyShiftByDate, weekOffDates, weeklyPattern))
-      ) {
-        absent++;
-      }
+    for (const status of statuses.values()) {
+      if (status === 'late') late++;
+      else if (status === 'absent') absent++;
     }
 
     return {

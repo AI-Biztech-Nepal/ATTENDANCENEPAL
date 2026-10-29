@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperadmin } from '@/lib/superadmin';
 import { listAllUsers } from '@/lib/supabase-admin';
+import { fetchAll } from '@/lib/leaveBalance';
+import { weekOffDatesByGender } from '@/lib/weekOff';
+import { buildWeeklyPatternByEmployee, nepalDateTimeToUtcMs, nepalTodayIso, type DailyShiftByDate } from '@/lib/shift';
+import { todayStatusByEmployee } from '@/lib/todayStatus';
+import type { AttendanceLog, CompanyHoliday, Employee, Shift } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
@@ -18,10 +23,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { admin } = result;
   const { id: companyId } = await params;
 
-  const [companyRes, profilesRes, employeesRes, devicesRes, syncEventsRes] = await Promise.all([
-    admin.from('companies').select('id, name, created_at, status, suspended_at').eq('id', companyId).maybeSingle(),
+  const today = nepalTodayIso();
+  const todayStart = new Date(nepalDateTimeToUtcMs(today, '00:00')).toISOString();
+
+  const [
+    companyRes,
+    profilesRes,
+    employeesRes,
+    devicesRes,
+    syncEventsRes,
+    shiftsRes,
+    todayLogs,
+    leaveRes,
+    rosterRes,
+    weeklyPatternRes,
+    holidaysRes,
+  ] = await Promise.all([
+    admin.from('companies').select('id, name, created_at, status, suspended_at, weekly_off_day').eq('id', companyId).maybeSingle(),
     admin.from('profiles').select('id, full_name, role, employee_id').eq('company_id', companyId),
-    admin.from('employees').select('id, employee_code, name, department, designation, status, date_of_joining').eq('company_id', companyId),
+    admin.from('employees').select('*').eq('company_id', companyId),
     admin.from('devices').select('id, name, ip_address, status, last_sync').eq('company_id', companyId).order('name'),
     admin
       .from('device_sync_events')
@@ -29,11 +49,49 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       .eq('company_id', companyId)
       .order('requested_at', { ascending: false })
       .limit(100),
+    // Today's attendance per employee — same inputs as the company's own
+    // Dashboard, see lib/todayStatus.ts.
+    admin.from('shifts').select('*').eq('company_id', companyId),
+    fetchAll<AttendanceLog>((a, b) =>
+      admin
+        .from('attendance_logs')
+        .select('id, employee_id, punch_time, punch_type')
+        .eq('company_id', companyId)
+        .gte('punch_time', todayStart)
+        .order('id')
+        .range(a, b)
+    ),
+    admin
+      .from('leave_requests')
+      .select('employee_id')
+      .eq('company_id', companyId)
+      .eq('status', 'approved')
+      .lte('start_date', today)
+      .gte('end_date', today),
+    admin.from('employee_daily_shifts').select('employee_id, shift_id').eq('company_id', companyId).eq('work_date', today),
+    admin.from('employee_weekly_pattern').select('employee_id, weekday, shift_id').eq('company_id', companyId),
+    admin.from('company_holidays').select('*').eq('company_id', companyId).eq('holiday_date', today),
   ]);
 
   if (!companyRes.data) {
     return NextResponse.json({ error: 'Company not found.' }, { status: 404 });
   }
+
+  const allEmployees = (employeesRes.data ?? []) as Employee[];
+  const dailyShiftByDate: DailyShiftByDate = new Map();
+  for (const r of rosterRes.data ?? []) {
+    dailyShiftByDate.set(r.employee_id, new Map([[today, r.shift_id]]));
+  }
+  const todayStatuses = todayStatusByEmployee({
+    activeEmployees: allEmployees.filter(e => e.status === 'active'),
+    shifts: (shiftsRes.data ?? []) as Shift[],
+    logs: todayLogs,
+    onLeaveIds: new Set((leaveRes.data ?? []).map(l => l.employee_id)),
+    today,
+    dailyShiftByDate,
+    weeklyPattern: buildWeeklyPatternByEmployee(weeklyPatternRes.data ?? []),
+    weekOffDatesFor: weekOffDatesByGender(today, today, companyRes.data.weekly_off_day, (holidaysRes.data ?? []) as CompanyHoliday[]),
+  });
 
   const { users: authUsers } = await listAllUsers(admin);
   const emailById = new Map(authUsers.map(u => [u.id, u.email ?? '']));
@@ -42,7 +100,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // employee_id but never sets profiles.full_name (the real name lives on
   // the employees row instead) — resolve it from there rather than showing
   // "(no name set)" for every employee login, which is the common case.
-  const employeeNameById = new Map((employeesRes.data ?? []).map(e => [e.id, e.name]));
+  const employeeNameById = new Map(allEmployees.map(e => [e.id, e.name]));
 
   const users = (profilesRes.data ?? []).map(p => ({
     id: p.id,
@@ -95,7 +153,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       suspendedAt: companyRes.data.suspended_at,
     },
     users,
-    employees: (employeesRes.data ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+    // Only the columns the modal shows — the row was fetched with '*' for
+    // the shift/gender/exempt fields todayStatusByEmployee needs, and the
+    // rest (salary, bank details, …) has no business in this response.
+    employees: allEmployees
+      .map(e => ({
+        id: e.id,
+        employee_code: e.employee_code,
+        name: e.name,
+        department: e.department,
+        designation: e.designation,
+        status: e.status,
+        date_of_joining: e.date_of_joining,
+        todayStatus: todayStatuses.get(e.id) ?? null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
     devices,
   });
 }
