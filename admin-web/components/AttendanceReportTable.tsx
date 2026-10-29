@@ -7,7 +7,7 @@ import { useConfirm } from '@/components/ConfirmDialog';
 import DateRangePicker from '@/components/DateRangePicker';
 import TableExportBar, { downloadExcel } from '@/components/TableExportBar';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
-import { formatDdMmYyyy } from '@/lib/calendar';
+import { formatDdMmYyyy, type CalendarSystem } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { fetchCompanyName } from '@/lib/payrollFormat';
 import {
@@ -310,6 +310,125 @@ function isoDaysAgo(n: number) {
   return d.toISOString().slice(0, 10);
 }
 
+/** One employee's every day in the picked range, read-only, over the "All
+ * Employees" one-line summary. `rows` is already that employee's slice of
+ * the range (and of the Status filter). Corrections still happen in the
+ * report itself, with the employee picked in the filter. */
+function EmployeeRangeModal({
+  rows,
+  from,
+  to,
+  system,
+  onClose,
+}: {
+  rows: Row[];
+  from: string;
+  to: string;
+  system: CalendarSystem;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const first = rows[0];
+  const workHours = rows.reduce((sum, r) => sum + r.hours, 0);
+  const overtimeHours = rows.reduce((sum, r) => sum + r.overtime, 0);
+  const presentDays = rows.filter(r => r.checkIn).length;
+  const absentDays = rows.filter(r => r.status === 'Absent').length;
+  const th = 'whitespace-nowrap px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500';
+  const td = 'whitespace-nowrap px-2.5 py-1.5 text-slate-600';
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/30 sm:items-center sm:p-6 print:hidden" onClick={onClose}>
+      <div
+        className="flex max-h-[92dvh] w-full max-w-5xl flex-col rounded-t-2xl bg-white shadow-lg sm:max-h-[85dvh] sm:rounded-xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4 sm:px-6">
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-semibold text-ink">
+              {first?.employeeName ?? 'Employee'}
+              {first?.enrollId && <span className="text-sm font-normal text-slate-400"> · ID {first.enrollId}</span>}
+            </h3>
+            <p className="text-xs text-slate-500">
+              {formatDdMmYyyy(from, system)} – {formatDdMmYyyy(to, system)}
+            </p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="-m-2 shrink-0 p-2 text-slate-400 hover:text-slate-600">
+            ✕
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto">
+          {rows.length === 0 ? (
+            <p className="px-6 py-8 text-center text-sm text-slate-400">No records in this range.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className={th}>Date</th>
+                  <th className={th}>Day</th>
+                  <th className={th}>Shift</th>
+                  <th className={th}>Check-in</th>
+                  <th className={th}>Check-out</th>
+                  <th className={th}>Late/Early</th>
+                  <th className={th}>Work hours</th>
+                  <th className={th}>Overtime</th>
+                  <th className={th}>Status</th>
+                  <th className={th}>Device</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.key} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                    <td className={`${td} tabular-nums`}>{formatDdMmYyyy(r.date, system)}</td>
+                    <td className={td}>{weekdayShort(r.date)}</td>
+                    <td className={td}>
+                      <span className="flex flex-col leading-tight">
+                        <span>{r.shiftName}</span>
+                        {r.shiftTime && <span className="text-[10px] text-slate-400">{r.shiftTime}</span>}
+                      </span>
+                    </td>
+                    <td className={td}>
+                      <CheckInCell row={r} />
+                    </td>
+                    <td className={td}>
+                      <CheckOutCell row={r} />
+                    </td>
+                    <td className={`${td} text-xs`}>
+                      <LateEarlyCell row={r} />
+                    </td>
+                    <td className={td}>{fmtHrs(r.hours)}</td>
+                    <td className={td}>{fmtHrs(r.overtime)}</td>
+                    <td className={td}>{statusBadge(r)}</td>
+                    <td className={td}>{r.device}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {rows.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-slate-100 px-4 py-3 text-xs sm:px-6">
+            <span className="font-semibold text-good-text">{presentDays} present</span>
+            <span className="font-semibold text-critical-text">{absentDays} absent</span>
+            <span className="text-slate-600">
+              Work hours <strong className="text-ink">{fmtHrs(workHours)}</strong>
+            </span>
+            <span className="text-slate-600">
+              Overtime <strong className="text-ink">{fmtHrs(overtimeHours)}</strong>
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function statusBadge(r: Row) {
   if (r.checkIn) return <Badge tone="good">Present</Badge>;
   if (r.status === 'Holiday') return <Badge tone="neutral">Holiday</Badge>;
@@ -376,6 +495,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const [recalcProgress, setRecalcProgress] = useState<{ done: number; total: number } | null>(null);
   const [recalcNotice, setRecalcNotice] = useState<string | null>(null);
   const [fixRow, setFixRow] = useState<Row | null>(null);
+  const [detailEmployeeId, setDetailEmployeeId] = useState<string | null>(null);
   // checkOutNextDay: the check-out falls on the morning after work_date — an
   // overnight / 24-hour duty (09:00 -> 08:00). Without it both times were
   // built on work_date, so such a duty was always rejected as "check-out
@@ -477,7 +597,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const leaveByEmployee = useMemo(() => leaveDatesByEmployee(leaveRequests), [leaveRequests]);
   const weeklyPattern = useMemo(() => buildWeeklyPatternByEmployee(weeklyPatternRows), [weeklyPatternRows]);
 
-  const rows: Row[] = useMemo(() => {
+  const rangeRows: Row[] = useMemo(() => {
     // Where the day's attendance actually came from: the registered
     // terminal's own name for a machine punch (method 'zkteco'), or "App"
     // for one recorded in the mobile app (gps / qr / selfie). Read from the
@@ -712,8 +832,18 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       });
   }, [scopedEmployees, summaries, logs, devices, shifts, from, to, status, dailyShiftByDate, weekOffDatesFor, leaveByEmployee, weeklyPattern]);
 
+  // "All Employees" is a one-line-per-person summary: just each employee's
+  // row for today (or, for a range that doesn't include today, the range's
+  // nearest end to it). Clicking a name opens EmployeeRangeModal with every
+  // day of the range for that person. The Excel export still writes every
+  // day for everyone (rangeRows), as it always has.
+  const compact = employeeId === 'all';
+  const todayKey = nepalTodayIso();
+  const summaryDay = todayKey < from ? from : todayKey > to ? to : todayKey;
+  const rows = useMemo(() => (compact ? rangeRows.filter(r => r.date === summaryDay) : rangeRows), [compact, rangeRows, summaryDay]);
+
   // `rows` as they'll read once the staged changes are saved — what the table
-  // shows. `rows` itself stays the saved state (the Excel export writes it).
+  // shows. `rows` itself stays the saved state.
   const shownRows = useMemo(
     () =>
       rows.map(r => {
@@ -1069,7 +1199,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       'Status',
       'Device',
     ];
-    const lines = rows.map(r => [
+    const lines = rangeRows.map(r => [
       r.date,
       weekdayShort(r.date),
       r.enrollId,
@@ -1086,12 +1216,12 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
       r.status,
       r.device,
     ]);
-    // lines is built from rows in the same order (rows is sorted by
-    // enrollId — see the .sort() above — so each employee's whole date
-    // range is one contiguous block), same page-break-per-employee logic
-    // as the printed table's <tr break-before>.
-    const pageBreakBeforeRowIndexes = rows
-      .map((r, i) => (i > 0 && rows[i - 1].employeeId !== r.employeeId ? i : -1))
+    // lines is built from rangeRows in the same order (sorted by enrollId —
+    // see the .sort() above — so each employee's whole date range is one
+    // contiguous block), same page-break-per-employee logic as the printed
+    // table's <tr break-before>.
+    const pageBreakBeforeRowIndexes = rangeRows
+      .map((r, i) => (i > 0 && rangeRows[i - 1].employeeId !== r.employeeId ? i : -1))
       .filter(i => i >= 0);
     downloadExcel(`attendance_${from}_to_${to}.csv`, header, lines, pageBreakBeforeRowIndexes);
   }
@@ -1358,8 +1488,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               // days, splitting one person's data across two pages with no
               // visual boundary; forcing a break here keeps every printed
               // page's content confined to a single employee. Skipped for the
-              // very first row so it doesn't waste a blank leading page.
-              const isFirstRowForEmployee = i > 0 && rows[i - 1].employeeId !== r.employeeId;
+              // very first row so it doesn't waste a blank leading page. Not in
+              // the one-line summary, where every row is a different person.
+              const isFirstRowForEmployee = !compact && i > 0 && rows[i - 1].employeeId !== r.employeeId;
               return (
               <tr
                 key={r.key}
@@ -1375,7 +1506,20 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className={`w-px whitespace-nowrap px-2.5 py-1.5 tabular-nums text-slate-600 text-left print:px-2 print:py-1 print:text-ink ${flagged ? 'border-l-2 border-l-warning' : ''} ${change?.kind === 'edit' ? 'border-l-2 border-l-info print:border-l' : change?.kind === 'delete' ? 'border-l-2 border-l-critical print:border-l' : ''}`}>{formatDdMmYyyy(r.date, system)}</td>
                 <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
                 <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
-                <td className="whitespace-nowrap px-2.5 py-1.5 font-medium text-ink text-left print:px-2 print:py-1">{r.employeeName}</td>
+                <td className="whitespace-nowrap px-2.5 py-1.5 font-medium text-ink text-left print:px-2 print:py-1">
+                  {compact ? (
+                    <button
+                      type="button"
+                      onClick={() => setDetailEmployeeId(r.employeeId)}
+                      title={`Show all of ${r.employeeName}'s days in this range`}
+                      className="font-medium text-ink hover:text-accent hover:underline"
+                    >
+                      {r.employeeName}
+                    </button>
+                  ) : (
+                    r.employeeName
+                  )}
+                </td>
                 <td className="w-px px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   <span className="flex flex-col leading-tight">
                     <span className="whitespace-nowrap">{r.shiftName}</span>
@@ -1454,7 +1598,9 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                     ? 'Loading…'
                     : recalculating
                       ? `Recalculating ${recalcProgress?.done ?? 0}/${recalcProgress?.total ?? 0}…`
-                      : 'No records in this range.'}
+                      : compact
+                        ? `No records for ${formatDdMmYyyy(summaryDay, system)}.`
+                        : 'No records in this range.'}
                 </td>
               </tr>
             )}
@@ -1601,6 +1747,16 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
           <RecalculateIcon className="h-4 w-4 shrink-0 text-slate-400" />
           <span className="text-sm font-medium text-ink">{recalcNotice}</span>
         </div>
+      )}
+
+      {detailEmployeeId && (
+        <EmployeeRangeModal
+          rows={rangeRows.filter(r => r.employeeId === detailEmployeeId)}
+          from={from}
+          to={to}
+          system={system}
+          onClose={() => setDetailEmployeeId(null)}
+        />
       )}
 
       {fixRow && (
