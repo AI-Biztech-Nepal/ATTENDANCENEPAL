@@ -126,21 +126,23 @@ export default function SuperadminDashboardPage() {
   // any), same as every other RLS-scoped table. Only the service-role API
   // route can see across every company, so live-ness here comes from
   // refetching it on an interval instead. Today's per-company counts ride
-  // the same poll, so a card's numbers move in step with its pulse.
+  // the same poll — but each lands on its own, so neither waits on the
+  // other's round trip.
   useEffect(() => {
     async function loadLiveActivity() {
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
       if (!token) return;
       const headers = { Authorization: `Bearer ${token}` };
-      const [activityRes, todayRes] = await Promise.all([
-        fetch('/api/superadmin/recent-activity', { headers }),
-        fetch('/api/superadmin/today-attendance', { headers }),
+      const load = async <T,>(url: string, set: (rows: T[]) => void) => {
+        const res = await fetch(url, { headers });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok) set(body.companies);
+      };
+      await Promise.all([
+        load<RecentActivity>('/api/superadmin/recent-activity', setRecentActivity),
+        load<TodayAttendance>('/api/superadmin/today-attendance', setTodayAttendance),
       ]);
-      const activityBody = await activityRes.json().catch(() => ({}));
-      const todayBody = await todayRes.json().catch(() => ({}));
-      if (activityRes.ok) setRecentActivity(activityBody.companies);
-      if (todayRes.ok) setTodayAttendance(todayBody.companies);
     }
     loadLiveActivity();
     const id = setInterval(loadLiveActivity, RECENT_ACTIVITY_POLL_MS);

@@ -21,39 +21,34 @@ export async function GET(req: NextRequest) {
   if ('response' in result) return result.response;
   const { admin } = result;
 
-  // Ordered scan capped at a bounded window — a single company spamming
-  // punches can't push every other company off this list, since we stop
-  // as soon as MAX_COMPANIES distinct company_ids have been seen rather
-  // than scanning a fixed row count that a busy company could dominate.
+  // One "latest punch" lookup per company, all in parallel. This used to be
+  // a paged scan of the newest punches that stopped once 10 distinct
+  // companies had shown up — with fewer than 10 companies punching at all,
+  // it never stopped early and read all 2000 rows in 10 sequential round
+  // trips (1-3s) on every 15s poll. A per-company limit(1) also can't be
+  // crowded out by one busy company, which the scan's 2000-row window could.
   const MAX_COMPANIES = 10;
-  const PAGE = 200;
-  const seen = new Map<string, string>(); // company_id -> most recent created_at
-  for (let from = 0; seen.size < MAX_COMPANIES && from < 2000; from += PAGE) {
-    const { data, error } = await admin
-      .from('attendance_logs')
-      .select('company_id, created_at')
-      .order('created_at', { ascending: false })
-      .range(from, from + PAGE - 1);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!data || data.length === 0) break;
-    for (const row of data) {
-      if (!row.company_id || seen.has(row.company_id)) continue;
-      seen.set(row.company_id, row.created_at);
-    }
-    if (data.length < PAGE) break;
-  }
-
-  if (seen.size === 0) return NextResponse.json({ companies: [] });
-
-  const { data: companies, error: companiesError } = await admin
-    .from('companies')
-    .select('id, name')
-    .in('id', [...seen.keys()]);
+  const { data: companies, error: companiesError } = await admin.from('companies').select('id, name');
   if (companiesError) return NextResponse.json({ error: companiesError.message }, { status: 500 });
-  const nameById = new Map((companies ?? []).map(c => [c.id, c.name]));
 
-  const rows: RecentActivityRow[] = [...seen.entries()]
-    .map(([companyId, lastPunchAt]) => ({ companyId, companyName: nameById.get(companyId) ?? '(unknown)', lastPunchAt }))
+  const latest = await Promise.all(
+    (companies ?? []).map(c =>
+      admin
+        .from('attendance_logs')
+        .select('created_at')
+        .eq('company_id', c.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+        .then(({ data, error }) => ({ company: c, lastPunchAt: data?.created_at as string | undefined, error }))
+    )
+  );
+  const failed = latest.find(l => l.error);
+  if (failed?.error) return NextResponse.json({ error: failed.error.message }, { status: 500 });
+
+  const rows: RecentActivityRow[] = latest
+    .filter(l => l.lastPunchAt)
+    .map(l => ({ companyId: l.company.id, companyName: l.company.name, lastPunchAt: l.lastPunchAt! }))
     .sort((a, b) => new Date(b.lastPunchAt).getTime() - new Date(a.lastPunchAt).getTime())
     .slice(0, MAX_COMPANIES);
 
