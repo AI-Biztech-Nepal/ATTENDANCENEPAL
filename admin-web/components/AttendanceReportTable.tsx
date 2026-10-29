@@ -443,9 +443,10 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
   const tableScrollRef = useRef<HTMLDivElement>(null);
-  // Dates, status, employee and Correction mode are remembered for this
-  // browser tab, so a refresh picks up where you were (lib/useSessionState).
-  // An employee passed in the link wins over the remembered one.
+  // Dates, status and Correction mode are remembered for this browser tab, so
+  // a refresh picks up where you were (lib/useSessionState). The employee is
+  // NOT: a refresh always comes back to All Employees, unless the link itself
+  // names one (?employee=, e.g. from an employee's profile).
   const [from, setFrom] = useSessionState('attendanceReport:from', isoDaysAgo(0), { isValid: (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) });
   const [to, setTo] = useSessionState('attendanceReport:to', isoDaysAgo(0), { isValid: (v: unknown) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) });
   const [status, setStatus] = useSessionState<'All' | 'Present' | 'Late' | 'Early' | 'Absent' | 'Week Off' | 'Leave' | 'Holiday' | 'Exempt'>(
@@ -453,10 +454,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
     'All',
     { isValid: v => typeof v === 'string' && ['All', 'Present', 'Late', 'Early', 'Absent', 'Week Off', 'Leave', 'Holiday', 'Exempt'].includes(v) }
   );
-  const [employeeId, setEmployeeId] = useSessionState<string>('attendanceReport:employee', initialEmployeeId ?? 'all', {
-    enabled: !initialEmployeeId,
-    isValid: v => typeof v === 'string',
-  });
+  const [employeeId, setEmployeeId] = useState<string>(initialEmployeeId ?? 'all');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [summaries, setSummaries] = useState<PayrollSummary[]>([]);

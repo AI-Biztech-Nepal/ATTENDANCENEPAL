@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 /**
  * useState that survives a page refresh in the same browser tab
  * (sessionStorage) — so refreshing the Leave page stays on Leave Balance, and
- * the Attendance Report keeps its dates, employee and Correction mode, instead
+ * the Attendance Report keeps its dates, status and Correction mode, instead
  * of starting over. A new tab starts fresh.
  *
  * The saved value is applied right after mount, so the server render and the
