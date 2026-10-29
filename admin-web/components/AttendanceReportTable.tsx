@@ -1494,7 +1494,26 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
               return (
               <tr
                 key={r.key}
-                className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''} ${change?.kind === 'edit' ? 'bg-info-bg/50 print:bg-transparent' : change?.kind === 'delete' ? 'bg-critical-bg/40 print:bg-transparent' : ''}`}
+                // In the one-line summary the whole row opens that person's
+                // range popup — except a click on one of the row's own
+                // buttons (Correction mode's fix/edit chips, Undo).
+                onClick={
+                  compact
+                    ? e => {
+                        if ((e.target as HTMLElement).closest('button, a')) return;
+                        setDetailEmployeeId(r.employeeId);
+                      }
+                    : undefined
+                }
+                onKeyDown={
+                  compact
+                    ? e => {
+                        if (e.target === e.currentTarget && e.key === 'Enter') setDetailEmployeeId(r.employeeId);
+                      }
+                    : undefined
+                }
+                tabIndex={compact ? 0 : undefined}
+                className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 print:hover:bg-transparent ${compact ? 'cursor-pointer outline-none' : ''} ${flagged ? 'bg-warning-bg/40 print:bg-transparent' : ''} ${change?.kind === 'edit' ? 'bg-info-bg/50 print:bg-transparent' : change?.kind === 'delete' ? 'bg-critical-bg/40 print:bg-transparent' : ''}`}
                 style={isFirstRowForEmployee ? { breakBefore: 'page' } : undefined}
               >
                 <td className="w-px whitespace-nowrap px-2.5 py-1.5 tabular-nums text-slate-500 font-medium print:px-2 print:py-1 print:text-ink">{i + 1}</td>
@@ -1507,18 +1526,7 @@ export default function AttendanceReportTable({ initialEmployeeId }: { initialEm
                 <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{weekdayShort(r.date)}</td>
                 <td className="w-px whitespace-nowrap px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">{r.enrollId}</td>
                 <td className="whitespace-nowrap px-2.5 py-1.5 font-medium text-ink text-left print:px-2 print:py-1">
-                  {compact ? (
-                    <button
-                      type="button"
-                      onClick={() => setDetailEmployeeId(r.employeeId)}
-                      title={`Show all of ${r.employeeName}'s days in this range`}
-                      className="font-medium text-ink hover:text-accent hover:underline"
-                    >
-                      {r.employeeName}
-                    </button>
-                  ) : (
-                    r.employeeName
-                  )}
+                  {r.employeeName}
                 </td>
                 <td className="w-px px-2.5 py-1.5 text-slate-600 text-left print:px-2 print:py-1 print:text-ink">
                   <span className="flex flex-col leading-tight">
