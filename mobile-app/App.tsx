@@ -167,6 +167,9 @@ function AdminDrawerNavigator() {
   const isAdmin = profile?.role === 'admin';
   return (
     <Drawer.Navigator
+      // 'history' so back returns to the previously visited section, same
+      // as the employee tabs, instead of always jumping to the Dashboard.
+      backBehavior="history"
       drawerContent={props => <AdminSidebarContent {...props} />}
       screenOptions={{ headerShown: false, drawerType: 'front', overlayColor: 'rgba(0,0,0,0.4)', drawerStyle: { width: 240 } }}
     >

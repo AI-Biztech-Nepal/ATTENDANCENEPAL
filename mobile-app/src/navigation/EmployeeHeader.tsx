@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { supabase } from '../lib/supabase';
 import CalendarSystemSwitch from '../components/CalendarSystemSwitch';
-import { BackIcon } from '../components/icons';
+import HeaderBackButton from './HeaderBackButton';
 
 // Mirrors admin-web's EmployeeShell header exactly: the employee's own
 // `employees.name`/`profile_photo_url` (not the login account's `profiles`
@@ -40,24 +40,11 @@ export default function EmployeeHeader({ options, navigation }: any) {
   }
 
   const initial = name.slice(0, 1).toUpperCase();
-  // True on a pushed page (Leave) and on any tab reached from another tab
-  // (the tab navigator keeps history), so back retraces the visited pages.
-  const canGoBack = navigation?.canGoBack() ?? false;
 
   return (
     <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
       <View style={styles.topRow}>
-        {canGoBack && (
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            style={styles.backButton}
-          >
-            <BackIcon />
-          </TouchableOpacity>
-        )}
+        <HeaderBackButton navigation={navigation} />
         <Text style={styles.title} numberOfLines={1}>
           {options.title}
         </Text>
@@ -117,7 +104,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  backButton: { marginLeft: -4, padding: 4 },
   title: { flex: 1, fontSize: 18, fontWeight: '700', color: colors.ink },
   identity: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '55%' },
   name: { fontSize: 13, fontWeight: '600', color: colors.ink, flexShrink: 1 },

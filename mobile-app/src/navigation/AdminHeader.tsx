@@ -9,6 +9,7 @@ import { colors } from '../theme';
 import { BellIcon, MenuIcon } from '../components/icons';
 import AccountMenuModal from '../components/AccountMenuModal';
 import CalendarSystemSwitch from '../components/CalendarSystemSwitch';
+import HeaderBackButton from './HeaderBackButton';
 
 export default function AdminHeader({ navigation, options }: NativeStackHeaderProps) {
   const { profile } = useAuth();
@@ -32,6 +33,7 @@ export default function AdminHeader({ navigation, options }: NativeStackHeaderPr
   return (
     <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
       <View style={styles.topRow}>
+        <HeaderBackButton navigation={navigation} />
         <TouchableOpacity
           style={styles.menuBtn}
           onPress={() => navigation.getParent()?.dispatch(DrawerActions.openDrawer())}
