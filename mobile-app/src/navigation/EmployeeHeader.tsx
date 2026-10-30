@@ -63,7 +63,8 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
         {isHome ? (
           <View style={styles.brand}>
             <View style={styles.brandMark}>
-              <View style={styles.brandDot} />
+              {/* eslint-disable-next-line @typescript-eslint/no-require-imports */}
+              <Image source={require('../../assets/icon.png')} style={styles.brandLogo} resizeMode="contain" />
             </View>
             <Text style={styles.brandText} numberOfLines={1}>
               Attendance Nepal
@@ -109,8 +110,8 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   title: { flex: 1, fontSize: 20, fontWeight: '800', color: colors.white },
   brand: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  brandMark: { height: 28, width: 28, borderRadius: 8, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
-  brandDot: { height: 9, width: 9, borderRadius: 5, backgroundColor: colors.accent },
+  brandMark: { height: 38, width: 38, borderRadius: 11, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  brandLogo: { height: 34, width: 34 },
   brandText: { flexShrink: 1, fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
   avatar: {
     height: 36,
