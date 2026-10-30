@@ -150,9 +150,10 @@ export async function scrapeHamroPatro(): Promise<HolidayRange[]> {
 
 Deno.serve(async req => {
   try {
-    const expected = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    const authHeader = req.headers.get('Authorization');
-    if (!expected || authHeader !== `Bearer ${expected}`) {
+    // The runtime's SUPABASE_SERVICE_ROLE_KEY isn't the key the dashboard/CLI hands out, so a
+    // dedicated secret (supabase secrets set CRON_SECRET) authenticates the cron caller instead.
+    const expected = Deno.env.get('CRON_SECRET');
+    if (!expected || req.headers.get('x-cron-secret') !== expected) {
       return new Response('Not authorized', { status: 401 });
     }
 
