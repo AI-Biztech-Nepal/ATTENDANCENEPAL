@@ -59,6 +59,9 @@ const EmployeeStack = createNativeStackNavigator<EmployeeStackParamList>();
 function EmployeeTabNavigator() {
   return (
     <EmployeeTab.Navigator
+      // 'history' so the header's back button (and Android's) returns to
+      // the previously visited tab instead of always jumping to Check In.
+      backBehavior="history"
       screenOptions={{
         header: props => <EmployeeHeader {...props} />,
         tabBarStyle: { backgroundColor: colors.white, borderTopColor: colors.slate200 },

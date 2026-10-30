@@ -124,6 +124,13 @@ export function ChevronIcon({ size = 16, color = '#94a3b8' }: IconProps) {
     </Svg>
   );
 }
+export function BackIcon({ size = 22, color = '#0f172a' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
+      <Path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5M12 19l-7-7 7-7" />
+    </Svg>
+  );
+}
 export function MenuIcon({ size = 20, color = '#64748b' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
