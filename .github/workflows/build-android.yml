@@ -34,7 +34,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # The action's default packages are "tools platform-tools", but the
+      # legacy "tools" package no longer exists in current cmdline-tools —
+      # sdkmanager exits 1 on it and fails the whole build before it starts.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install dependencies
         working-directory: mobile-app
