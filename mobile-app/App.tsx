@@ -14,6 +14,7 @@ import CheckInScreen from './src/screens/CheckInScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import LeaveRequestScreen from './src/screens/LeaveRequestScreen';
+import FixPunchScreen from './src/screens/FixPunchScreen';
 import EmployeesScreen from './src/screens/EmployeesScreen';
 import EmployeeDetailScreen from './src/screens/EmployeeDetailScreen';
 import AdminPayrollDetailScreen from './src/screens/AdminPayrollDetailScreen';
@@ -53,6 +54,7 @@ const EmployeeTab = createBottomTabNavigator<EmployeeTabParamList>();
 export type EmployeeStackParamList = {
   EmployeeTabs: undefined;
   Leave: undefined;
+  FixPunch: undefined;
 };
 const EmployeeStack = createNativeStackNavigator<EmployeeStackParamList>();
 
@@ -308,6 +310,7 @@ function AppInner() {
             >
               <EmployeeStack.Screen name="EmployeeTabs" component={EmployeeTabNavigator} options={{ headerShown: false }} />
               <EmployeeStack.Screen name="Leave" component={LeaveRequestScreen} options={{ title: 'Leave Requests' }} />
+              <EmployeeStack.Screen name="FixPunch" component={FixPunchScreen} options={{ title: 'Fix a Missed Punch' }} />
             </EmployeeStack.Navigator>
           )}
         </NavigationContainer>

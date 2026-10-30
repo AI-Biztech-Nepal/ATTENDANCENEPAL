@@ -1,20 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, Modal } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
-import { nepalDateKey, nepalDateTimeToUtcMs, punchTypeLabel, selectDayPunches } from '../lib/shift';
-import type { AttendanceGpsRequest, AttendanceLog, CorrectionRequest } from '../types';
+import { nepalDateKey, punchTypeLabel, selectDayPunches } from '../lib/shift';
+import type { AttendanceGpsRequest, AttendanceLog } from '../types';
 import { ATTENDANCE_LOG_COLUMNS } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
 import { formatAdDate, localDateKey } from '../lib/calendar';
 import type { CalendarSystem } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
-import DatePicker from '../components/DatePicker';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '../lib/weekOff';
 import type { CompanyHoliday, Gender } from '../types';
 
-type ViewMode = 'menu' | 'fix';
 type PunchModal = {
   punchType: '0' | '1' | '2' | '3';
   punchTime: string;
@@ -42,21 +40,12 @@ function formatDateTime(value: string, system: CalendarSystem) {
 export default function CheckInScreen({ navigation }: any) {
   const { system } = useCalendarSystem();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
-  const [view, setView] = useState<ViewMode>('menu');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'good' | 'critical'; text: string } | null>(null);
   const [modal, setModal] = useState<PunchModal | null>(null);
   const [gpsRequests, setGpsRequests] = useState<AttendanceGpsRequest[]>([]);
   const [history, setHistory] = useState<AttendanceLog[]>([]);
   const [historyRange, setHistoryRange] = useState<HistoryRange>('weekly');
-
-  const [requests, setRequests] = useState<CorrectionRequest[]>([]);
-  const [workDate, setWorkDate] = useState('');
-  const [checkInTime, setCheckInTime] = useState('');
-  const [checkOutTime, setCheckOutTime] = useState('');
-  const [reason, setReason] = useState('');
-  const [submittingCorrection, setSubmittingCorrection] = useState(false);
-  const [correctionError, setCorrectionError] = useState<string | null>(null);
   const [weeklyOffDay, setWeeklyOffDay] = useState<number | null>(null);
   const [todayHoliday, setTodayHoliday] = useState<CompanyHoliday | null>(null);
   const [myGender, setMyGender] = useState<Gender | null>(null);
@@ -88,12 +77,9 @@ export default function CheckInScreen({ navigation }: any) {
 
   useEffect(() => {
     if (!employeeId) return;
-    if (view === 'menu') {
-      reloadGpsRequests(employeeId);
-      reloadHistory(employeeId);
-    }
-    if (view === 'fix') reloadCorrections(employeeId);
-  }, [view, employeeId]);
+    reloadGpsRequests(employeeId);
+    reloadHistory(employeeId);
+  }, [employeeId]);
 
   function reloadGpsRequests(empId: string) {
     supabase.from('attendance_gps_requests').select('*').eq('employee_id', empId).order('created_at', { ascending: false }).limit(10).then(({ data }) => setGpsRequests((data as AttendanceGpsRequest[]) ?? []));
@@ -107,9 +93,6 @@ export default function CheckInScreen({ navigation }: any) {
       .order('punch_time', { ascending: false })
       .limit(50)
       .then(({ data }) => setHistory((data as AttendanceLog[]) ?? []));
-  }
-  function reloadCorrections(empId: string) {
-    supabase.from('attendance_correction_requests').select('*').eq('employee_id', empId).order('created_at', { ascending: false }).then(({ data }) => setRequests((data as CorrectionRequest[]) ?? []));
   }
 
   const filteredHistory = useMemo(() => {
@@ -197,101 +180,6 @@ export default function CheckInScreen({ navigation }: any) {
     }
   }
 
-  async function handleCorrectionSubmit() {
-    if (!employeeId) return;
-    setCorrectionError(null);
-    if (!workDate || (!checkInTime && !checkOutTime)) {
-      setCorrectionError('Pick a date and at least one of check-in or check-out time.');
-      return;
-    }
-    setSubmittingCorrection(true);
-    let coords: { lat: number; lng: number } | null = null;
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const pos = await Location.getCurrentPositionAsync({});
-        coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      }
-    } catch {
-      // best-effort only
-    }
-    const { error } = await supabase.from('attendance_correction_requests').insert({
-      employee_id: employeeId,
-      work_date: workDate,
-      requested_check_in: checkInTime ? new Date(nepalDateTimeToUtcMs(workDate, checkInTime)).toISOString() : null,
-      requested_check_out: checkOutTime ? new Date(nepalDateTimeToUtcMs(workDate, checkOutTime)).toISOString() : null,
-      reason: reason || null,
-      lat: coords?.lat ?? null,
-      lng: coords?.lng ?? null,
-    });
-    setSubmittingCorrection(false);
-    if (error) {
-      setCorrectionError(error.message);
-      return;
-    }
-    setWorkDate('');
-    setCheckInTime('');
-    setCheckOutTime('');
-    setReason('');
-    reloadCorrections(employeeId);
-  }
-
-  if (view === 'fix') {
-    return (
-      <FlatList
-        style={styles.container}
-        contentContainerStyle={{ padding: 16 }}
-        ListHeaderComponent={
-          <>
-            <TouchableOpacity onPress={() => setView('menu')}>
-              <Text style={styles.backLink}>← Back</Text>
-            </TouchableOpacity>
-            <Text style={styles.intro}>
-              Forgot to check in or out? Request a correction and HR/Admin will review it. Your current location is captured
-              automatically as confirmation.
-            </Text>
-            <View style={styles.form}>
-              <Text style={styles.label}>Date</Text>
-              <DatePicker value={workDate} onChange={setWorkDate} />
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Check-in (HH:MM)</Text>
-                  <TextInput style={styles.input} value={checkInTime} onChangeText={setCheckInTime} placeholder="09:00" placeholderTextColor={colors.slate400} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Check-out (HH:MM)</Text>
-                  <TextInput style={styles.input} value={checkOutTime} onChangeText={setCheckOutTime} placeholder="18:00" placeholderTextColor={colors.slate400} />
-                </View>
-              </View>
-              <Text style={styles.label}>Reason (optional)</Text>
-              <TextInput style={[styles.input, { height: 60 }]} value={reason} onChangeText={setReason} multiline placeholderTextColor={colors.slate400} />
-              {correctionError && <Text style={styles.errorText}>{correctionError}</Text>}
-              <TouchableOpacity style={[styles.submitBtn, submittingCorrection && { opacity: 0.6 }]} onPress={handleCorrectionSubmit} disabled={submittingCorrection}>
-                <Text style={styles.submitBtnText}>{submittingCorrection ? 'Submitting…' : 'Submit request'}</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.sectionHeading}>My requests</Text>
-          </>
-        }
-        data={requests}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <View style={styles.row}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>{formatAdDate(item.work_date, system)}</Text>
-              <Text style={styles.rowSub}>
-                In {formatTime(item.requested_check_in)} · Out {formatTime(item.requested_check_out)}
-              </Text>
-              {item.reason ? <Text style={styles.rowSub}>{item.reason}</Text> : null}
-            </View>
-            <Badge tone={statusTone(item.status)}>{item.status}</Badge>
-          </View>
-        )}
-        ListEmptyComponent={<Text style={styles.empty}>No correction requests yet.</Text>}
-      />
-    );
-  }
-
   return (
     <View style={styles.container}>
       <FlatList
@@ -320,7 +208,7 @@ export default function CheckInScreen({ navigation }: any) {
             <TouchableOpacity style={[styles.punchBtn, { backgroundColor: colors.good }]} disabled={!employeeId} onPress={() => openPunchModal('1')}>
               <Text style={styles.punchBtnText}>📍 Check Out</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.punchBtn, { backgroundColor: colors.good }]} onPress={() => setView('fix')}>
+            <TouchableOpacity style={[styles.punchBtn, { backgroundColor: colors.good }]} onPress={() => navigation.getParent()?.navigate('FixPunch')}>
               <Text style={styles.punchBtnText}>🔧 Fix a Missed Punch</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.punchBtn, { backgroundColor: colors.good }]} onPress={() => navigation.getParent()?.navigate('Leave')}>
@@ -431,12 +319,6 @@ const styles = StyleSheet.create({
   rowSub: { fontSize: 11, color: colors.slate400, marginTop: 2 },
   punchTypeBadge: { width: 44, borderRadius: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: 4 },
   empty: { textAlign: 'center', color: colors.slate400, marginTop: 20 },
-  backLink: { color: colors.accent, fontSize: 14, fontWeight: '600', marginBottom: 12 },
-  form: { backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, padding: 14, marginBottom: 12 },
-  label: { fontSize: 12, fontWeight: '600', color: colors.slate500, marginBottom: 4, marginTop: 8 },
-  input: { borderWidth: 1, borderColor: colors.slate200, borderRadius: 10, padding: 10, fontSize: 14, color: colors.ink },
-  errorText: { color: colors.criticalText, fontSize: 12, marginTop: 8 },
-  submitBtn: { backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 14 },
   submitBtnText: { color: colors.white, fontWeight: '700', fontSize: 14 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', padding: 24 },
   modalSheet: { backgroundColor: colors.white, borderRadius: 16, padding: 20 },
