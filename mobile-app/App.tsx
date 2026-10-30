@@ -86,6 +86,9 @@ function tabBarOptions(insets: { bottom: number }) {
     },
     tabBarActiveTintColor: colors.accent,
     tabBarInactiveTintColor: colors.slate500,
+    // Always below: on a wide window (the web preview, tablets) the default
+    // switches to label-beside-icon, which overlaps the label and its dot.
+    tabBarLabelPosition: 'below-icon' as const,
     tabBarLabel: ({ focused, color, children }: { focused: boolean; color: string; children: string }) => (
       <View style={styles.tabLabel}>
         <Text style={[styles.tabLabelText, { color, fontWeight: focused ? '800' : '600' }]}>{children}</Text>
