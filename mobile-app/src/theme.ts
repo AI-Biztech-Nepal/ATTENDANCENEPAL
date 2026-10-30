@@ -1,7 +1,7 @@
-// The mobile app's "Himalayan Navy" look: deep blue from Nepal's flag as the
-// brand color, crimson only for small accents (active tab, logo mark), green
-// for success. Neutrals and warning/critical/info still mirror
-// admin-web/tailwind.config.ts, which keeps its original teal for now.
+// The mobile app's brand green: emerald #047857 replaces the old teal
+// #0d9488, which was too light for white text (3.7:1; this is 5.5:1).
+// Neutrals and warning/critical/info still mirror admin-web/tailwind.config.ts,
+// which keeps its original teal for now.
 export const colors = {
   ink: '#0f172a',
   sidebar: '#0f172a',
@@ -12,9 +12,8 @@ export const colors = {
   slate500: '#64748b',
   white: '#ffffff',
 
-  accent: '#1e3a8a',
-  accentLight: '#e8edfb',
-  crimson: '#c8102e',
+  accent: '#047857',
+  accentLight: '#e3f4ec',
 
   good: '#15803d',
   goodBg: '#e2f3e8',

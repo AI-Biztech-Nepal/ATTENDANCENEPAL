@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { colors } from '../theme';
 
-/** `onDark` is the pill version that sits on the employee header's navy band. */
+/** `onDark` is the pill version that sits on the employee header's green band. */
 export default function CalendarSystemSwitch({ onDark = false }: { onDark?: boolean }) {
   const { system, setSystem } = useCalendarSystem();
 

@@ -9,7 +9,7 @@ import HeaderBackButton from './HeaderBackButton';
 // The employee's own `employees.name`/`profile_photo_url` (not the login
 // account's `profiles` row, which AdminHeader/AccountMenuModal use for
 // admins) — an employee's HR record name/photo can differ from their login
-// profile. Navy band with no bottom border: Check In/Out continues the band
+// profile. Brand-green band with no bottom border: Check In/Out continues the band
 // into its "Namaste" hero, so the two read as one surface.
 export default function EmployeeHeader({ options, navigation, route }: any) {
   const insets = useSafeAreaInsets();
@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontSize: 20, fontWeight: '800', color: colors.white },
   brand: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   brandMark: { height: 28, width: 28, borderRadius: 8, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
-  brandDot: { height: 9, width: 9, borderRadius: 5, backgroundColor: colors.crimson },
+  brandDot: { height: 9, width: 9, borderRadius: 5, backgroundColor: colors.accent },
   brandText: { flexShrink: 1, fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
   avatar: {
     height: 36,

@@ -68,7 +68,7 @@ function EmployeeTabNavigator() {
       backBehavior="history"
       screenOptions={{
         header: props => <EmployeeHeader {...props} />,
-        // Taller than the default to fit the crimson active-tab dot under
+        // Taller than the default to fit the active-tab dot under
         // the label; insets.bottom keeps it clear of gesture/nav bars.
         tabBarStyle: {
           backgroundColor: colors.white,
@@ -82,7 +82,7 @@ function EmployeeTabNavigator() {
         tabBarLabel: ({ focused, color, children }) => (
           <View style={styles.tabLabel}>
             <Text style={[styles.tabLabelText, { color, fontWeight: focused ? '800' : '600' }]}>{children}</Text>
-            <View style={[styles.tabDot, focused && { backgroundColor: colors.crimson }]} />
+            <View style={[styles.tabDot, focused && { backgroundColor: colors.accent }]} />
           </View>
         ),
       }}
