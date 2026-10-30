@@ -2,17 +2,21 @@ import React, { useState } from 'react';
 import { View, TextInput, TouchableOpacity, Text, Image, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { colors } from '../theme';
+import { EyeIcon, EyeOffIcon } from '../components/icons';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleLogin() {
     setError(null);
     setSubmitting(true);
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    // Trimmed because Android keyboards append a space after picking an
+    // email suggestion, and Supabase rejects the address with it attached.
+    const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setSubmitting(false);
     if (authError) setError(authError.message);
   }
@@ -28,6 +32,8 @@ export default function LoginScreen() {
         <TextInput
           style={styles.input}
           autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
           keyboardType="email-address"
           placeholder="you@company.com"
           placeholderTextColor={colors.slate400}
@@ -35,14 +41,27 @@ export default function LoginScreen() {
           onChangeText={setEmail}
         />
         <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={styles.input}
-          secureTextEntry
-          placeholder="••••••••"
-          placeholderTextColor={colors.slate400}
-          value={password}
-          onChangeText={setPassword}
-        />
+        <View style={styles.passwordWrap}>
+          <TextInput
+            style={[styles.input, styles.passwordInput]}
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="••••••••"
+            placeholderTextColor={colors.slate400}
+            value={password}
+            onChangeText={setPassword}
+          />
+          <TouchableOpacity
+            style={styles.eyeButton}
+            onPress={() => setShowPassword(v => !v)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+          >
+            {showPassword ? <EyeOffIcon color={colors.slate400} /> : <EyeIcon color={colors.slate400} />}
+          </TouchableOpacity>
+        </View>
         {error && <Text style={styles.error}>{error}</Text>}
         <TouchableOpacity style={[styles.button, submitting && styles.buttonDisabled]} onPress={handleLogin} disabled={submitting}>
           <Text style={styles.buttonText}>{submitting ? 'Signing in…' : 'Sign in'}</Text>
@@ -76,6 +95,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.ink,
   },
+  passwordWrap: { width: '100%', marginBottom: 16, justifyContent: 'center' },
+  passwordInput: { marginBottom: 0, paddingRight: 46 },
+  eyeButton: { position: 'absolute', right: 12, padding: 4 },
   error: { color: colors.criticalText, fontSize: 13, marginBottom: 12, alignSelf: 'flex-start' },
   button: { width: '100%', backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
   buttonDisabled: { opacity: 0.6 },
