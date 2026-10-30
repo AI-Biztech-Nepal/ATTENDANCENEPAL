@@ -124,6 +124,28 @@ export function ChevronIcon({ size = 16, color = '#94a3b8' }: IconProps) {
     </Svg>
   );
 }
+export function ChevronRightIcon({ size = 18, color = '#64748b' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
+      <Path strokeLinecap="round" strokeLinejoin="round" d="m9 6 6 6-6 6" />
+    </Svg>
+  );
+}
+export function SignInIcon({ size = 18, color = '#fff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2.2}>
+      <Path strokeLinecap="round" strokeLinejoin="round" d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
+    </Svg>
+  );
+}
+export function UmbrellaIcon({ size = 18, color = '#1e3a8a' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
+      <Path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 0 1 18 0Z" />
+      <Path strokeLinecap="round" strokeLinejoin="round" d="M12 12v7a2 2 0 0 1-4 0" />
+    </Svg>
+  );
+}
 export function BackIcon({ size = 22, color = '#0f172a' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>

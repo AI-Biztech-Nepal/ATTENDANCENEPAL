@@ -1,6 +1,7 @@
-// Mirrors admin-web/tailwind.config.ts exactly — the single source of truth
-// for brand colors, kept in sync by hand since Tailwind's config isn't
-// something React Native can import directly.
+// The mobile app's "Himalayan Navy" look: deep blue from Nepal's flag as the
+// brand color, crimson only for small accents (active tab, logo mark), green
+// for success. Neutrals and warning/critical/info still mirror
+// admin-web/tailwind.config.ts, which keeps its original teal for now.
 export const colors = {
   ink: '#0f172a',
   sidebar: '#0f172a',
@@ -11,12 +12,13 @@ export const colors = {
   slate500: '#64748b',
   white: '#ffffff',
 
-  accent: '#0d9488',
-  accentLight: '#ccfbf1',
+  accent: '#1e3a8a',
+  accentLight: '#e8edfb',
+  crimson: '#c8102e',
 
-  good: '#0d9488',
-  goodBg: '#ccfbf1',
-  goodText: '#0f766e',
+  good: '#15803d',
+  goodBg: '#e2f3e8',
+  goodText: '#14532d',
 
   warning: '#f97316',
   warningBg: '#ffedd5',

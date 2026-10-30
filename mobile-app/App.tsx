@@ -2,6 +2,7 @@ import 'react-native-gesture-handler';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
@@ -59,6 +60,7 @@ export type EmployeeStackParamList = {
 const EmployeeStack = createNativeStackNavigator<EmployeeStackParamList>();
 
 function EmployeeTabNavigator() {
+  const insets = useSafeAreaInsets();
   return (
     <EmployeeTab.Navigator
       // 'history' so the header's back button (and Android's) returns to
@@ -66,16 +68,29 @@ function EmployeeTabNavigator() {
       backBehavior="history"
       screenOptions={{
         header: props => <EmployeeHeader {...props} />,
-        tabBarStyle: { backgroundColor: colors.white, borderTopColor: colors.slate200 },
+        // Taller than the default to fit the crimson active-tab dot under
+        // the label; insets.bottom keeps it clear of gesture/nav bars.
+        tabBarStyle: {
+          backgroundColor: colors.white,
+          borderTopColor: colors.slate200,
+          height: 62 + insets.bottom,
+          paddingTop: 6,
+          paddingBottom: 6 + insets.bottom,
+        },
         tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.slate400,
-        tabBarLabelStyle: { fontSize: 10 },
+        tabBarInactiveTintColor: colors.slate500,
+        tabBarLabel: ({ focused, color, children }) => (
+          <View style={styles.tabLabel}>
+            <Text style={[styles.tabLabelText, { color, fontWeight: focused ? '800' : '600' }]}>{children}</Text>
+            <View style={[styles.tabDot, focused && { backgroundColor: colors.crimson }]} />
+          </View>
+        ),
       }}
     >
       <EmployeeTab.Screen
         name="CheckIn"
         component={CheckInScreen}
-        options={{ title: 'Check In/Out', tabBarLabel: 'Check In/Out', tabBarIcon: ({ color, size }) => <CheckCircleIcon size={size} color={color} /> }}
+        options={{ title: 'Check In/Out', tabBarIcon: ({ color, size }) => <CheckCircleIcon size={size} color={color} /> }}
       />
       <EmployeeTab.Screen
         name="Calendar"
@@ -335,6 +350,9 @@ export default function App() {
 // On a desktop browser it keeps the app from stretching edge-to-edge into an
 // unusably wide layout, centering it as a phone-width card instead.
 const styles = StyleSheet.create({
+  tabLabel: { alignItems: 'center' },
+  tabLabelText: { fontSize: 11 },
+  tabDot: { height: 5, width: 5, borderRadius: 3, marginTop: 3, backgroundColor: 'transparent' },
   webOuter: (Platform.OS === 'web'
     ? { flex: 1, alignItems: 'center', backgroundColor: colors.slate200, minHeight: '100vh' }
     : { flex: 1 }) as object,
