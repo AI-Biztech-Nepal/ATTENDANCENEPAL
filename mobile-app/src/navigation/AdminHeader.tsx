@@ -9,8 +9,8 @@ import CalendarSystemSwitch from '../components/CalendarSystemSwitch';
 import HeaderBackButton from './HeaderBackButton';
 
 // Same brand-green band as EmployeeHeader. Owner/HR navigation is the bottom
-// tab bar now (no side menu), so there's no menu button; Home shows the
-// company name in place of a title and continues the band into its greeting.
+// tab bar now (no side menu), so there's no menu button; Home shows the app
+// logo and name in place of a title and continues the band into its greeting.
 export default function AdminHeader({ navigation, options, route }: NativeStackHeaderProps) {
   const { profile } = useAuth();
   const insets = useSafeAreaInsets();
@@ -39,7 +39,7 @@ export default function AdminHeader({ navigation, options, route }: NativeStackH
               <Image source={require('../../assets/icon.png')} style={styles.brandLogo} resizeMode="contain" />
             </View>
             <Text style={styles.brandText} numberOfLines={1}>
-              {profile?.company_name || 'Attendance Nepal'}
+              Attendance Nepal
             </Text>
           </View>
         ) : (
