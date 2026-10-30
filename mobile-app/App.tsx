@@ -2,7 +2,7 @@ import 'react-native-gesture-handler';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, AppState, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -385,11 +385,15 @@ function AppInner() {
 export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <CalendarSystemProvider>
-          <AppInner />
-        </CalendarSystemProvider>
-      </AuthProvider>
+      {/* Needed by the owner tab bar, which reads insets at the top level
+          (outside any navigator's own provider) to clear the gesture bar. */}
+      <SafeAreaProvider>
+        <AuthProvider>
+          <CalendarSystemProvider>
+            <AppInner />
+          </CalendarSystemProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
