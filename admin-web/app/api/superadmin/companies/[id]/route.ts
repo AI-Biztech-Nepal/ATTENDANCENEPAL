@@ -223,6 +223,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
+  const { error: syncErr } = await admin.schema('core').rpc('set_service_status', {
+    p_org: companyId,
+    p_service: 'attendance',
+    p_status: action === 'suspend' ? 'suspended' : 'active',
+  });
+  if (syncErr) {
+    return NextResponse.json(
+      { error: `The company row was updated, but mirroring the status into the portal failed: ${syncErr.message}` },
+      { status: 500 }
+    );
+  }
+
   return NextResponse.json({
     ok: true,
     status: action === 'suspend' ? 'suspended' : 'active',
@@ -271,6 +283,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (rpcError) {
     return NextResponse.json({ error: `Delete failed, nothing was removed: ${rpcError.message}` }, { status: 500 });
   }
+
+  const { error: removeErr } = await admin.schema('core').rpc('remove_org_service', {
+    p_org: companyId,
+    p_service: 'attendance',
+  });
+  if (removeErr) console.error('remove_org_service failed after company delete:', removeErr.message);
 
   // Best-effort cleanup of the now-orphaned login accounts (no profile, no
   // company, no employee left for any of them) — the data itself is already
