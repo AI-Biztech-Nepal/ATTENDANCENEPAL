@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, Image, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { colors } from '../theme';
-import AccountMenuModal from '../components/AccountMenuModal';
 import {
   BranchIcon,
   CalendarIcon,
@@ -41,7 +40,6 @@ export default function MoreScreen({ navigation }: any) {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
   const [deviceCounts, setDeviceCounts] = useState<{ online: number; total: number } | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -52,16 +50,6 @@ export default function MoreScreen({ navigation }: any) {
         if (data) setDeviceCounts({ online: data.filter(d => d.status === 'online').length, total: data.length });
       });
   }, [isAdmin]);
-
-  const name = profile?.full_name || 'Admin';
-  const initials =
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map(w => w[0])
-      .join('')
-      .toUpperCase() || 'A';
 
   function renderTiles(tiles: Tile[]) {
     return (
@@ -88,30 +76,7 @@ export default function MoreScreen({ navigation }: any) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 24 }}>
-      <View style={styles.band}>
-        <View style={styles.profileCard}>
-          <View style={styles.profileAvatar}>
-            {profile?.photo_url ? (
-              <Image source={{ uri: profile.photo_url }} style={styles.profileAvatarImg} />
-            ) : (
-              <Text style={styles.profileAvatarText}>{initials}</Text>
-            )}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.profileName} numberOfLines={1}>
-              {name}
-            </Text>
-            <Text style={styles.profileSub} numberOfLines={1}>
-              {isAdmin ? 'Owner' : 'HR'}
-              {profile?.company_name ? ` · ${profile.company_name}` : ''}
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.profileBtn} onPress={() => setMenuOpen(true)}>
-            <Text style={styles.profileBtnText}>Profile</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
+      {/* No profile card here: the header avatar already opens the account menu. */}
       <View style={styles.body}>
         <Text style={styles.groupTitle}>Attendance</Text>
         {renderTiles(ATTENDANCE_TILES)}
@@ -123,31 +88,12 @@ export default function MoreScreen({ navigation }: any) {
           <Text style={styles.signOutText}>Sign out</Text>
         </TouchableOpacity>
       </View>
-
-      <AccountMenuModal visible={menuOpen} onClose={() => setMenuOpen(false)} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.slate100 },
-  band: { backgroundColor: colors.accent, paddingHorizontal: 16, paddingBottom: 18 },
-  profileCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.12)' },
-  profileAvatar: {
-    height: 48,
-    width: 48,
-    borderRadius: 24,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  profileAvatarImg: { height: '100%', width: '100%' },
-  profileAvatarText: { fontSize: 16, fontWeight: '800', color: colors.accent },
-  profileName: { fontSize: 16, fontWeight: '800', color: colors.white },
-  profileSub: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.82)', marginTop: 1 },
-  profileBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, backgroundColor: colors.white },
-  profileBtnText: { fontSize: 12, fontWeight: '800', color: colors.accent },
   body: { paddingHorizontal: 16 },
   groupTitle: {
     marginTop: 18,
