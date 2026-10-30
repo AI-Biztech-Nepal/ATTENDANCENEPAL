@@ -249,14 +249,14 @@ export default function DevicesPage() {
   useEffect(() => {
     const channel = supabase
       .channel('devices-live')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'devices' }, payload => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'attendance', table: 'devices' }, payload => {
         setDevices(prev => [...prev, payload.new as Device]);
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'devices' }, payload => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'attendance', table: 'devices' }, payload => {
         const updated = payload.new as Device;
         setDevices(prev => prev.map(d => (d.id === updated.id ? updated : d)));
       })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'devices' }, payload => {
+      .on('postgres_changes', { event: 'DELETE', schema: 'attendance', table: 'devices' }, payload => {
         const removed = payload.old as Device;
         setDevices(prev => prev.filter(d => d.id !== removed.id));
       })

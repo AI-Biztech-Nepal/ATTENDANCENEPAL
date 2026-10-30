@@ -462,6 +462,7 @@ async function configure(email, password) {
   status.lastError = null;
 
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    db: { schema: 'attendance' },
     auth: { autoRefreshToken: true, persistSession: false },
     realtime: { transport: WebSocket },
   });

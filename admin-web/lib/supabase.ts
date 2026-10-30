@@ -26,5 +26,6 @@ export const supabaseConfigured = isValidHttpUrl(supabaseUrl) && Boolean(supabas
 
 export const supabase = createClient(
   isValidHttpUrl(supabaseUrl) ? (supabaseUrl as string) : 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-anon-key'
+  supabaseAnonKey || 'placeholder-anon-key',
+  { db: { schema: 'attendance' as 'public' } }
 );

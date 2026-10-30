@@ -130,7 +130,7 @@ export default function DashboardScreen({ navigation }: any) {
       .channel('attendance-live')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'attendance_logs' },
+        { event: 'INSERT', schema: 'attendance', table: 'attendance_logs' },
         payload => {
           const log = payload.new as AttendanceLog;
           setFeed(prev => [log, ...prev].slice(0, 20));

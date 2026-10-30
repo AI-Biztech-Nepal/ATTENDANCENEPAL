@@ -95,6 +95,7 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !BRIDGE_EMAIL || !BRIDGE_PASSWORD) {
 // process keeps running; persistSession is off since there's no browser
 // storage to persist to here.
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  db: { schema: 'attendance' },
   auth: { autoRefreshToken: true, persistSession: false },
   realtime: { transport: WebSocket },
 });

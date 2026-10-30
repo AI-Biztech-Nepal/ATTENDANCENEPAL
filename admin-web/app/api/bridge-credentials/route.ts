@@ -92,6 +92,10 @@ export async function POST(req: NextRequest) {
   const { error: linkError } = await admin
     .from('profiles')
     .upsert({ id: created.user.id, role: 'admin', company_id: auth.companyId, is_device_bridge: true }, { onConflict: 'id' });
+  // TODO(portal): same as create-login, but service_role 'admin' and org = auth.companyId:
+  // core.memberships + core.service_roles (service_key 'attendance', role 'admin') +
+  // core.profiles.active_org_id = auth.companyId. DELETE below also needs the matching
+  // core.memberships / core.service_roles rows removed.
   if (linkError) {
     // Same rollback pattern as create-login: don't leave an orphaned auth
     // user nobody can see or manage from this page.

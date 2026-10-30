@@ -42,5 +42,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: createError?.message ?? 'Could not create the account.' }, { status: 400 });
   }
 
+  // TODO(portal): the old handle_new_user() trigger created the company + admin profile from
+  // user_metadata (company_name, location). In the portal, this route must instead create the org,
+  // then core.memberships (org = new org), core.service_roles (service_key 'attendance',
+  // role 'admin') and core.profiles.active_org_id = new org. Needs the portal function.
   return NextResponse.json({ email });
 }

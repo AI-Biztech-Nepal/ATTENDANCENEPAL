@@ -10,6 +10,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  db: { schema: 'attendance' as 'public' },
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,

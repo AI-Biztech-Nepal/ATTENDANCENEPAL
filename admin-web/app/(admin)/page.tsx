@@ -128,7 +128,7 @@ export default function DashboardPage() {
 
     const channel = supabase
       .channel('dashboard-live-feed')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, payload => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'attendance', table: 'attendance_logs' }, payload => {
         const log = payload.new as AttendanceLog;
         setLogs(prev => [log, ...prev]);
       })

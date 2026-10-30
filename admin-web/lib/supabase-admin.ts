@@ -15,6 +15,7 @@ export function getSupabaseAdmin() {
     throw new Error('SUPABASE_SERVICE_ROLE_KEY (or NEXT_PUBLIC_SUPABASE_URL) is not configured on the server.');
   }
   return createClient(supabaseUrl, serviceRoleKey, {
+    db: { schema: 'attendance' as 'public' },
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }

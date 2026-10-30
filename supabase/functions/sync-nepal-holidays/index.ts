@@ -166,7 +166,9 @@ Deno.serve(async req => {
       });
     }
 
-    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
+      db: { schema: 'attendance' },
+    });
 
     // The table mirrors hamropatro per BS year. Upsert first (re-running is
     // harmless), then drop rows of those years this run didn't see (a date

@@ -21,6 +21,7 @@ Deno.serve(async req => {
     // can only ever see/act on the caller's own company, same as every
     // other admin-web request.
     const callerClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+      db: { schema: 'attendance' },
       global: { headers: { Authorization: authHeader } },
     });
 
@@ -38,7 +39,9 @@ Deno.serve(async req => {
     // employees RLS is per-employee, not per-admin, so this step needs to
     // bypass it (same pattern as admin-web/lib/supabase-admin.ts's
     // server-only API routes).
-    const adminClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const adminClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
+      db: { schema: 'attendance' },
+    });
 
     const { data: employees } = await adminClient.from('employees').select('id').eq('company_id', profile.company_id).eq('status', 'active');
     const employeeIds = (employees ?? []).map(e => e.id);

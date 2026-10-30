@@ -32,6 +32,7 @@ const { createClient } = require('@supabase/supabase-js');
 // WebSocket global. Passing `ws` explicitly avoids that crash without
 // requiring a Node upgrade.
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+  db: { schema: 'attendance' },
   realtime: { transport: WebSocket },
 });
 

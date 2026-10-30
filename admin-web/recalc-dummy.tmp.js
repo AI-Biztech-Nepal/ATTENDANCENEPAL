@@ -1,6 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const admin = createClient(URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+const admin = createClient(URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { db: { schema: 'attendance' }, auth: { autoRefreshToken: false, persistSession: false } });
 const EMAIL = 'dummy@gmail.com';
 const CID = '3022240a-396c-4330-88e3-25f535f953d8';
 
@@ -8,7 +8,7 @@ async function main() {
   // Session as the dummy company's admin (no password change, no email sent) so RLS scopes the recompute to this company only.
   const { data: link, error: lErr } = await admin.auth.admin.generateLink({ type: 'magiclink', email: EMAIL });
   if (lErr) throw lErr;
-  const user = createClient(URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+  const user = createClient(URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, { db: { schema: 'attendance' }, auth: { autoRefreshToken: false, persistSession: false } });
   const { error: vErr } = await user.auth.verifyOtp({ token_hash: link.properties.hashed_token, type: 'magiclink' });
   if (vErr) throw vErr;
   const { data: { user: u } } = await user.auth.getUser();
