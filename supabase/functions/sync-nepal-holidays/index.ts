@@ -113,6 +113,16 @@ function mergeFestivalRuns(rows: ParsedRow[]): HolidayRange[] {
   return out;
 }
 
+/** A BS year is AD + 56 (Jan to mid-April) or AD + 57 (mid-April on). Rows
+ * must be within a year of today's BS year, and their AD date must agree with
+ * their own BS year — so a hamropatro layout change that still happens to
+ * match ROW_RE can't write junk years or mismatched dates into the table. */
+function plausibleRow(row: ParsedRow, todayAdYear: number): boolean {
+  const adYear = Number(row.date.slice(0, 4));
+  const yearOffset = row.bsYear - adYear;
+  return row.bsYear >= todayAdYear + 56 && row.bsYear <= todayAdYear + 58 && (yearOffset === 56 || yearOffset === 57);
+}
+
 export async function scrapeHamroPatro(): Promise<HolidayRange[]> {
   const res = await fetch(SOURCE_URL, {
     headers: {
@@ -126,12 +136,14 @@ export async function scrapeHamroPatro(): Promise<HolidayRange[]> {
   if (!res.ok) throw new Error(`hamropatro.com returned ${res.status}`);
   const html = await res.text();
 
+  const todayAdYear = new Date().getUTCFullYear();
   const rows: ParsedRow[] = [];
   for (const m of html.matchAll(ROW_RE)) {
     const bsYear = Number(m[1]);
     const date = parseAdDate(m[5]);
     if (!date) continue;
-    rows.push({ bsYear, name: shortName(m[4]), date });
+    const row = { bsYear, name: shortName(m[4]), date };
+    if (plausibleRow(row, todayAdYear)) rows.push(row);
   }
   return mergeFestivalRuns(rows);
 }
@@ -155,19 +167,27 @@ Deno.serve(async req => {
 
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-    // Full replace per BS year seen in this scrape — the table is a pure
-    // mirror of hamropatro, not user data, so there's nothing to preserve
-    // across a run beyond "whatever the site says right now."
+    // The table mirrors hamropatro per BS year. Upsert first (re-running is
+    // harmless), then drop rows of those years this run didn't see (a date
+    // hamropatro moved or removed) — in that order, so a failed write leaves
+    // the previous data in place instead of an emptied year.
+    const runStartedAt = new Date().toISOString();
     const bsYears = [...new Set(holidays.map(h => h.bsYear))];
-    const { error: deleteError } = await supabase.from('nepal_public_holidays').delete().in('bs_year', bsYears);
-    if (deleteError) throw deleteError;
-
-    const { error: insertError } = await supabase.from('nepal_public_holidays').insert(
-      holidays.map(h => ({ bs_year: h.bsYear, name: h.name, start_date: h.start, end_date: h.end }))
+    const byKey = new Map(holidays.map(h => [`${h.bsYear}|${h.start}`, h]));
+    const { error: upsertError } = await supabase.from('nepal_public_holidays').upsert(
+      [...byKey.values()].map(h => ({ bs_year: h.bsYear, name: h.name, start_date: h.start, end_date: h.end, scraped_at: runStartedAt })),
+      { onConflict: 'bs_year,start_date' }
     );
-    if (insertError) throw insertError;
+    if (upsertError) throw upsertError;
 
-    return new Response(JSON.stringify({ upserted: holidays.length, bsYears }), {
+    const { error: pruneError } = await supabase
+      .from('nepal_public_holidays')
+      .delete()
+      .in('bs_year', bsYears)
+      .lt('scraped_at', runStartedAt);
+    if (pruneError) throw pruneError;
+
+    return new Response(JSON.stringify({ upserted: byKey.size, bsYears }), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (err) {

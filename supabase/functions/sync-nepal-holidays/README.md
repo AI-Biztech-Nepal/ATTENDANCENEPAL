@@ -1,47 +1,64 @@
 # sync-nepal-holidays
 
-Scrapes hamropatro.com's public holiday calendar and replaces the `nepal_public_holidays` table
-with whatever it currently says. Called automatically once a day by `pg_cron` at 23:15 UTC (05:00
-Asia/Kathmandu) — see `supabase/migrations/20260823200000_nepal_public_holidays.sql`. Powers the
-Name-field suggestions on the New Holiday form (`admin-web/app/week-off/page.tsx`).
+Scrapes hamropatro.com's public holiday calendar into the `nepal_public_holidays` table. Called
+automatically once a day by `pg_cron` at 23:15 UTC (05:00 Asia/Kathmandu) — see
+`supabase/migrations/20261030120000_nepal_holidays_cron_vault.sql`. Powers the Name-field
+suggestions on the New Holiday form (`admin-web/app/(admin)/week-off/page.tsx`).
 
 Nepali festival dates are lunar/panchang-based and shift every BS year — there's no formula for
 them, only a real published calendar, which is why this scrapes a live source daily instead of a
 hardcoded list that would eventually go stale or get stuck on one year.
 
+Each run upserts on `(bs_year, start_date)` and then removes rows of the scraped BS years that the
+run didn't see, so re-running is harmless and a failed write never empties the table. Rows whose
+BS year isn't within a year of today's, or whose AD date doesn't match their BS year, are dropped
+before writing, so a hamropatro layout change can't insert junk.
+
 ## One-time setup
 
-The code and the cron schedule are both already in place, but — same as `notify-week-off` — the
-function itself still needs deploying by someone with real Supabase CLI credentials; a coding
-assistant has no browser/stored logins to do this step:
+Both steps need someone with access to the Supabase project — they can't be done from the repo.
 
-```
-cd supabase
-npx supabase login    # your own Supabase account
-npx supabase link --project-ref <your-project-ref>   # find this in the Supabase dashboard URL
-npx supabase functions deploy sync-nepal-holidays
-```
+1. **Deploy the function** (needs the Supabase CLI and your own login):
 
-No extra secrets to configure — it only uses `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, which
-every Edge Function gets automatically.
+   ```
+   cd supabase
+   npx supabase login
+   npx supabase link --project-ref <your-project-ref>
+   npx supabase functions deploy sync-nepal-holidays
+   ```
 
-## Until it's deployed
+2. **Store the two values the cron job reads in Vault** (Dashboard → SQL Editor). The service
+   role key is under Project Settings → API. Never commit it — this repo is public.
 
-The `nepal_public_holidays` table already has a one-time seed of BS 2083's holidays (inserted by
-the migration itself), so the New Holiday form's suggestions work from day one — they just won't
-self-update until this function is deployed and the daily cron job actually has something to call.
-The cron job fires on schedule regardless; before deploy it just gets a harmless 404 each time.
+   ```sql
+   select vault.create_secret('https://<your-project-ref>.supabase.co', 'project_url');
+   select vault.create_secret('<your-service-role-key>', 'service_role_key');
+   ```
+
+   If the migration above hasn't been applied yet (it applies on push to `main` when the GitHub
+   integration is connected), run its `do $$ ... $$` block in the SQL editor as well.
 
 ## Verifying it worked
 
-After deploying, trigger it once by hand to confirm:
+Run the job's command once by hand in the SQL editor instead of waiting for the night:
 
-```
-curl -X POST "https://<your-project-ref>.supabase.co/functions/v1/sync-nepal-holidays" \
-  -H "Authorization: Bearer <your-service-role-key>"
+```sql
+select command from cron.job where jobname = 'sync-nepal-holidays-daily';  -- copy, then run it
+select status_code, content from net._http_response order by created desc limit 1;
 ```
 
-A healthy response looks like `{"upserted":33,"bsYears":[2083]}`. `{"upserted":0,...}` means
-hamropatro's page structure changed and the scraper's regex (in `index.ts`, `ROW_RE`) needs
-updating to match — it deliberately leaves the existing table alone rather than wiping it in that
-case, so nothing breaks silently, but the data will also stop refreshing until that regex is fixed.
+A healthy response is `200` with `{"upserted":35,"bsYears":[2083]}` (the count changes as
+hamropatro updates). `{"upserted":0,...}` means hamropatro's page structure changed and `ROW_RE`
+in `index.ts` needs updating — the table is left untouched in that case. The next morning:
+
+```sql
+select status, return_message from cron.job_run_details order by start_time desc limit 3;
+select max(scraped_at) from nepal_public_holidays;
+```
+
+## After the portal migration
+
+The single portal Supabase project does not recreate this job. Once Attendance moves there, repeat
+both setup steps against the portal project — the function writes to
+`attendance.nepal_public_holidays`, so update the table name in `index.ts` — and create the cron
+job there with the portal's URL and key in its Vault.
