@@ -84,15 +84,22 @@ export async function POST(req: NextRequest) {
       { id: created.user.id, employee_id: employeeId, role: 'employee', company_id: callerProfile.company_id },
       { onConflict: 'id' }
     );
-  // TODO(portal): after this upsert, call the portal function so the new user also gets, in the
-  // portal project: core.memberships (user_id = created.user.id, org_id = callerProfile.company_id),
-  // core.service_roles (service_key 'attendance', role 'employee'), and
-  // core.profiles.active_org_id = callerProfile.company_id. Roll back like the deleteUser below if it fails.
   if (linkError) {
     // Roll back the orphaned auth user so a failed link doesn't leave a
     // dangling account nobody can see from the Employees page.
     await admin.auth.admin.deleteUser(created.user.id);
     return NextResponse.json({ error: linkError.message }, { status: 500 });
+  }
+
+  const { error: provErr } = await admin.schema('core').rpc('provision_service_user', {
+    p_org: callerProfile.company_id,
+    p_user: created.user.id,
+    p_service: 'attendance',
+    p_role: 'employee',
+  });
+  if (provErr) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    return NextResponse.json({ error: provErr.message }, { status: 500 });
   }
 
   return NextResponse.json({ email, employeeName: employee.name });

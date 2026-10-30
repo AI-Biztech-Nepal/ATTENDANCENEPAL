@@ -54,8 +54,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'This employee has no login to reset.' }, { status: 404 });
   }
 
-  // TODO(portal): nothing to write here — only updates the password of an existing auth user, whose
-  // memberships/service_roles already exist. Confirm link.id is that portal auth user's id.
   const { error: updateError } = await admin.auth.admin.updateUserById(link.id, { password });
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 400 });

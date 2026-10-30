@@ -92,15 +92,22 @@ export async function POST(req: NextRequest) {
   const { error: linkError } = await admin
     .from('profiles')
     .upsert({ id: created.user.id, role: 'admin', company_id: auth.companyId, is_device_bridge: true }, { onConflict: 'id' });
-  // TODO(portal): same as create-login, but service_role 'admin' and org = auth.companyId:
-  // core.memberships + core.service_roles (service_key 'attendance', role 'admin') +
-  // core.profiles.active_org_id = auth.companyId. DELETE below also needs the matching
-  // core.memberships / core.service_roles rows removed.
   if (linkError) {
     // Same rollback pattern as create-login: don't leave an orphaned auth
     // user nobody can see or manage from this page.
     await admin.auth.admin.deleteUser(created.user.id);
     return NextResponse.json({ error: linkError.message }, { status: 500 });
+  }
+
+  const { error: provErr } = await admin.schema('core').rpc('provision_service_user', {
+    p_org: auth.companyId,
+    p_user: created.user.id,
+    p_service: 'attendance',
+    p_role: 'admin',
+  });
+  if (provErr) {
+    await admin.auth.admin.deleteUser(created.user.id);
+    return NextResponse.json({ error: provErr.message }, { status: 500 });
   }
 
   const envFile = [
@@ -136,6 +143,13 @@ export async function DELETE(req: NextRequest) {
   if (!target || !target.is_device_bridge || target.company_id !== auth.companyId) {
     return NextResponse.json({ error: 'Credential not found.' }, { status: 404 });
   }
+
+  const { error: deprovErr } = await admin.schema('core').rpc('deprovision_service_user', {
+    p_org: auth.companyId,
+    p_user: id,
+    p_service: 'attendance',
+  });
+  if (deprovErr) return NextResponse.json({ error: deprovErr.message }, { status: 500 });
 
   const { error } = await admin.auth.admin.deleteUser(id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
