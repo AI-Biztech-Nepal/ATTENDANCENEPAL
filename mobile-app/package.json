@@ -10,6 +10,7 @@
     "build:web": "expo export --platform web"
   },
   "dependencies": {
+    "@expo-google-fonts/manrope": "^0.4.3",
     "@expo/metro-runtime": "~3.2.3",
     "@opentelemetry/api": "^1.9.1",
     "@react-native-async-storage/async-storage": "1.23.1",
@@ -24,6 +25,7 @@
     "expo-constants": "~16.0.2",
     "expo-device": "~6.0.2",
     "expo-file-system": "~17.0.1",
+    "expo-font": "~12.0.10",
     "expo-image-manipulator": "~12.0.5",
     "expo-image-picker": "~15.1.0",
     "expo-local-authentication": "~14.0.1",

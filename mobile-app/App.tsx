@@ -8,6 +8,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as LocalAuthentication from 'expo-local-authentication';
+import { useFonts } from 'expo-font';
+import { MANROPE_FONTS, applyManropeGlobally } from './src/lib/fonts';
 import { AuthProvider, useAuth } from './src/lib/AuthContext';
 import { CalendarSystemProvider } from './src/lib/CalendarSystemContext';
 import LoginScreen from './src/screens/LoginScreen';
@@ -203,6 +205,10 @@ function AdminDrawerNavigator() {
 function AppInner() {
   const { session, profile, loading, isSuperadmin, justSignedIn, clearJustSignedIn } = useAuth();
   const updateInfo = useUpdateCheck();
+  // Bundled font files, so this resolves almost instantly. On a load error
+  // the app still opens, just in the system font.
+  const [fontsLoaded, fontError] = useFonts(MANROPE_FONTS);
+  if (fontsLoaded) applyManropeGlobally();
 
   // Only ever true on a device that actually has biometrics set up — a
   // phone with no fingerprint/face enrolled never locks at all instead of
@@ -280,7 +286,7 @@ function AppInner() {
     return () => sub.remove();
   }, [biometricAvailable, authenticate]);
 
-  if (loading || (session && isSuperadmin === null)) {
+  if ((!fontsLoaded && !fontError) || loading || (session && isSuperadmin === null)) {
     return (
       <View style={styles.webOuter}>
         <View style={[styles.webInner, { justifyContent: 'center', alignItems: 'center' }]}>
