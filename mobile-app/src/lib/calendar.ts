@@ -196,3 +196,11 @@ export function formatAdDate(adKey: string | null | undefined, system: CalendarS
   }
   return NepaliDate.fromAD(new Date(Number(y), Number(mo) - 1, Number(d))).format('D MMMM YYYY');
 }
+
+/** "Thu, 30 Oct 2026  ·  13 Kartik 2083" — both calendars at once, for the
+ * greeting bands on the employee and owner home screens. */
+export function formatTodayLine(adKey: string): string {
+  const [y, mo, d] = adKey.split('-').map(Number);
+  const weekday = new Date(y, mo - 1, d).toLocaleDateString(undefined, { weekday: 'short' });
+  return `${weekday}, ${formatAdDate(adKey, 'AD')}  ·  ${formatAdDate(adKey, 'BS')}`;
+}

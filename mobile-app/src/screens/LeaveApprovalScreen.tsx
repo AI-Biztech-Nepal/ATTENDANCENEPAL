@@ -8,6 +8,7 @@ import { formatAdDate } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { nepalTodayIso } from '../lib/shift';
 import { fetchMyCompanyWeekOffConfig } from '../lib/weekOff';
+import { usePendingApprovals } from '../lib/PendingApprovals';
 import {
   NO_LEAVE_POLICY,
   fetchLeavePolicy,
@@ -39,9 +40,11 @@ function daysBetween(start: string, end: string) {
  * Leave, for an admin: the Requests list (approve / reject) and the yearly
  * Leave Balance — the same two tabs as the dashboard's Leave page, driven by
  * the same lib/leaveBalance.ts, so a balance here is the balance there.
+ * `embedded` (the owner's Approvals tab) shows the Requests list only.
  */
-export default function LeaveApprovalScreen() {
+export default function LeaveApprovalScreen({ embedded = false }: { embedded?: boolean }) {
   const { system } = useCalendarSystem();
+  const { refresh: refreshPending } = usePendingApprovals();
   const [tab, setTab] = useState<'requests' | 'balance'>('requests');
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -113,6 +116,7 @@ export default function LeaveApprovalScreen() {
     await supabase.from('leave_requests').update({ status, reviewed_by: data.user?.id, reviewed_at: new Date().toISOString() }).eq('id', id);
     setBusyId(null);
     reload();
+    refreshPending();
   }
 
   function startEdit(emp: Employee) {
@@ -178,18 +182,20 @@ export default function LeaveApprovalScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.tabBar}>
-        {(
-          [
-            ['requests', 'Requests'],
-            ['balance', 'Leave Balance'],
-          ] as const
-        ).map(([key, label]) => (
-          <TouchableOpacity key={key} style={[styles.tab, tab === key && styles.tabActive]} onPress={() => setTab(key)}>
-            <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {!embedded && (
+        <View style={styles.tabBar}>
+          {(
+            [
+              ['requests', 'Requests'],
+              ['balance', 'Leave Balance'],
+            ] as const
+          ).map(([key, label]) => (
+            <TouchableOpacity key={key} style={[styles.tab, tab === key && styles.tabActive]} onPress={() => setTab(key)}>
+              <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {tab === 'requests' ? (
         <>
@@ -223,11 +229,11 @@ export default function LeaveApprovalScreen() {
                 {r.reason ? <Text style={styles.reason}>{r.reason}</Text> : null}
                 {r.status === 'pending' && (
                   <View style={styles.actions}>
-                    <TouchableOpacity disabled={busyId === r.id} style={styles.approveBtn} onPress={() => review(r.id, 'approved')}>
-                      <Text style={styles.approveText}>Approve</Text>
-                    </TouchableOpacity>
                     <TouchableOpacity disabled={busyId === r.id} style={styles.rejectBtn} onPress={() => review(r.id, 'rejected')}>
                       <Text style={styles.rejectText}>Reject</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity disabled={busyId === r.id} style={styles.approveBtn} onPress={() => review(r.id, 'approved')}>
+                      <Text style={styles.approveText}>Approve</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -411,18 +417,18 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipText: { fontSize: 12, fontWeight: '600', color: colors.slate500, textTransform: 'capitalize' },
   chipTextActive: { color: colors.white },
-  card: { backgroundColor: colors.white, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.slate200 },
+  card: { backgroundColor: colors.white, borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.slate200 },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  name: { fontSize: 14, fontWeight: '700', color: colors.ink },
-  type: { fontSize: 11, color: colors.slate500, textTransform: 'capitalize', marginTop: 2 },
-  dates: { fontSize: 13, color: colors.slate500, marginTop: 8 },
-  dim: { color: colors.slate400, fontSize: 13 },
+  name: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  type: { fontSize: 12, fontWeight: '600', color: colors.slate500, textTransform: 'capitalize', marginTop: 2 },
+  dates: { fontSize: 13, fontWeight: '700', color: colors.ink, marginTop: 10 },
+  dim: { color: colors.slate500, fontSize: 13 },
   reason: { fontSize: 12, color: colors.slate500, marginTop: 4 },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  approveBtn: { backgroundColor: colors.good, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  approveText: { color: colors.white, fontSize: 12, fontWeight: '700' },
-  rejectBtn: { borderWidth: 1, borderColor: colors.slate200, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  rejectText: { color: colors.slate500, fontSize: 12, fontWeight: '700' },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  approveBtn: { flex: 1, height: 44, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  approveText: { color: colors.white, fontSize: 14, fontWeight: '800' },
+  rejectBtn: { flex: 1, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#fecaca', alignItems: 'center', justifyContent: 'center' },
+  rejectText: { color: colors.criticalText, fontSize: 14, fontWeight: '800' },
   empty: { textAlign: 'center', marginTop: 40, color: colors.slate400 },
   infoCard: { backgroundColor: colors.white, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.slate200 },
   infoTitle: { fontSize: 13, fontWeight: '700', color: colors.ink, marginBottom: 6 },

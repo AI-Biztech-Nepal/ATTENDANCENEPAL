@@ -7,6 +7,7 @@ import Badge from '../components/Badge';
 import { formatAdDate } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { nepalDateKey } from '../lib/shift';
+import { usePendingApprovals } from '../lib/PendingApprovals';
 
 const FILTERS = ['pending', 'approved', 'rejected', 'All'] as const;
 
@@ -19,8 +20,11 @@ type UnifiedRequest =
   | { kind: 'correction'; id: string; employee_id: string; status: string; created_at: string; data: CorrectionRequest }
   | { kind: 'gps'; id: string; employee_id: string; status: string; created_at: string; data: AttendanceGpsRequest };
 
-export default function CorrectionsScreen() {
+/** `kind` narrows the list to GPS check-ins or missed-punch corrections only —
+ * how the owner's Approvals tab embeds this screen; More › Corrections shows both. */
+export default function CorrectionsScreen({ kind }: { kind?: 'gps' | 'correction' }) {
   const { system } = useCalendarSystem();
+  const { refresh: refreshPending } = usePendingApprovals();
   const [requests, setRequests] = useState<CorrectionRequest[]>([]);
   const [gpsRequests, setGpsRequests] = useState<AttendanceGpsRequest[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -42,7 +46,10 @@ export default function CorrectionsScreen() {
     return [...corrections, ...gps].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [requests, gpsRequests]);
 
-  const filtered = useMemo(() => (filter === 'All' ? unified : unified.filter(r => r.status === filter)), [unified, filter]);
+  const filtered = useMemo(
+    () => unified.filter(r => (!kind || r.kind === kind) && (filter === 'All' || r.status === filter)),
+    [unified, filter, kind]
+  );
 
   async function approve(item: UnifiedRequest) {
     setBusyId(item.id);
@@ -50,6 +57,7 @@ export default function CorrectionsScreen() {
     setBusyId(null);
     if (error) Alert.alert('Could not approve', error.message);
     reload();
+    refreshPending();
   }
 
   async function reject(item: UnifiedRequest) {
@@ -62,6 +70,7 @@ export default function CorrectionsScreen() {
     setBusyId(null);
     if (error) Alert.alert('Could not reject', error.message);
     reload();
+    refreshPending();
   }
 
   return (
@@ -72,10 +81,12 @@ export default function CorrectionsScreen() {
         contentContainerStyle={{ padding: 16 }}
         ListHeaderComponent={
           <>
-            <Text style={styles.intro}>
-              Requests from employees — a missed punch, or a live check-in/out submitted from their phone. Approving a missed punch
-              recalculates that day's hours and locks it against the nightly recompute.
-            </Text>
+            {!kind && (
+              <Text style={styles.intro}>
+                Requests from employees — a missed punch, or a live check-in/out submitted from their phone. Approving a missed punch
+                recalculates that day's hours and locks it against the nightly recompute.
+              </Text>
+            )}
             <View style={styles.filterBar}>
               {FILTERS.map(f => (
                 <TouchableOpacity key={f} style={[styles.chip, filter === f && styles.chipActive]} onPress={() => setFilter(f)}>
@@ -111,11 +122,11 @@ export default function CorrectionsScreen() {
               ) : null}
               {item.status === 'pending' && (
                 <View style={styles.actions}>
-                  <TouchableOpacity disabled={busyId === item.id} style={styles.approveBtn} onPress={() => approve(item)}>
-                    <Text style={styles.approveText}>Approve</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity disabled={busyId === item.id} style={styles.rejectBtn} onPress={() => reject(item)}>
                     <Text style={styles.rejectText}>Reject</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity disabled={busyId === item.id} style={styles.approveBtn} onPress={() => approve(item)}>
+                    <Text style={styles.approveText}>Approve</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -129,24 +140,24 @@ export default function CorrectionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.slate50 },
+  container: { flex: 1, backgroundColor: colors.slate100 },
   intro: { fontSize: 12, color: colors.slate500, lineHeight: 18, marginBottom: 12 },
   filterBar: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.slate200 },
   chipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipText: { fontSize: 12, fontWeight: '600', color: colors.slate500, textTransform: 'capitalize' },
   chipTextActive: { color: colors.white },
-  card: { backgroundColor: colors.white, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.slate200 },
+  card: { backgroundColor: colors.white, borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.slate200 },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  name: { fontSize: 14, fontWeight: '700', color: colors.ink },
-  type: { fontSize: 11, color: colors.slate500, marginTop: 2 },
-  detail: { fontSize: 13, color: colors.slate500, marginTop: 8 },
+  name: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  type: { fontSize: 12, fontWeight: '600', color: colors.slate500, marginTop: 2 },
+  detail: { fontSize: 13, fontWeight: '700', color: colors.ink, marginTop: 10 },
   reason: { fontSize: 12, color: colors.slate500, marginTop: 4 },
-  locationLink: { fontSize: 12, color: colors.accent, marginTop: 4, fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-  approveBtn: { backgroundColor: colors.good, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  approveText: { color: colors.white, fontSize: 12, fontWeight: '700' },
-  rejectBtn: { borderWidth: 1, borderColor: colors.slate200, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8 },
-  rejectText: { color: colors.slate500, fontSize: 12, fontWeight: '700' },
-  empty: { textAlign: 'center', marginTop: 40, color: colors.slate400 },
+  locationLink: { fontSize: 13, color: colors.accent, marginTop: 6, fontWeight: '800' },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  approveBtn: { flex: 1, height: 44, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  approveText: { color: colors.white, fontSize: 14, fontWeight: '800' },
+  rejectBtn: { flex: 1, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#fecaca', alignItems: 'center', justifyContent: 'center' },
+  rejectText: { color: colors.criticalText, fontSize: 14, fontWeight: '800' },
+  empty: { textAlign: 'center', marginTop: 40, color: colors.slate500 },
 });

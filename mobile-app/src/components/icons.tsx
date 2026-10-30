@@ -124,6 +124,28 @@ export function ChevronIcon({ size = 16, color = '#94a3b8' }: IconProps) {
     </Svg>
   );
 }
+export function InboxIcon({ size = 20, color = '#94a3b8' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
+      <Path strokeLinecap="round" strokeLinejoin="round" d="M22 12h-6l-2 3h-4l-2-3H2" />
+      <Path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"
+      />
+    </Svg>
+  );
+}
+export function GridIcon({ size = 20, color = '#94a3b8' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
+      <Rect x={3} y={3} width={7} height={7} rx={1.5} />
+      <Rect x={14} y={3} width={7} height={7} rx={1.5} />
+      <Rect x={3} y={14} width={7} height={7} rx={1.5} />
+      <Rect x={14} y={14} width={7} height={7} rx={1.5} />
+    </Svg>
+  );
+}
 export function ChevronRightIcon({ size = 18, color = '#64748b' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>

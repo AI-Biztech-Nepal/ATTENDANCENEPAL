@@ -5,7 +5,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createDrawerNavigator } from '@react-navigation/drawer';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useFonts } from 'expo-font';
@@ -34,13 +33,25 @@ import MyCalendarScreen from './src/screens/MyCalendarScreen';
 import MyPayrollScreen from './src/screens/MyPayrollScreen';
 import MyTasksScreen from './src/screens/MyTasksScreen';
 import MyProfileScreen from './src/screens/MyProfileScreen';
+import ApprovalsScreen from './src/screens/ApprovalsScreen';
+import MoreScreen from './src/screens/MoreScreen';
 import AdminHeader from './src/navigation/AdminHeader';
 import EmployeeHeader from './src/navigation/EmployeeHeader';
 import UpdateBanner from './src/components/UpdateBanner';
 import { useUpdateCheck } from './src/lib/useUpdateCheck';
-import AdminSidebarContent from './src/navigation/AdminSidebarContent';
+import { PendingApprovalsProvider, usePendingApprovals } from './src/lib/PendingApprovals';
 import { colors } from './src/theme';
-import { CalendarIcon, CardIcon, CheckCircleIcon, PersonIcon, TaskIcon } from './src/components/icons';
+import {
+  CalendarIcon,
+  CardIcon,
+  CheckCircleIcon,
+  GridIcon,
+  HomeIcon,
+  InboxIcon,
+  PersonIcon,
+  TaskIcon,
+  UsersIcon,
+} from './src/components/icons';
 
 // Employee-facing flow mirrors admin-web's EmployeeShell: a 5-tab bottom bar
 // (Check In/Out, Calendar, Payroll, Tasks, Profile) with Leave reached as a
@@ -61,6 +72,29 @@ export type EmployeeStackParamList = {
 };
 const EmployeeStack = createNativeStackNavigator<EmployeeStackParamList>();
 
+// Shared by the employee and owner tab bars so the two always look alike.
+function tabBarOptions(insets: { bottom: number }) {
+  return {
+    // Taller than the default to fit the active-tab dot under the label;
+    // insets.bottom keeps it clear of gesture/nav bars.
+    tabBarStyle: {
+      backgroundColor: colors.white,
+      borderTopColor: colors.slate200,
+      height: 62 + insets.bottom,
+      paddingTop: 6,
+      paddingBottom: 6 + insets.bottom,
+    },
+    tabBarActiveTintColor: colors.accent,
+    tabBarInactiveTintColor: colors.slate500,
+    tabBarLabel: ({ focused, color, children }: { focused: boolean; color: string; children: string }) => (
+      <View style={styles.tabLabel}>
+        <Text style={[styles.tabLabelText, { color, fontWeight: focused ? '800' : '600' }]}>{children}</Text>
+        <View style={[styles.tabDot, focused && { backgroundColor: colors.accent }]} />
+      </View>
+    ),
+  };
+}
+
 function EmployeeTabNavigator() {
   const insets = useSafeAreaInsets();
   return (
@@ -70,23 +104,7 @@ function EmployeeTabNavigator() {
       backBehavior="history"
       screenOptions={{
         header: props => <EmployeeHeader {...props} />,
-        // Taller than the default to fit the active-tab dot under
-        // the label; insets.bottom keeps it clear of gesture/nav bars.
-        tabBarStyle: {
-          backgroundColor: colors.white,
-          borderTopColor: colors.slate200,
-          height: 62 + insets.bottom,
-          paddingTop: 6,
-          paddingBottom: 6 + insets.bottom,
-        },
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.slate500,
-        tabBarLabel: ({ focused, color, children }) => (
-          <View style={styles.tabLabel}>
-            <Text style={[styles.tabLabelText, { color, fontWeight: focused ? '800' : '600' }]}>{children}</Text>
-            <View style={[styles.tabDot, focused && { backgroundColor: colors.accent }]} />
-          </View>
-        ),
+        ...tabBarOptions(insets),
       }}
     >
       <EmployeeTab.Screen
@@ -118,87 +136,109 @@ function EmployeeTabNavigator() {
   );
 }
 
-// Admin flow mirrors admin-web's AppShell: a left sidebar (here, a slide-out
-// drawer since a phone has no room for a permanent one) with the same nav
-// groups, and every screen wrapped in its own single-screen stack purely so
-// each one gets the same shared header (menu button + title + bell +
-// device count + account avatar) instead of the drawer's own header.
-const Drawer = createDrawerNavigator();
-const DashboardStack = createNativeStackNavigator();
+// Owner/HR flow (mobile only — admin-web keeps its sidebar): a 5-tab bottom
+// bar like the employee app — Home, Approvals, Employees, Payroll, More —
+// where More holds everything the old side menu had beyond those. Each tab
+// is its own stack so sub-pages (Employee Details, Shifts, …) push under the
+// shared AdminHeader and get its back button.
+const AdminTab = createBottomTabNavigator();
+const HomeStack = createNativeStackNavigator();
+const ApprovalsStack = createNativeStackNavigator();
 const EmployeesAdminStack = createNativeStackNavigator();
-const AttendanceAdminStack = createNativeStackNavigator();
 const PayrollAdminStack = createNativeStackNavigator();
-const TasksAdminStack = createNativeStackNavigator();
-const DevicesAdminStack = createNativeStackNavigator();
+const MoreStack = createNativeStackNavigator();
+const adminStackOptions = { header: (props: any) => <AdminHeader {...props} /> };
 
-function DashboardStackScreen() {
+function HomeStackScreen() {
   return (
-    <DashboardStack.Navigator screenOptions={{ header: props => <AdminHeader {...props} /> }}>
-      <DashboardStack.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Live Dashboard' }} />
-    </DashboardStack.Navigator>
+    <HomeStack.Navigator screenOptions={adminStackOptions}>
+      <HomeStack.Screen name="Dashboard" component={DashboardScreen} options={{ title: 'Home' }} />
+    </HomeStack.Navigator>
+  );
+}
+function ApprovalsStackScreen() {
+  return (
+    <ApprovalsStack.Navigator screenOptions={adminStackOptions}>
+      <ApprovalsStack.Screen name="Approvals" component={ApprovalsScreen} options={{ title: 'Approvals' }} />
+    </ApprovalsStack.Navigator>
   );
 }
 function EmployeesStackScreen() {
   return (
-    <EmployeesAdminStack.Navigator screenOptions={{ header: props => <AdminHeader {...props} /> }}>
+    <EmployeesAdminStack.Navigator screenOptions={adminStackOptions}>
       <EmployeesAdminStack.Screen name="EmployeesList" component={EmployeesScreen} options={{ title: 'Employees' }} />
       <EmployeesAdminStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee Details' }} />
-      <EmployeesAdminStack.Screen name="Shifts" component={ShiftsScreen} options={{ title: 'Shift Roster Management' }} />
-      <EmployeesAdminStack.Screen name="Branches" component={BranchesScreen} options={{ title: 'Branch / Department' }} />
     </EmployeesAdminStack.Navigator>
-  );
-}
-function AttendanceStackScreen() {
-  return (
-    <AttendanceAdminStack.Navigator screenOptions={{ header: props => <AdminHeader {...props} /> }}>
-      <AttendanceAdminStack.Screen name="AttendanceList" component={HistoryScreen} options={{ title: 'Attendance' }} />
-      <AttendanceAdminStack.Screen name="Leave" component={LeaveApprovalScreen} options={{ title: 'Leave' }} />
-      <AttendanceAdminStack.Screen name="Corrections" component={CorrectionsScreen} options={{ title: 'Attendance Corrections' }} />
-      <AttendanceAdminStack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Attendance Calendar' }} />
-    </AttendanceAdminStack.Navigator>
   );
 }
 function PayrollStackScreen() {
   return (
-    <PayrollAdminStack.Navigator screenOptions={{ header: props => <AdminHeader {...props} /> }}>
+    <PayrollAdminStack.Navigator screenOptions={adminStackOptions}>
       <PayrollAdminStack.Screen name="Payroll" component={PayrollScreen} options={{ title: 'Payroll' }} />
       <PayrollAdminStack.Screen name="PayrollDetail" component={AdminPayrollDetailScreen} options={{ title: 'Payroll Detail' }} />
     </PayrollAdminStack.Navigator>
   );
 }
-function TasksStackScreen() {
-  return (
-    <TasksAdminStack.Navigator screenOptions={{ header: props => <AdminHeader {...props} /> }}>
-      <TasksAdminStack.Screen name="Tasks" component={TasksScreen} options={{ title: 'Tasks & Rewards' }} />
-    </TasksAdminStack.Navigator>
-  );
-}
-function DevicesStackScreen() {
-  return (
-    <DevicesAdminStack.Navigator screenOptions={{ header: props => <AdminHeader {...props} /> }}>
-      <DevicesAdminStack.Screen name="Devices" component={DevicesScreen} options={{ title: 'Biometric Sync Devices' }} />
-    </DevicesAdminStack.Navigator>
-  );
-}
-
-function AdminDrawerNavigator() {
+function MoreStackScreen() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
   return (
-    <Drawer.Navigator
-      // 'history' so back returns to the previously visited section, same
-      // as the employee tabs, instead of always jumping to the Dashboard.
-      backBehavior="history"
-      drawerContent={props => <AdminSidebarContent {...props} />}
-      screenOptions={{ headerShown: false, drawerType: 'front', overlayColor: 'rgba(0,0,0,0.4)', drawerStyle: { width: 240 } }}
-    >
-      <Drawer.Screen name="Dashboard" component={DashboardStackScreen} />
-      <Drawer.Screen name="Employees" component={EmployeesStackScreen} />
-      <Drawer.Screen name="Attendance" component={AttendanceStackScreen} />
-      <Drawer.Screen name="Payroll" component={PayrollStackScreen} />
-      <Drawer.Screen name="Tasks" component={TasksStackScreen} />
-      {isAdmin && <Drawer.Screen name="Devices" component={DevicesStackScreen} />}
-    </Drawer.Navigator>
+    <MoreStack.Navigator screenOptions={adminStackOptions}>
+      <MoreStack.Screen name="More" component={MoreScreen} options={{ title: 'More' }} />
+      <MoreStack.Screen name="Attendance" component={HistoryScreen} options={{ title: 'Attendance' }} />
+      <MoreStack.Screen name="Calendar" component={CalendarScreen} options={{ title: 'Attendance Calendar' }} />
+      <MoreStack.Screen name="Corrections" component={CorrectionsScreen} options={{ title: 'Attendance Corrections' }} />
+      <MoreStack.Screen name="Leave" component={LeaveApprovalScreen} options={{ title: 'Leave' }} />
+      <MoreStack.Screen name="Tasks" component={TasksScreen} options={{ title: 'Tasks & Rewards' }} />
+      {isAdmin && (
+        <>
+          <MoreStack.Screen name="Shifts" component={ShiftsScreen} options={{ title: 'Shift Roster Management' }} />
+          <MoreStack.Screen name="Branches" component={BranchesScreen} options={{ title: 'Branch / Department' }} />
+          <MoreStack.Screen name="Devices" component={DevicesScreen} options={{ title: 'Biometric Sync Devices' }} />
+          <MoreStack.Screen name="Resigned" component={EmployeesScreen} initialParams={{ filter: 'Resigned' }} options={{ title: 'Resigned' }} />
+          <MoreStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee Details' }} />
+        </>
+      )}
+    </MoreStack.Navigator>
+  );
+}
+
+function AdminTabNavigator() {
+  const insets = useSafeAreaInsets();
+  const { total: pendingTotal } = usePendingApprovals();
+  return (
+    <AdminTab.Navigator backBehavior="history" screenOptions={{ headerShown: false, ...tabBarOptions(insets) }}>
+      <AdminTab.Screen
+        name="HomeTab"
+        component={HomeStackScreen}
+        options={{ title: 'Home', tabBarIcon: ({ color, size }) => <HomeIcon size={size} color={color} /> }}
+      />
+      <AdminTab.Screen
+        name="ApprovalsTab"
+        component={ApprovalsStackScreen}
+        options={{
+          title: 'Approvals',
+          tabBarIcon: ({ color, size }) => <InboxIcon size={size} color={color} />,
+          tabBarBadge: pendingTotal > 0 ? pendingTotal : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.critical, fontSize: 10, fontWeight: '800' },
+        }}
+      />
+      <AdminTab.Screen
+        name="EmployeesTab"
+        component={EmployeesStackScreen}
+        options={{ title: 'Employees', tabBarIcon: ({ color, size }) => <UsersIcon size={size} color={color} /> }}
+      />
+      <AdminTab.Screen
+        name="PayrollTab"
+        component={PayrollStackScreen}
+        options={{ title: 'Payroll', tabBarIcon: ({ color, size }) => <CardIcon size={size} color={color} /> }}
+      />
+      <AdminTab.Screen
+        name="MoreTab"
+        component={MoreStackScreen}
+        options={{ title: 'More', tabBarIcon: ({ color, size }) => <GridIcon size={size} color={color} /> }}
+      />
+    </AdminTab.Navigator>
   );
 }
 
@@ -322,7 +362,9 @@ function AppInner() {
           ) : isSuperadmin ? (
             <SuperadminScreen />
           ) : profile?.role === 'admin' || profile?.role === 'hr' ? (
-            <AdminDrawerNavigator />
+            <PendingApprovalsProvider>
+              <AdminTabNavigator />
+            </PendingApprovalsProvider>
           ) : (
             <EmployeeStack.Navigator
               screenOptions={{

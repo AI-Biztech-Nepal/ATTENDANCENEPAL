@@ -7,7 +7,7 @@ import type { AttendanceGpsRequest, AttendanceLog } from '../types';
 import { ATTENDANCE_LOG_COLUMNS } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
-import { formatAdDate, localDateKey } from '../lib/calendar';
+import { formatAdDate, formatTodayLine, localDateKey } from '../lib/calendar';
 import type { CalendarSystem } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '../lib/weekOff';
@@ -192,9 +192,7 @@ export default function CheckInScreen({ navigation }: any) {
   }, [history, pendingGpsRequests, today]);
 
   const firstName = myName?.trim().split(/\s+/)[0];
-  const [ty, tm, td] = today.split('-').map(Number);
-  const weekday = new Date(ty, tm - 1, td).toLocaleDateString(undefined, { weekday: 'short' });
-  const todayLine = `${weekday}, ${formatAdDate(today, 'AD')}  ·  ${formatAdDate(today, 'BS')}`;
+  const todayLine = formatTodayLine(today);
 
   async function locate(base: PunchModal) {
     try {

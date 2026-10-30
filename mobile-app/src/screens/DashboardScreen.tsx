@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase';
 import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, Shift } from '../types';
 import { ATTENDANCE_LOG_COLUMNS } from '../types';
 import { colors } from '../theme';
-import StatCard from '../components/StatCard';
 import SimpleLineChart from '../components/SimpleLineChart';
 import SimplePieChart from '../components/SimplePieChart';
 import { dateKey, firstCheckIn, isLate, presentEmployeeIds } from '../lib/metrics';
@@ -21,8 +20,11 @@ import {
   type WeeklyPatternByEmployee,
 } from '../lib/shift';
 import { fetchMyCompanyWeekOffConfig, weekOffDatesByGender } from '../lib/weekOff';
-import { formatAdDate } from '../lib/calendar';
+import { formatAdDate, formatTodayLine } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
+import { useAuth } from '../lib/AuthContext';
+import { usePendingApprovals } from '../lib/PendingApprovals';
+import { ChevronRightIcon, DeviceIcon, EditIcon, PinIcon, UmbrellaIcon } from '../components/icons';
 
 type EmployeeLite = Pick<Employee, 'name' | 'profile_photo_url'>;
 type DetailRow = { id: string; primary: string; secondary?: string };
@@ -50,6 +52,9 @@ function last7Days(): string[] {
 
 export default function DashboardScreen({ navigation }: any) {
   const { system } = useCalendarSystem();
+  const { profile } = useAuth();
+  const { counts: pending, refresh: refreshPending } = usePendingApprovals();
+  const [deviceCounts, setDeviceCounts] = useState<{ online: number; total: number } | null>(null);
   const [feed, setFeed] = useState<AttendanceLog[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeLookup, setEmployeeLookup] = useState<Record<string, EmployeeLite>>({});
@@ -92,6 +97,12 @@ export default function DashboardScreen({ navigation }: any) {
         setEmployeeLookup(map);
       });
     supabase.from('shifts').select('*').then(({ data }) => setShifts((data as Shift[]) ?? []));
+    supabase
+      .from('devices')
+      .select('status')
+      .then(({ data }) => {
+        if (data?.length) setDeviceCounts({ online: data.filter(d => d.status === 'online').length, total: data.length });
+      });
     supabase
       .from('leave_requests')
       .select('*')
@@ -310,6 +321,19 @@ export default function DashboardScreen({ navigation }: any) {
     });
   }, [weekLogs]);
 
+  useEffect(() => navigation.addListener('focus', refreshPending), [navigation, refreshPending]);
+
+  // Today's attendance bar: late arrivals are a subset of present, so on time
+  // is the rest; whatever isn't present, on leave or absent (roster Week Off,
+  // company off-day) is the grey remainder.
+  const onTimeCount = Math.max(0, presentIds.size - lateCount);
+  const restCount = Math.max(0, activeEmployees.length - presentIds.size - onLeaveIds.size - absentCount);
+  const firstName = profile?.full_name?.trim().split(/\s+/)[0];
+
+  function openApprovals(segment?: 'gps' | 'correction' | 'leave') {
+    navigation.getParent()?.navigate('ApprovalsTab', { screen: 'Approvals', params: segment ? { segment } : undefined });
+  }
+
   const deptBreakdown = useMemo(() => {
     const counts = new Map<string, number>();
     for (const emp of activeEmployees) {
@@ -327,33 +351,119 @@ export default function DashboardScreen({ navigation }: any) {
         contentContainerStyle={styles.list}
         ListHeaderComponent={
           <>
-            <View style={styles.statsGrid}>
-              <StatCard label="Total Employees" value={String(activeEmployees.length)} hint="Active rosters" onPress={() => setDetailKey('total')} />
-              <StatCard label="Present Today" value={String(presentIds.size)} hint={`${attendancePct}% attendance`} onPress={() => setDetailKey('present')} />
-              <StatCard label="Late Arrivals" value={String(lateCount)} hint="Past grace period" onPress={() => setDetailKey('late')} />
-              <StatCard label="On Leave" value={String(onLeaveIds.size)} hint="Approved today" onPress={() => setDetailKey('leave')} />
-              <StatCard label="Absent Today" value={String(absentCount)} hint="No punch, not on leave" onPress={() => setDetailKey('absent')} />
-              <StatCard label="Total Work Hours" value={todayWorkHours.toFixed(1)} hint="Today, all staff" onPress={() => setDetailKey('hours')} />
-              <StatCard label="Overtime" value={`${todayOvertimeHours.toFixed(1)} hrs`} hint="Today, all staff" onPress={() => setDetailKey('overtime')} />
+            <View style={styles.hero}>
+              <Text style={styles.greeting} numberOfLines={1}>
+                Namaste{firstName ? `, ${firstName}` : ''}
+              </Text>
+              <Text style={styles.heroDate}>{formatTodayLine(today)}</Text>
             </View>
 
-            <View style={styles.chartCard}>
-              <Text style={styles.chartTitle}>Weekly Attendance Trend</Text>
-              <SimpleLineChart data={trend} />
-            </View>
+            <View style={styles.body}>
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryTop}>
+                  <Text style={styles.cardLabel}>Today's attendance</Text>
+                  {deviceCounts && (
+                    <View style={styles.devices}>
+                      <DeviceIcon size={14} color={colors.slate500} />
+                      <Text style={styles.devicesText}>
+                        Devices {deviceCounts.online}/{deviceCounts.total} online
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <TouchableOpacity style={styles.bigRow} onPress={() => setDetailKey('present')}>
+                  <Text style={styles.bigNumber}>{presentIds.size}</Text>
+                  <Text style={styles.bigOf}>of {activeEmployees.length} checked in</Text>
+                  <View style={styles.pctPill}>
+                    <Text style={styles.pctText}>{attendancePct}%</Text>
+                  </View>
+                </TouchableOpacity>
+                <View style={styles.bar}>
+                  {onTimeCount > 0 && <View style={{ flex: onTimeCount, backgroundColor: colors.good }} />}
+                  {lateCount > 0 && <View style={{ flex: lateCount, backgroundColor: '#d97706' }} />}
+                  {onLeaveIds.size > 0 && <View style={{ flex: onLeaveIds.size, backgroundColor: '#2563eb' }} />}
+                  {absentCount > 0 && <View style={{ flex: absentCount, backgroundColor: '#dc2626' }} />}
+                  {restCount > 0 && <View style={{ flex: restCount, backgroundColor: colors.slate200 }} />}
+                </View>
+                <View style={styles.legend}>
+                  {(
+                    [
+                      ['present', onTimeCount, 'On time', colors.good],
+                      ['late', lateCount, 'Late', '#d97706'],
+                      ['leave', onLeaveIds.size, 'On leave', '#2563eb'],
+                      ['absent', absentCount, 'Absent', '#dc2626'],
+                    ] as const
+                  ).map(([key, value, label, color]) => (
+                    <TouchableOpacity key={key} style={styles.legendItem} onPress={() => setDetailKey(key)}>
+                      <Text style={styles.legendValue}>{value}</Text>
+                      <View style={styles.legendLabelRow}>
+                        <View style={[styles.legendSwatch, { backgroundColor: color }]} />
+                        <Text style={styles.legendLabel}>{label}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
 
-            <View style={styles.chartCard}>
-              <Text style={styles.chartTitle}>Department Breakdown</Text>
-              {deptBreakdown.length === 0 ? <Text style={styles.empty}>No employees yet.</Text> : <SimplePieChart data={deptBreakdown} />}
-            </View>
+              <View style={styles.card}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardTitle}>Needs your approval</Text>
+                  <TouchableOpacity onPress={() => openApprovals()}>
+                    <Text style={styles.link}>Review all</Text>
+                  </TouchableOpacity>
+                </View>
+                {(
+                  [
+                    ['gps', 'GPS check-ins', pending.gps, PinIcon],
+                    ['correction', 'Missed-punch corrections', pending.corrections, EditIcon],
+                    ['leave', 'Leave requests', pending.leave, UmbrellaIcon],
+                  ] as const
+                ).map(([segment, label, count, Icon], i) => (
+                  <TouchableOpacity key={segment} style={[styles.approvalRow, i < 2 && styles.rowDivider]} onPress={() => openApprovals(segment)}>
+                    <View style={styles.approvalIcon}>
+                      <Icon size={17} color={colors.accent} />
+                    </View>
+                    <Text style={styles.approvalLabel}>{label}</Text>
+                    <View style={[styles.countPill, count === 0 && styles.countPillZero]}>
+                      <Text style={[styles.countText, count === 0 && styles.countTextZero]}>{count}</Text>
+                    </View>
+                    <ChevronRightIcon color={colors.slate500} />
+                  </TouchableOpacity>
+                ))}
+              </View>
 
-            <TouchableOpacity
-              style={styles.viewLogsButton}
-              onPress={() => navigation.getParent()?.navigate('Attendance' as never)}
-            >
-              <Text style={styles.viewLogsText}>View Full Logs</Text>
-            </TouchableOpacity>
-            <Text style={styles.heading}>Live Biometric Feed</Text>
+              <View style={styles.kpiRow}>
+                <TouchableOpacity style={styles.kpi} onPress={() => setDetailKey('hours')}>
+                  <Text style={styles.kpiValue}>{todayWorkHours.toFixed(1)}h</Text>
+                  <Text style={styles.kpiLabel}>Work hours today</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.kpi} onPress={() => setDetailKey('overtime')}>
+                  <Text style={styles.kpiValue}>{todayOvertimeHours.toFixed(1)}h</Text>
+                  <Text style={styles.kpiLabel}>Overtime today</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.kpi} onPress={() => setDetailKey('total')}>
+                  <Text style={styles.kpiValue}>{activeEmployees.length}</Text>
+                  <Text style={styles.kpiLabel}>Active staff</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.chartCard}>
+                <Text style={styles.chartTitle}>Weekly Attendance Trend</Text>
+                <SimpleLineChart data={trend} />
+              </View>
+
+              <View style={styles.chartCard}>
+                <Text style={styles.chartTitle}>Department Breakdown</Text>
+                {deptBreakdown.length === 0 ? <Text style={styles.empty}>No employees yet.</Text> : <SimplePieChart data={deptBreakdown} />}
+              </View>
+
+              <View style={styles.cardHeaderLoose}>
+                <Text style={styles.cardTitle}>Live activity</Text>
+                <TouchableOpacity onPress={() => navigation.getParent()?.navigate('MoreTab', { screen: 'Attendance', initial: false })}>
+                  <Text style={styles.link}>Full logs</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </>
         }
         renderItem={({ item }) => {
@@ -418,22 +528,67 @@ export default function DashboardScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.slate50, padding: 16 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  chartCard: { backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, padding: 12, marginBottom: 12 },
-  chartTitle: { fontSize: 13, fontWeight: '700', color: colors.ink, marginBottom: 8 },
-  viewLogsButton: { backgroundColor: colors.accent, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginBottom: 16, marginTop: 4 },
-  viewLogsText: { color: colors.white, fontWeight: '700', fontSize: 14 },
-  heading: { fontSize: 16, fontWeight: '700', color: colors.ink, marginBottom: 10 },
-  list: { paddingBottom: 16 },
+  container: { flex: 1, backgroundColor: colors.slate100 },
+  hero: { backgroundColor: colors.accent, paddingHorizontal: 20, paddingTop: 4, paddingBottom: 72 },
+  greeting: { fontSize: 26, fontWeight: '800', color: colors.white, letterSpacing: -0.4 },
+  heroDate: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.8)', marginTop: 4 },
+  body: { paddingHorizontal: 20 },
+  summaryCard: {
+    marginTop: -56,
+    backgroundColor: colors.white,
+    borderRadius: 18,
+    padding: 18,
+    shadowColor: '#064e3b',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.14,
+    shadowRadius: 20,
+    elevation: 6,
+  },
+  summaryTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  cardLabel: { fontSize: 12, fontWeight: '800', color: colors.slate500, textTransform: 'uppercase', letterSpacing: 0.6 },
+  devices: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  devicesText: { fontSize: 12, fontWeight: '700', color: colors.slate500 },
+  bigRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 8 },
+  bigNumber: { fontSize: 40, fontWeight: '800', color: colors.ink, letterSpacing: -1 },
+  bigOf: { fontSize: 16, fontWeight: '700', color: colors.slate500 },
+  pctPill: { marginLeft: 'auto', alignSelf: 'center', paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: colors.goodBg },
+  pctText: { fontSize: 12, fontWeight: '800', color: colors.goodText },
+  bar: { flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', gap: 2, marginTop: 14, backgroundColor: colors.slate100 },
+  legend: { flexDirection: 'row', marginTop: 12 },
+  legendItem: { flex: 1 },
+  legendValue: { fontSize: 18, fontWeight: '800', color: colors.ink },
+  legendLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  legendSwatch: { height: 7, width: 7, borderRadius: 2 },
+  legendLabel: { fontSize: 11, fontWeight: '700', color: colors.slate500 },
+  card: { marginTop: 14, backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.slate200 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4 },
+  cardHeaderLoose: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, marginBottom: 10 },
+  cardTitle: { fontSize: 15, fontWeight: '800', color: colors.ink },
+  link: { fontSize: 13, fontWeight: '800', color: colors.accent },
+  approvalRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 11 },
+  rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.slate100 },
+  approvalIcon: { height: 36, width: 36, borderRadius: 18, backgroundColor: colors.accentLight, alignItems: 'center', justifyContent: 'center' },
+  approvalLabel: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.ink },
+  countPill: { minWidth: 26, alignItems: 'center', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: colors.warningBg },
+  countPillZero: { backgroundColor: colors.slate100 },
+  countText: { fontSize: 12, fontWeight: '800', color: colors.warningText },
+  countTextZero: { color: colors.slate500 },
+  kpiRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  kpi: { flex: 1, backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.slate200, paddingHorizontal: 12, paddingVertical: 10 },
+  kpiValue: { fontSize: 18, fontWeight: '800', color: colors.ink },
+  kpiLabel: { fontSize: 11, fontWeight: '700', color: colors.slate500, marginTop: 1 },
+  chartCard: { backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.slate200, padding: 14, marginTop: 14 },
+  chartTitle: { fontSize: 15, fontWeight: '800', color: colors.ink, marginBottom: 8 },
+  list: { paddingBottom: 20 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     backgroundColor: colors.white,
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 10,
     marginBottom: 8,
+    marginHorizontal: 20,
     borderWidth: 1,
     borderColor: colors.slate200,
   },
