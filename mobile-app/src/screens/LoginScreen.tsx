@@ -10,6 +10,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { API_BASE } from '../lib/accountsApi';
@@ -90,10 +91,12 @@ function RegisterForm({ onMode }: FormProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [portalUrl, setPortalUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleRegister() {
     setError(null);
+    setPortalUrl(null);
     if (!companyName.trim() || !fullName.trim() || !email.trim()) {
       setError('Company name, full name and email are required.');
       return;
@@ -120,6 +123,8 @@ function RegisterForm({ onMode }: FormProps) {
       if (!res.ok) {
         setSubmitting(false);
         setError(body.error ?? 'Could not create the account.');
+        // 410: sign-up moved to the portal.
+        if (res.status === 410) setPortalUrl(body.portalUrl ?? null);
         return;
       }
     } catch {
@@ -142,6 +147,11 @@ function RegisterForm({ onMode }: FormProps) {
       <PasswordField label="Password" value={password} onChangeText={setPassword} />
       <PasswordField label="Confirm password" value={confirmPassword} onChangeText={setConfirmPassword} />
       {error && <Text style={styles.error}>{error}</Text>}
+      {portalUrl && (
+        <TouchableOpacity onPress={() => Linking.openURL(portalUrl)}>
+          <Text style={styles.linkAccent}>Go to portal sign-up</Text>
+        </TouchableOpacity>
+      )}
       <SubmitButton
         label={submitting ? 'Creating account…' : 'Create account'}
         onPress={handleRegister}

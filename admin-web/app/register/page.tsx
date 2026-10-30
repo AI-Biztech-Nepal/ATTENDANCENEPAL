@@ -16,6 +16,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [portalUrl, setPortalUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (!supabaseConfigured) {
@@ -25,6 +26,7 @@ export default function RegisterPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setPortalUrl(null);
 
     if (password !== confirmPassword) {
       setError('Passwords do not match.');
@@ -49,6 +51,8 @@ export default function RegisterPage() {
     if (!res.ok) {
       setSubmitting(false);
       setError(body.error ?? 'Could not create the account.');
+      // 410: sign-up moved to the portal.
+      if (res.status === 410) setPortalUrl(body.portalUrl ?? null);
       return;
     }
 
@@ -114,6 +118,11 @@ export default function RegisterPage() {
           className="mb-2.5 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
         />
         {error && <p className="mb-4 text-sm text-critical">{error}</p>}
+        {portalUrl && (
+          <a href={portalUrl} className="mb-4 block text-sm font-medium text-accent underline">
+            Go to portal sign-up
+          </a>
+        )}
         <button
           type="submit"
           disabled={submitting}
