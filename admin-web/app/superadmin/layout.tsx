@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import SuperadminShell from '@/components/SuperadminShell';
 import ConfigWarning from '@/components/ConfigWarning';
+import BodyFontClass from '@/components/BodyFontClass';
+import { manrope } from '@/lib/fonts';
 
 // Mirrors AppShell's loading/check/redirect shape, but the check itself is
 // different on purpose: AppShell reads profiles.role, a value RLS lets a
@@ -50,5 +52,12 @@ export default function SuperadminLayout({ children }: { children: React.ReactNo
     return <div className="flex h-screen items-center justify-center text-slate-400">Loading…</div>;
   }
 
-  return <SuperadminShell>{children}</SuperadminShell>;
+  // Manrope, same as the owner pages and the mobile app — see
+  // app/(admin)/layout.tsx for why both the wrapper and BodyFontClass.
+  return (
+    <div className={`${manrope.className} contents`}>
+      <BodyFontClass className={manrope.className} />
+      <SuperadminShell>{children}</SuperadminShell>
+    </div>
+  );
 }
