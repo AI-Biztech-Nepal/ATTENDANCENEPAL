@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
 import StatCard from '@/components/StatCard';
@@ -59,6 +60,8 @@ export default function DashboardPage() {
   const [todayHoliday, setTodayHoliday] = useState<CompanyHoliday | null>(null);
   const [detailKey, setDetailKey] = useState<DetailKey | null>(null);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
+  const [pending, setPending] = useState({ gps: 0, corrections: 0, leave: 0 });
+  const [ownerName, setOwnerName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabaseConfigured) {
@@ -118,6 +121,24 @@ export default function DashboardPage() {
       .select('employee_id, weekday, shift_id')
       .then(({ data }) => setWeeklyPatternRows(data ?? []));
     supabase.from('company_holidays').select('*').eq('holiday_date', today).maybeSingle().then(({ data }) => setTodayHoliday(data ?? null));
+    // "Needs your approval" card — the same three queues the Corrections and
+    // Leave pages review.
+    const countPending = (table: string) =>
+      supabase
+        .from(table)
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .then(({ count }) => count ?? 0);
+    Promise.all([
+      countPending('attendance_gps_requests'),
+      countPending('attendance_correction_requests'),
+      countPending('leave_requests'),
+    ]).then(([gps, corrections, leave]) => setPending({ gps, corrections, leave }));
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) return;
+      const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', data.user.id).single();
+      setOwnerName(profile?.full_name ?? null);
+    });
     // A week of punches for a busy/large company can pass PostgREST's
     // default 1000-row cap on a plain select(), which silently truncates
     // rather than erroring — quietly wrong present/late/absent KPIs and a
@@ -368,144 +389,246 @@ export default function DashboardPage() {
       const key = emp.department && DEPT_COLORS[emp.department] ? emp.department : emp.department ? 'Other' : 'Unassigned';
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    return Array.from(counts.entries()).map(([name, value]) => ({
-      name,
-      value,
-      color: DEPT_COLORS[name] ?? OTHER_COLOR,
-    }));
+    return Array.from(counts.entries())
+      .map(([name, value]) => ({ name, value, color: DEPT_COLORS[name] ?? OTHER_COLOR }))
+      .sort((a, b) => b.value - a.value);
   }, [activeEmployees]);
 
   if (checkingSuperadmin) {
     return <div className="flex h-screen items-center justify-center text-slate-400">Loading…</div>;
   }
 
+  // Today's attendance bar: late arrivals are a subset of present, so on time
+  // is the rest. Each segment opens the same name list its old stat card did.
+  const onTimeCount = Math.max(0, presentIds.size - lateCount);
+  const segments: { key: string; label: string; count: number; bar: string; detail: DetailKey }[] = [
+    { key: 'onTime', label: 'On time', count: onTimeCount, bar: 'bg-good', detail: 'present' },
+    { key: 'late', label: 'Late', count: lateCount, bar: 'bg-warning', detail: 'late' },
+    { key: 'leave', label: 'On leave', count: onLeaveIds.size, bar: 'bg-info', detail: 'leave' },
+    { key: 'absent', label: 'Absent', count: absentCount, bar: 'bg-critical', detail: 'absent' },
+    { key: 'weekOff', label: 'Week-off', count: weekOffCount, bar: 'bg-slate-300', detail: 'weekOff' },
+  ];
+  const onlineDevices = devices.filter(d => d.status === 'online').length;
+  const pendingTotal = pending.gps + pending.corrections + pending.leave;
+  const approvals = [
+    { label: 'GPS check-ins', count: pending.gps, href: '/corrections', icon: <PinGlyph /> },
+    { label: 'Missed-punch corrections', count: pending.corrections, href: '/corrections', icon: <PencilGlyph /> },
+    { label: 'Leave requests', count: pending.leave, href: '/leave', icon: <UmbrellaGlyph /> },
+  ];
+  const firstName = ownerName?.trim().split(/\s+/)[0];
+  const [ty, tm, td] = today.split('-').map(Number);
+  const todayLine = `${new Date(ty, tm - 1, td).toLocaleDateString(undefined, { weekday: 'short' })}, ${formatAdDate(today, 'AD')}  ·  ${formatAdDate(today, 'BS')}`;
+  const lastPunch = feed[0];
+  const maxDept = Math.max(1, ...deptBreakdown.map(d => d.value));
+
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4">
-        <StatCard label="Total Employees" value={String(activeEmployees.length)} hint="Active rosters" onClick={() => setDetailKey('total')} />
-        <StatCard label="Present Today" value={String(presentIds.size)} hint={`${attendancePct}% attendance`} onClick={() => setDetailKey('present')} />
-        <StatCard label="Late Arrivals" value={String(lateCount)} hint="Past grace period" onClick={() => setDetailKey('late')} />
-        <StatCard label="On Leave" value={String(onLeaveIds.size)} hint="Approved today" onClick={() => setDetailKey('leave')} />
+      <div className="mb-5">
+        <h2 className="text-2xl font-extrabold tracking-tight text-ink">Namaste{firstName ? `, ${firstName}` : ''}</h2>
+        <p className="mt-1 text-sm font-semibold text-slate-500">{todayLine}</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Today&apos;s attendance</h3>
+            {devices.length > 0 && (
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${
+                  onlineDevices === devices.length ? 'bg-good-bg text-good-text' : 'bg-warning-bg text-warning-text'
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${onlineDevices === devices.length ? 'bg-good' : 'bg-warning'}`} />
+                Devices {onlineDevices}/{devices.length} online
+              </span>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <button
+              onClick={() => setDetailKey('present')}
+              className="text-5xl font-extrabold leading-none tracking-tight text-ink transition-colors hover:text-accent"
+            >
+              {presentIds.size}
+            </button>
+            <span className="text-lg font-bold text-slate-500">of {activeEmployees.length} checked in</span>
+            <span className="rounded-full bg-accent-light px-2.5 py-0.5 text-sm font-extrabold text-accent">{attendancePct}%</span>
+            {lastPunch && (
+              <span className="ml-auto text-sm font-semibold text-slate-500">
+                Last punch {new Date(lastPunch.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ·{' '}
+                {lastPunch.employee_name}
+              </span>
+            )}
+          </div>
+          <div className="mt-5 flex h-3 gap-0.5 overflow-hidden rounded-full bg-slate-100">
+            {segments
+              .filter(s => s.count > 0)
+              .map(s => (
+                <span key={s.key} className={s.bar} style={{ flex: s.count }} />
+              ))}
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+            {segments.map(s => (
+              <button
+                key={s.key}
+                onClick={() => setDetailKey(s.detail)}
+                className="rounded-xl bg-slate-50 px-3 py-2.5 text-left transition-colors hover:bg-slate-100"
+              >
+                <span className="block text-2xl font-extrabold text-ink">{s.count}</span>
+                <span className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+                  <span className={`h-2 w-2 rounded-sm ${s.bar}`} />
+                  {s.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-extrabold text-ink">Needs your approval</h3>
+            {pendingTotal > 0 && (
+              <span className="rounded-full bg-critical-bg px-2.5 py-0.5 text-xs font-extrabold text-critical-text">{pendingTotal} waiting</span>
+            )}
+          </div>
+          <ul className="mt-2 divide-y divide-slate-100">
+            {approvals.map(a => (
+              <li key={a.label}>
+                <Link href={a.href} className="flex items-center gap-3 py-3 transition-opacity hover:opacity-80">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-light text-accent">{a.icon}</span>
+                  <span className="flex-1 text-sm font-bold text-ink">{a.label}</span>
+                  <span
+                    className={`min-w-[1.75rem] rounded-full px-2 py-0.5 text-center text-xs font-extrabold ${
+                      a.count > 0 ? 'bg-warning-bg text-warning-text' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {a.count}
+                  </span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m9 6 6 6-6 6" />
+                  </svg>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
+        <StatCard label="Active Staff" value={String(activeEmployees.length)} hint="On active rosters" onClick={() => setDetailKey('total')} />
+        <StatCard label="Work Hours Today" value={`${todayWorkHours.toFixed(1)}h`} hint="All staff, checked out" onClick={() => setDetailKey('hours')} />
+        <StatCard label="Overtime Today" value={`${todayOvertimeHours.toFixed(1)}h`} hint="Beyond shift hours" onClick={() => setDetailKey('overtime')} />
         <StatCard
           label="Week-off Today"
           value={String(weekOffCount)}
-          hint={todayIsWeekOff ? (todayHoliday?.name ?? 'Recurring weekly day') : 'Employees off today'}
+          hint={todayIsWeekOff ? (todayHoliday?.name ?? 'Recurring weekly day') : 'Off by roster or holiday'}
           onClick={() => setDetailKey('weekOff')}
-        />
-        <StatCard label="Absent Today" value={String(absentCount)} hint="No punch, not on leave" onClick={() => setDetailKey('absent')} />
-        <StatCard label="Total Work Hours" value={todayWorkHours.toFixed(1)} hint="Today, all staff" onClick={() => setDetailKey('hours')} />
-        <StatCard
-          className="col-span-2 sm:col-span-1"
-          label="Overtime"
-          value={`${todayOvertimeHours.toFixed(1)} hrs`}
-          hint="Today, all staff"
-          onClick={() => setDetailKey('overtime')}
         />
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:col-span-2">
-          <h2 className="mb-4 text-base font-semibold text-ink">Weekly Attendance Trend</h2>
+      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:col-span-2">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-base font-extrabold text-ink">Weekly attendance</h3>
+            <span className="text-xs font-bold text-slate-500">Present each day · last 7 days</span>
+          </div>
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={trend} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="#e2e8f0" />
+            <BarChart data={trend} margin={{ top: 20, right: 8, left: -16, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="#e2e8f0" strokeDasharray="4 4" />
               <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
               <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
               <Tooltip
+                cursor={{ fill: '#f1f5f9' }}
                 contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
                 formatter={(v: number) => [`${v} present`, '']}
               />
-              <Line
-                type="monotone"
-                dataKey="present"
-                name="Present"
-                stroke="#0d9488"
-                strokeWidth={2}
-                dot={{ r: 4, fill: '#0d9488' }}
-                activeDot={{ r: 6 }}
-              />
-            </LineChart>
+              <Bar dataKey="present" radius={[8, 8, 3, 3]} maxBarSize={56} label={{ position: 'top', fontSize: 12, fontWeight: 700, fill: '#334155' }}>
+                {trend.map((d, i) => (
+                  // Today in the full accent, the six days before it lighter.
+                  <Cell key={`${d.day}-${i}`} fill={i === trend.length - 1 ? '#0d9488' : '#99f6e4'} />
+                ))}
+              </Bar>
+            </BarChart>
           </ResponsiveContainer>
-        </div>
+        </section>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-ink">Live Biometric Feed</h2>
-            <span className="flex items-center gap-1.5 text-xs font-medium text-good">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-base font-extrabold text-ink">Live activity</h3>
+            <span className="flex items-center gap-1.5 text-xs font-bold text-good">
               <span className="h-1.5 w-1.5 rounded-full bg-good" />
               Realtime
             </span>
           </div>
-          <ul className="space-y-3">
-            {feed.length === 0 && <li className="text-sm text-slate-400">No punches yet.</li>}
+          <ul className="divide-y divide-slate-100">
+            {feed.length === 0 && <li className="py-3 text-sm text-slate-400">No punches yet.</li>}
             {feed.map(item => (
-              <li key={item.id} className="flex items-center justify-between border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-                <div>
-                  <div className="text-sm font-medium text-ink">{item.employee_name}</div>
-                  <div className="text-xs text-slate-500">{item.method}</div>
+              <li key={item.id} className="flex items-center gap-3 py-2.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-light text-xs font-extrabold text-accent">
+                  {item.employee_name
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map(w => w[0])
+                    .join('')
+                    .toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-bold text-ink">{item.employee_name}</div>
+                  <div className="text-xs font-semibold capitalize text-slate-500">{item.method === 'gps' ? 'GPS' : item.method}</div>
                 </div>
                 <div className="text-right">
-                  <Badge tone={item.punch_type === '0' ? 'good' : item.punch_type === '1' ? 'info' : 'warning'}>
-                    {punchTypeLabel(item.punch_type)}
-                  </Badge>
-                  <div className="mt-1 text-xs text-slate-500">
-                    ({formatAdDate(localDateKey(item.punch_time), system)}{' '}
-                    {new Date(item.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                  <Badge tone={item.punch_type === '0' ? 'good' : item.punch_type === '1' ? 'info' : 'warning'}>{punchTypeLabel(item.punch_type)}</Badge>
+                  <div className="mt-1 text-xs font-semibold text-slate-500">
+                    {formatAdDate(localDateKey(item.punch_time), system)}{' '}
+                    {new Date(item.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
               </li>
             ))}
           </ul>
-        </div>
+          <Link href="/attendance" className="mt-3 inline-block text-sm font-extrabold text-accent hover:underline">
+            Full attendance logs
+          </Link>
+        </section>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <h2 className="mb-4 text-base font-semibold text-ink">Department Breakdown</h2>
+      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <h3 className="mb-4 text-base font-extrabold text-ink">Departments</h3>
           {deptBreakdown.length === 0 ? (
             <p className="text-sm text-slate-400">No employees yet.</p>
           ) : (
-            // A right-side vertical legend fights the pie for width on a
-            // narrow phone (single-column below lg) — bottom-horizontal
-            // works at every width instead of needing a JS breakpoint check.
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={deptBreakdown} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                  {deptBreakdown.map(d => (
-                    <Cell key={d.name} fill={d.color} stroke="#fff" strokeWidth={2} />
-                  ))}
-                </Pie>
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
-                  iconType="circle"
-                  wrapperStyle={{ paddingTop: 12 }}
-                  formatter={(value: string) => <span className="text-sm text-slate-600">{value}</span>}
-                />
-                <Tooltip formatter={(v: number, n: string) => [`${v} staff`, n]} />
-              </PieChart>
-            </ResponsiveContainer>
+            <ul className="space-y-3">
+              {deptBreakdown.map(d => (
+                <li key={d.name} className="flex items-center gap-3">
+                  <span className="w-28 shrink-0 truncate text-sm font-bold text-ink">{d.name}</span>
+                  <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <span className="block h-full rounded-full" style={{ width: `${(d.value / maxDept) * 100}%`, backgroundColor: d.color }} />
+                  </span>
+                  <span className="w-8 text-right text-sm font-extrabold text-ink">{d.value}</span>
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
+        </section>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <h2 className="mb-4 text-base font-semibold text-ink">Device Sync Activity</h2>
-          <ul className="space-y-3">
-            {devices.length === 0 && <li className="text-sm text-slate-400">No devices registered.</li>}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <h3 className="mb-2 text-base font-extrabold text-ink">Biometric devices</h3>
+          <ul className="divide-y divide-slate-100">
+            {devices.length === 0 && <li className="py-3 text-sm text-slate-400">No devices registered.</li>}
             {devices.map(d => (
-              <li key={d.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2.5">
-                <div>
-                  <div className="text-sm font-medium text-ink">{d.name}</div>
-                  <div className="text-xs text-slate-500">
-                    {d.ip_address} · Sync: {d.last_sync ? new Date(d.last_sync).toLocaleTimeString() : 'never'}
+              <li key={d.id} className="flex items-center justify-between gap-3 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-bold text-ink">{d.name}</div>
+                  <div className="text-xs font-semibold text-slate-500">
+                    {d.ip_address} · Synced {d.last_sync ? new Date(d.last_sync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'never'}
                   </div>
                 </div>
                 <Badge tone={d.status === 'online' ? 'good' : 'critical'}>{d.status}</Badge>
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       </div>
 
       {detailKey && (
@@ -546,5 +669,30 @@ export default function DashboardPage() {
         </div>
       )}
     </>
+  );
+}
+
+// Icons for the "Needs your approval" rows.
+function PinGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 21s-7-6.1-7-11a7 7 0 1 1 14 0c0 4.9-7 11-7 11Z" />
+      <circle cx="12" cy="10" r="2.5" />
+    </svg>
+  );
+}
+function PencilGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+function UmbrellaGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 0 1 18 0Z" />
+      <path d="M12 12v7a2 2 0 0 1-4 0" />
+    </svg>
   );
 }
