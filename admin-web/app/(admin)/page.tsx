@@ -6,9 +6,8 @@ import { useRouter } from 'next/navigation';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
-import StatCard from '@/components/StatCard';
-import Badge from '@/components/Badge';
-import { formatAdDate, localDateKey } from '@/lib/calendar';
+import { timeAgo, usePendingApprovals, type PendingQueue } from '@/lib/pendingApprovals';
+import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS } from '@/lib/types';
@@ -21,7 +20,6 @@ import {
   computeDayStatusForResolvedShift,
   isWeekOff,
   nepalTodayIso,
-  punchTypeLabel,
   resolveShiftForDate,
   type DailyShiftByDate,
 } from '@/lib/shift';
@@ -35,12 +33,31 @@ const DEPT_COLORS: Record<string, string> = {
 };
 const OTHER_COLOR = '#94a3b8';
 
+// Live activity rows: pastel initials circles, cycled per row.
+const AVATAR_COLORS: [string, string][] = [
+  ['#e0e7ff', '#3730a3'],
+  ['#fce7f3', '#9d174d'],
+  ['#dcfce7', '#166534'],
+  ['#fef3c7', '#92400e'],
+  ['#e0f2fe', '#075985'],
+];
+const PUNCH_VERB: Record<string, string> = { '0': 'checked in', '1': 'checked out', '2': 'started a break', '3': 'is back from break' };
+const METHOD_LABEL: Record<string, string> = { zkteco: 'Biometric', gps: 'GPS', qr: 'QR code', selfie: 'Selfie' };
+function initialsOf(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0])
+    .join('')
+    .toUpperCase();
+}
+
 type FeedItem = AttendanceLog & { employee_name: string };
 type DetailRow = { id: string; primary: string; secondary?: string };
 type DetailKey = 'total' | 'present' | 'late' | 'leave' | 'weekOff' | 'absent' | 'hours' | 'overtime';
 
 export default function DashboardPage() {
-  usePageTitle('Dashboard');
   const router = useRouter();
   const { system } = useCalendarSystem();
   // Superadmins never see this tenant dashboard — any account listed in the
@@ -60,8 +77,12 @@ export default function DashboardPage() {
   const [todayHoliday, setTodayHoliday] = useState<CompanyHoliday | null>(null);
   const [detailKey, setDetailKey] = useState<DetailKey | null>(null);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
-  const [pending, setPending] = useState({ gps: 0, corrections: 0, leave: 0 });
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [ownerName, setOwnerName] = useState<string | null>(null);
+  const pending = usePendingApprovals();
+  // Top bar reads "DASHBOARD" over "Namaste, <first name>".
+  const firstName = ownerName?.trim().split(/\s+/)[0];
+  usePageTitle(`Namaste${firstName ? `, ${firstName}` : ''}`, 'Dashboard');
 
   useEffect(() => {
     if (!supabaseConfigured) {
@@ -121,19 +142,8 @@ export default function DashboardPage() {
       .select('employee_id, weekday, shift_id')
       .then(({ data }) => setWeeklyPatternRows(data ?? []));
     supabase.from('company_holidays').select('*').eq('holiday_date', today).maybeSingle().then(({ data }) => setTodayHoliday(data ?? null));
-    // "Needs your approval" card — the same three queues the Corrections and
-    // Leave pages review.
-    const countPending = (table: string) =>
-      supabase
-        .from(table)
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'pending')
-        .then(({ count }) => count ?? 0);
-    Promise.all([
-      countPending('attendance_gps_requests'),
-      countPending('attendance_correction_requests'),
-      countPending('leave_requests'),
-    ]).then(([gps, corrections, leave]) => setPending({ gps, corrections, leave }));
+    // Branch names for the live activity and device rows.
+    supabase.from('branches').select('id, name').then(({ data }) => setBranches(data ?? []));
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', data.user.id).single();
@@ -399,83 +409,99 @@ export default function DashboardPage() {
   }
 
   // Today's attendance bar: late arrivals are a subset of present, so on time
-  // is the rest. Each segment opens the same name list its old stat card did.
+  // is the rest. Each count opens the same name list as before.
   const onTimeCount = Math.max(0, presentIds.size - lateCount);
-  const segments: { key: string; label: string; count: number; bar: string; detail: DetailKey }[] = [
-    { key: 'onTime', label: 'On time', count: onTimeCount, bar: 'bg-good', detail: 'present' },
-    { key: 'late', label: 'Late', count: lateCount, bar: 'bg-warning', detail: 'late' },
-    { key: 'leave', label: 'On leave', count: onLeaveIds.size, bar: 'bg-info', detail: 'leave' },
-    { key: 'absent', label: 'Absent', count: absentCount, bar: 'bg-critical', detail: 'absent' },
-    { key: 'weekOff', label: 'Week-off', count: weekOffCount, bar: 'bg-slate-300', detail: 'weekOff' },
+  const segments: { key: string; label: string; count: number; color: string; detail: DetailKey }[] = [
+    { key: 'onTime', label: 'On time', count: onTimeCount, color: '#15803d', detail: 'present' },
+    { key: 'late', label: 'Late', count: lateCount, color: '#d97706', detail: 'late' },
+    { key: 'leave', label: 'On leave', count: onLeaveIds.size, color: '#2563eb', detail: 'leave' },
+    { key: 'absent', label: 'Absent', count: absentCount, color: '#dc2626', detail: 'absent' },
+    { key: 'weekOff', label: 'Week-off', count: weekOffCount, color: '#94a3b8', detail: 'weekOff' },
   ];
+  const allOnline = devices.length > 0 && devices.every(d => d.status === 'online');
   const onlineDevices = devices.filter(d => d.status === 'online').length;
-  const pendingTotal = pending.gps + pending.corrections + pending.leave;
+  const branchName = (id: string | null) => branches.find(b => b.id === id)?.name ?? null;
+  const deviceById = new Map(devices.map(d => [d.id, d]));
+  const oldestText = (q: PendingQueue) => (q.oldest ? `Oldest ${timeAgo(q.oldest.created_at)}` : 'Nothing waiting');
+  const leaveText = (q: PendingQueue) => {
+    const o = q.oldest;
+    if (!o?.leave_type || !o.start_date || !o.end_date) return 'Nothing waiting';
+    const days = Math.round((new Date(o.end_date).getTime() - new Date(o.start_date).getTime()) / 86400000) + 1;
+    return `${o.leave_type[0].toUpperCase()}${o.leave_type.slice(1)} · ${days} ${days === 1 ? 'day' : 'days'}`;
+  };
   const approvals = [
-    { label: 'GPS check-ins', count: pending.gps, href: '/corrections', icon: <PinGlyph /> },
-    { label: 'Missed-punch corrections', count: pending.corrections, href: '/corrections', icon: <PencilGlyph /> },
-    { label: 'Leave requests', count: pending.leave, href: '/leave', icon: <UmbrellaGlyph /> },
+    { label: 'GPS check-ins', count: pending.gps.count, sub: oldestText(pending.gps), href: '/corrections', icon: <PinGlyph /> },
+    { label: 'Missed-punch corrections', count: pending.corrections.count, sub: oldestText(pending.corrections), href: '/corrections', icon: <PencilGlyph /> },
+    { label: 'Leave requests', count: pending.leave.count, sub: leaveText(pending.leave), href: '/leave', icon: <UmbrellaGlyph /> },
   ];
-  const firstName = ownerName?.trim().split(/\s+/)[0];
+  const kpis: { label: string; value: string; caption: string; detail: DetailKey }[] = [
+    { label: 'Active staff', value: String(activeEmployees.length), caption: 'On active rosters', detail: 'total' },
+    { label: 'Work hours today', value: `${todayWorkHours.toFixed(1)}h`, caption: 'All staff, checked out', detail: 'hours' },
+    { label: 'Overtime today', value: `${todayOvertimeHours.toFixed(1)}h`, caption: 'Beyond shift hours', detail: 'overtime' },
+    {
+      label: 'Week-off today',
+      value: String(weekOffCount),
+      caption: todayIsWeekOff ? (todayHoliday?.name ?? 'Recurring weekly day') : 'Off by roster or holiday',
+      detail: 'weekOff',
+    },
+  ];
   const [ty, tm, td] = today.split('-').map(Number);
   const todayLine = `${new Date(ty, tm - 1, td).toLocaleDateString(undefined, { weekday: 'short' })}, ${formatAdDate(today, 'AD')}  ·  ${formatAdDate(today, 'BS')}`;
+  const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const lastPunch = feed[0];
   const maxDept = Math.max(1, ...deptBreakdown.map(d => d.value));
 
   return (
     <>
-      <div className="mb-5">
-        <h2 className="text-2xl font-extrabold tracking-tight text-ink">Namaste{firstName ? `, ${firstName}` : ''}</h2>
-        <p className="mt-1 text-sm font-semibold text-slate-500">{todayLine}</p>
-      </div>
+      <p className="mb-5 text-[13px] font-bold text-[#586474]">{todayLine}</p>
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:col-span-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500">Today&apos;s attendance</h3>
+      <div className="flex flex-wrap gap-5">
+        <section className="min-w-0 flex-[2_1_560px] rounded-[18px] border border-slate-200 bg-white px-6 py-[22px]">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <h2 className="text-[13px] font-extrabold tracking-[0.06em] text-[#586474]">TODAY&apos;S ATTENDANCE</h2>
             {devices.length > 0 && (
               <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${
-                  onlineDevices === devices.length ? 'bg-good-bg text-good-text' : 'bg-warning-bg text-warning-text'
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold ${
+                  allOnline ? 'bg-[#e2f3e8] text-[#14532d]' : 'bg-[#fdf0d5] text-[#8a4b06]'
                 }`}
               >
-                <span className={`h-1.5 w-1.5 rounded-full ${onlineDevices === devices.length ? 'bg-good' : 'bg-warning'}`} />
+                <span className={`h-[7px] w-[7px] rounded-full ${allOnline ? 'bg-[#15803d]' : 'bg-[#d97706]'}`} />
                 Devices {onlineDevices}/{devices.length} online
               </span>
             )}
           </div>
-          <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <div className="mt-2.5 flex flex-wrap items-baseline gap-2.5">
             <button
               onClick={() => setDetailKey('present')}
-              className="text-5xl font-extrabold leading-none tracking-tight text-ink transition-colors hover:text-accent"
+              className="text-[52px] font-extrabold leading-none tracking-[-0.03em] text-ink hover:text-brand"
             >
               {presentIds.size}
             </button>
-            <span className="text-lg font-bold text-slate-500">of {activeEmployees.length} checked in</span>
-            <span className="rounded-full bg-accent-light px-2.5 py-0.5 text-sm font-extrabold text-accent">{attendancePct}%</span>
+            <span className="text-lg font-bold text-[#586474]">of {activeEmployees.length} checked in</span>
+            <span className="rounded-full bg-brand-light px-2.5 py-1 text-[13px] font-extrabold text-brand">{attendancePct}%</span>
             {lastPunch && (
-              <span className="ml-auto text-sm font-semibold text-slate-500">
-                Last punch {new Date(lastPunch.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ·{' '}
-                {lastPunch.employee_name}
+              <span className="ml-auto text-[13px] font-semibold text-[#586474]">
+                Last punch {timeOf(lastPunch.punch_time)} · {lastPunch.employee_name}
               </span>
             )}
           </div>
-          <div className="mt-5 flex h-3 gap-0.5 overflow-hidden rounded-full bg-slate-100">
+          <div className="mt-[18px] flex h-3 gap-[3px] overflow-hidden rounded-md bg-slate-100">
             {segments
               .filter(s => s.count > 0)
               .map(s => (
-                <span key={s.key} className={s.bar} style={{ flex: s.count }} />
+                <span key={s.key} style={{ flex: s.count, backgroundColor: s.color }} />
               ))}
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-3">
             {segments.map(s => (
               <button
                 key={s.key}
                 onClick={() => setDetailKey(s.detail)}
                 className="rounded-xl bg-slate-50 px-3 py-2.5 text-left transition-colors hover:bg-slate-100"
               >
-                <span className="block text-2xl font-extrabold text-ink">{s.count}</span>
-                <span className="flex items-center gap-1.5 text-xs font-bold text-slate-500">
-                  <span className={`h-2 w-2 rounded-sm ${s.bar}`} />
+                <span className="block text-[22px] font-extrabold text-ink">{s.count}</span>
+                <span className="flex items-center gap-1.5 text-xs font-bold text-[#586474]">
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: s.color }} />
                   {s.label}
                 </span>
               </button>
@@ -483,151 +509,167 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="min-w-0 flex-[1_1_340px] rounded-[18px] border border-slate-200 bg-white px-5 py-[18px]">
           <div className="flex items-center justify-between">
-            <h3 className="text-base font-extrabold text-ink">Needs your approval</h3>
-            {pendingTotal > 0 && (
-              <span className="rounded-full bg-critical-bg px-2.5 py-0.5 text-xs font-extrabold text-critical-text">{pendingTotal} waiting</span>
+            <h2 className="text-base font-extrabold text-ink">Needs your approval</h2>
+            {pending.total > 0 && (
+              <span className="rounded-full bg-[#fee2e2] px-[9px] py-0.5 text-xs font-extrabold text-[#991b1b]">{pending.total} waiting</span>
             )}
           </div>
-          <ul className="mt-2 divide-y divide-slate-100">
-            {approvals.map(a => (
-              <li key={a.label}>
-                <Link href={a.href} className="flex items-center gap-3 py-3 transition-opacity hover:opacity-80">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-light text-accent">{a.icon}</span>
-                  <span className="flex-1 text-sm font-bold text-ink">{a.label}</span>
-                  <span
-                    className={`min-w-[1.75rem] rounded-full px-2 py-0.5 text-center text-xs font-extrabold ${
-                      a.count > 0 ? 'bg-warning-bg text-warning-text' : 'bg-slate-100 text-slate-500'
-                    }`}
-                  >
-                    {a.count}
-                  </span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="m9 6 6 6-6 6" />
-                  </svg>
-                </Link>
-              </li>
+          <div className="mt-2 flex flex-col">
+            {approvals.map((a, i) => (
+              <Link
+                key={a.label}
+                href={a.href}
+                className={`flex items-center gap-3 py-3 transition-opacity hover:opacity-80 ${i < approvals.length - 1 ? 'border-b border-slate-100' : ''}`}
+              >
+                <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full bg-brand-light text-brand">{a.icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-ink">{a.label}</span>
+                  <span className="block text-xs font-semibold text-[#586474]">{a.sub}</span>
+                </span>
+                <span
+                  className={`rounded-full px-[9px] py-[3px] text-xs font-extrabold ${
+                    a.count > 0 ? 'bg-[#fdf0d5] text-[#8a4b06]' : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {a.count}
+                </span>
+              </Link>
             ))}
-          </ul>
-        </section>
-      </div>
-
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
-        <StatCard label="Active Staff" value={String(activeEmployees.length)} hint="On active rosters" onClick={() => setDetailKey('total')} />
-        <StatCard label="Work Hours Today" value={`${todayWorkHours.toFixed(1)}h`} hint="All staff, checked out" onClick={() => setDetailKey('hours')} />
-        <StatCard label="Overtime Today" value={`${todayOvertimeHours.toFixed(1)}h`} hint="Beyond shift hours" onClick={() => setDetailKey('overtime')} />
-        <StatCard
-          label="Week-off Today"
-          value={String(weekOffCount)}
-          hint={todayIsWeekOff ? (todayHoliday?.name ?? 'Recurring weekly day') : 'Off by roster or holiday'}
-          onClick={() => setDetailKey('weekOff')}
-        />
-      </div>
-
-      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:col-span-2">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-base font-extrabold text-ink">Weekly attendance</h3>
-            <span className="text-xs font-bold text-slate-500">Present each day · last 7 days</span>
           </div>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={trend} margin={{ top: 20, right: 8, left: -16, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="#e2e8f0" strokeDasharray="4 4" />
-              <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
-              <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip
-                cursor={{ fill: '#f1f5f9' }}
-                contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
-                formatter={(v: number) => [`${v} present`, '']}
-              />
-              <Bar dataKey="present" radius={[8, 8, 3, 3]} maxBarSize={56} label={{ position: 'top', fontSize: 12, fontWeight: 700, fill: '#334155' }}>
-                {trend.map((d, i) => (
-                  // Today in the full accent, the six days before it lighter.
-                  <Cell key={`${d.day}-${i}`} fill={i === trend.length - 1 ? '#0d9488' : '#99f6e4'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        </section>
+      </div>
+
+      <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-5">
+        {kpis.map(k => (
+          <button
+            key={k.label}
+            onClick={() => setDetailKey(k.detail)}
+            className="rounded-2xl border border-slate-200 bg-white px-[18px] py-4 text-left transition-colors hover:border-slate-300"
+          >
+            <div className="text-xs font-extrabold uppercase tracking-[0.05em] text-[#586474]">{k.label}</div>
+            <div className="mt-1.5 text-[26px] font-extrabold text-ink">{k.value}</div>
+            <div className="text-xs font-semibold text-[#586474]">{k.caption}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-5">
+        <section className="min-w-0 flex-[2_1_560px] rounded-[18px] border border-slate-200 bg-white px-6 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-extrabold text-ink">Weekly attendance</h2>
+            <span className="text-xs font-bold text-[#586474]">Present each day · last 7 days</span>
+          </div>
+          <div className="mt-[18px]">
+            <ResponsiveContainer width="100%" height={230}>
+              <BarChart data={trend} margin={{ top: 22, right: 8, left: 8, bottom: 0 }} barCategoryGap="18%">
+                <CartesianGrid vertical={false} stroke="#e2e8f0" strokeDasharray="4 4" />
+                <XAxis dataKey="day" tick={{ fontSize: 12, fontWeight: 700, fill: '#586474' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
+                <YAxis hide allowDecimals={false} />
+                <Tooltip
+                  cursor={{ fill: '#f1f5f9' }}
+                  contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+                  formatter={(v: number) => [`${v} present`, '']}
+                />
+                <Bar dataKey="present" radius={[8, 8, 3, 3]} maxBarSize={56} label={{ position: 'top', fontSize: 12, fontWeight: 800, fill: '#334155' }}>
+                  {trend.map((d, i) => (
+                    // Today in full emerald, the six days before it lighter.
+                    <Cell key={`${d.day}-${i}`} fill={i === trend.length - 1 ? '#047857' : '#a7d0c4'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-base font-extrabold text-ink">Live activity</h3>
-            <span className="flex items-center gap-1.5 text-xs font-bold text-good">
-              <span className="h-1.5 w-1.5 rounded-full bg-good" />
-              Realtime
+        <section className="min-w-0 flex-[1_1_340px] rounded-[18px] border border-slate-200 bg-white px-5 py-[18px]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-extrabold text-ink">Live activity</h2>
+            <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#15803d]">
+              <span className="h-[7px] w-[7px] rounded-full bg-[#15803d]" />
+              Live
             </span>
           </div>
-          <ul className="divide-y divide-slate-100">
-            {feed.length === 0 && <li className="py-3 text-sm text-slate-400">No punches yet.</li>}
-            {feed.map(item => (
-              <li key={item.id} className="flex items-center gap-3 py-2.5">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-light text-xs font-extrabold text-accent">
-                  {item.employee_name
-                    .split(/\s+/)
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map(w => w[0])
-                    .join('')
-                    .toUpperCase()}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-bold text-ink">{item.employee_name}</div>
-                  <div className="text-xs font-semibold capitalize text-slate-500">{item.method === 'gps' ? 'GPS' : item.method}</div>
+          <div className="mt-1.5 flex flex-col">
+            {feed.length === 0 && <p className="py-3 text-sm text-slate-400">No punches yet.</p>}
+            {feed.map((item, i) => {
+              const [bg, fg] = AVATAR_COLORS[i % AVATAR_COLORS.length];
+              const device = item.device_id ? deviceById.get(item.device_id) : undefined;
+              const where = device ? (branchName(device.branch_id) ?? device.name) : null;
+              const isToday = dateKey(item.punch_time) === today;
+              return (
+                <div key={item.id} className="flex items-center gap-3 border-b border-slate-100 py-2.5">
+                  <span
+                    className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full text-xs font-extrabold"
+                    style={{ backgroundColor: bg, color: fg }}
+                  >
+                    {initialsOf(item.employee_name)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-bold text-ink">
+                      {item.employee_name} {PUNCH_VERB[item.punch_type] ?? 'punched'}
+                    </span>
+                    <span className="block truncate text-xs font-semibold text-[#586474]">
+                      {METHOD_LABEL[item.method] ?? item.method}
+                      {where ? ` · ${where}` : ''}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right text-xs font-bold text-[#586474]">
+                    {isToday ? timeOf(item.punch_time) : `${formatAdDate(dateKey(item.punch_time), system)} ${timeOf(item.punch_time)}`}
+                  </span>
                 </div>
-                <div className="text-right">
-                  <Badge tone={item.punch_type === '0' ? 'good' : item.punch_type === '1' ? 'info' : 'warning'}>{punchTypeLabel(item.punch_type)}</Badge>
-                  <div className="mt-1 text-xs font-semibold text-slate-500">
-                    {formatAdDate(localDateKey(item.punch_time), system)}{' '}
-                    {new Date(item.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-          <Link href="/attendance" className="mt-3 inline-block text-sm font-extrabold text-accent hover:underline">
-            Full attendance logs
-          </Link>
+              );
+            })}
+            <Link href="/attendance" className="mt-2.5 text-[13px] font-extrabold text-brand hover:underline">
+              Full attendance logs
+            </Link>
+          </div>
         </section>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <h3 className="mb-4 text-base font-extrabold text-ink">Departments</h3>
+      <div className="mt-5 flex flex-wrap gap-5">
+        <section className="min-w-0 flex-[1_1_420px] rounded-[18px] border border-slate-200 bg-white px-[22px] py-[18px]">
+          <h2 className="text-base font-extrabold text-ink">Departments</h2>
           {deptBreakdown.length === 0 ? (
-            <p className="text-sm text-slate-400">No employees yet.</p>
+            <p className="mt-3 text-sm text-slate-400">No employees yet.</p>
           ) : (
-            <ul className="space-y-3">
+            <div className="mt-3.5 flex flex-col gap-3">
               {deptBreakdown.map(d => (
-                <li key={d.name} className="flex items-center gap-3">
-                  <span className="w-28 shrink-0 truncate text-sm font-bold text-ink">{d.name}</span>
+                <div key={d.name} className="flex items-center gap-3">
+                  <span className="w-[110px] shrink-0 truncate text-[13px] font-bold text-ink">{d.name}</span>
                   <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                    <span className="block h-full rounded-full" style={{ width: `${(d.value / maxDept) * 100}%`, backgroundColor: d.color }} />
+                    <span className="block h-full rounded-full bg-brand" style={{ width: `${(d.value / maxDept) * 100}%` }} />
                   </span>
-                  <span className="w-8 text-right text-sm font-extrabold text-ink">{d.value}</span>
-                </li>
+                  <span className="w-6 text-right text-[13px] font-extrabold text-ink">{d.value}</span>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <h3 className="mb-2 text-base font-extrabold text-ink">Biometric devices</h3>
-          <ul className="divide-y divide-slate-100">
-            {devices.length === 0 && <li className="py-3 text-sm text-slate-400">No devices registered.</li>}
-            {devices.map(d => (
-              <li key={d.id} className="flex items-center justify-between gap-3 py-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-bold text-ink">{d.name}</div>
-                  <div className="text-xs font-semibold text-slate-500">
-                    {d.ip_address} · Synced {d.last_sync ? new Date(d.last_sync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'never'}
-                  </div>
-                </div>
-                <Badge tone={d.status === 'online' ? 'good' : 'critical'}>{d.status}</Badge>
-              </li>
+        <section className="min-w-0 flex-[1_1_420px] rounded-[18px] border border-slate-200 bg-white px-[22px] py-[18px]">
+          <h2 className="text-base font-extrabold text-ink">Biometric devices</h2>
+          <div className="mt-2 flex flex-col">
+            {devices.length === 0 && <p className="py-3 text-sm text-slate-400">No devices registered.</p>}
+            {devices.map((d, i) => (
+              <div key={d.id} className={`flex items-center gap-3 py-3 ${i < devices.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold text-ink">{d.name}</span>
+                  <span className="block text-xs font-semibold text-[#586474]">
+                    {branchName(d.branch_id) ?? d.ip_address} · {d.last_sync ? `synced ${timeAgo(d.last_sync)}` : 'never synced'}
+                  </span>
+                </span>
+                <span
+                  className={`rounded-full px-[9px] py-[3px] text-xs font-extrabold ${
+                    d.status === 'online' ? 'bg-[#e2f3e8] text-[#14532d]' : 'bg-[#fde2e1] text-[#991b1b]'
+                  }`}
+                >
+                  {d.status === 'online' ? 'Online' : 'Offline'}
+                </span>
+              </div>
             ))}
-          </ul>
+          </div>
         </section>
       </div>
 

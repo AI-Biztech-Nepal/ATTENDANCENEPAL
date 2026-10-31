@@ -12,6 +12,13 @@ const config: Config = {
           DEFAULT: '#0d9488',
           light: '#ccfbf1',
         },
+        // The mobile app's emerald (mobile-app/src/theme.ts) — used by the
+        // redesigned owner Dashboard and top bar.
+        brand: {
+          DEFAULT: '#047857',
+          light: '#e3f4ec',
+          bar: '#a7d0c4',
+        },
         good: { DEFAULT: '#0d9488', bg: '#ccfbf1', text: '#0f766e' },
         warning: { DEFAULT: '#f97316', bg: '#ffedd5', text: '#c2410c' },
         critical: { DEFAULT: '#ef4444', bg: '#fee2e2', text: '#b91c1c' },

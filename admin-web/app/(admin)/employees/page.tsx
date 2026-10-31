@@ -320,6 +320,11 @@ function EmployeesView() {
   useEffect(() => {
     if (filterParam) setFilter(filterParam);
   }, [filterParam]);
+  // The top bar's search box lands here as /employees?search=…
+  const searchParam = searchParams.get('search');
+  useEffect(() => {
+    if (searchParam) setSearch(searchParam);
+  }, [searchParam]);
 
   // Let Escape close the Add Employee modal — the mobile/back-button
   // expectation for a modal that otherwise only closes via its own buttons.

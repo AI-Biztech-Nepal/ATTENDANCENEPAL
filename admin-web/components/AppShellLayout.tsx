@@ -28,7 +28,7 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { title } = usePageTitle();
+  const { title, eyebrow } = usePageTitle();
   const [status, setStatus] = useState<'loading' | 'ready' | 'redirecting'>('loading');
   const [role, setRole] = useState<Role>('admin');
   const [adminName, setAdminName] = useState('Admin');
@@ -80,7 +80,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
         </div>
         <div className="flex flex-1 flex-col overflow-hidden print:overflow-visible">
           <div className="print:hidden">
-            <TopBar title={title} onOpenMenu={() => setDrawerOpen(true)} adminName={adminName} role={role} />
+            <TopBar title={title} eyebrow={eyebrow} onOpenMenu={() => setDrawerOpen(true)} adminName={adminName} role={role} />
           </div>
           <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 print:overflow-visible print:p-0">{children}</main>
         </div>
