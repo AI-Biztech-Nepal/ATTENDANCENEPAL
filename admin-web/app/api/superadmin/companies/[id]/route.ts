@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireSuperadmin } from '@/lib/superadmin';
-import { listAllUsers } from '@/lib/supabase-admin';
+import { listAllUsers, removeCompanyDocuments } from '@/lib/supabase-admin';
 import { fetchAll } from '@/lib/leaveBalance';
 import { weekOffDatesByGender } from '@/lib/weekOff';
 import { buildWeeklyPatternByEmployee, nepalDateTimeToUtcMs, nepalTodayIso, type DailyShiftByDate } from '@/lib/shift';
@@ -279,9 +279,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const authResults = await Promise.all(profileIds.map(id => admin.auth.admin.deleteUser(id)));
   const authFailed = authResults.filter(r => r.error).length;
 
+  // Same again for the employees' uploaded HR documents: the rows went with
+  // the employees, but the files sit in private storage, which the delete
+  // above can't reach. (A company that never uploaded one has no folder, so
+  // this finds nothing.)
+  const documents = await removeCompanyDocuments(admin, companyId).catch(() => ({ removed: 0, failed: 1 }));
+
   return NextResponse.json({
     ok: true,
     authAccountsDeleted: profileIds.length - authFailed,
     authAccountsFailed: authFailed,
+    documentFilesDeleted: documents.removed,
+    documentFilesFailed: documents.failed,
   });
 }

@@ -52,6 +52,8 @@ export type Employee = {
   pan_no: string | null;
   ssf_no: string | null;
   attendance_exempt: boolean;
+  /** The company this employee belongs to — names the top folder of their stored documents. */
+  company_id?: string | null;
   /** Paid-leave days this employee gets each fiscal year, set on the Leave
    * page. Null = none (there is no company-wide default).
    * Optional: the column comes from 20260911110000 and may not exist yet. */

@@ -35,3 +35,50 @@ export async function listAllUsers(admin: ReturnType<typeof getSupabaseAdmin>) {
   }
   return { users, error: null };
 }
+
+/** Removes every file under `prefix` in a storage bucket, folders included.
+ * Storage can't list recursively, so this lists one level, removes the files
+ * it finds, descends into the folders, and asks again until the prefix is
+ * empty (a folder disappears on its own once its last file is gone). */
+async function removeUnderPrefix(
+  bucket: ReturnType<ReturnType<typeof getSupabaseAdmin>['storage']['from']>,
+  prefix: string,
+  depth = 0
+): Promise<{ removed: number; failed: number }> {
+  let removed = 0;
+  for (let round = 0; round < 1000; round++) {
+    const { data: entries, error } = await bucket.list(prefix, { limit: 100 });
+    if (error) return { removed, failed: 1 };
+    if (!entries || entries.length === 0) break;
+
+    // A folder entry has no id; a file does.
+    const files = entries.filter(e => e.id !== null).map(e => `${prefix}/${e.name}`);
+    const folders = entries.filter(e => e.id === null).map(e => `${prefix}/${e.name}`);
+    let progressed = false;
+
+    if (files.length > 0) {
+      const { error: removeError } = await bucket.remove(files);
+      if (removeError) return { removed, failed: files.length };
+      removed += files.length;
+      progressed = true;
+    }
+    if (depth < 3) {
+      for (const folder of folders) {
+        const inner = await removeUnderPrefix(bucket, folder, depth + 1);
+        removed += inner.removed;
+        if (inner.failed > 0) return { removed, failed: inner.failed };
+        if (inner.removed > 0) progressed = true;
+      }
+    }
+    // Nothing was removed this round, so asking again would just loop.
+    if (!progressed) break;
+  }
+  return { removed, failed: 0 };
+}
+
+/** Deletes every stored HR document of a company (<company id>/<employee id>/<file>
+ * in the private employee-documents bucket) — used after the company itself is
+ * deleted, since a database delete can't reach files in storage. */
+export async function removeCompanyDocuments(admin: ReturnType<typeof getSupabaseAdmin>, companyId: string) {
+  return removeUnderPrefix(admin.storage.from('employee-documents'), companyId);
+}

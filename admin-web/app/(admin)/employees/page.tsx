@@ -16,6 +16,7 @@ import { resolveShift, formatShiftHours } from '@/lib/shift';
 import { usePageTitle } from '@/lib/pageTitle';
 import { fetchAll } from '@/lib/leaveBalance';
 import { downloadExcel } from '@/components/TableExportBar';
+import { DOCUMENTS_BUCKET } from '@/lib/employeeDocuments';
 import {
   EMPLOYMENT_STATUS_LABEL,
   EMPLOYMENT_TYPES,
@@ -488,8 +489,30 @@ function EmployeesView() {
     reload();
   }
 
+  // The stored files an employee's documents point to. They sit in private
+  // storage, which deleting database rows can't reach, so whoever deletes the
+  // employee has to remove the files too. Empty (not an error) until the
+  // documents migration has been run.
+  async function documentPaths(employeeId: string): Promise<string[]> {
+    const { data } = await supabase.from('employee_documents').select('file_path').eq('employee_id', employeeId);
+    return (data ?? []).map(d => d.file_path as string);
+  }
+
+  async function removeDocumentFiles(paths: string[]) {
+    if (paths.length === 0) return;
+    const { error } = await supabase.storage.from(DOCUMENTS_BUCKET).remove(paths);
+    if (error) {
+      alert(`The employee was deleted, but ${paths.length} stored document file(s) could not be removed: ${error.message}`);
+    }
+  }
+
   async function handleDelete(id: string) {
-    if (!(await confirm('Remove this employee?', { title: 'Remove employee?', confirmLabel: 'Remove', tone: 'danger' }))) return;
+    const paths = await documentPaths(id);
+    const message =
+      paths.length > 0
+        ? `Remove this employee? Their ${paths.length} uploaded document${paths.length === 1 ? '' : 's'} will be permanently deleted too.`
+        : 'Remove this employee?';
+    if (!(await confirm(message, { title: 'Remove employee?', confirmLabel: 'Remove', tone: 'danger' }))) return;
     const { error } = await supabase.from('employees').delete().eq('id', id);
     if (error) {
       if (error.code === '23503') {
@@ -504,6 +527,7 @@ function EmployeesView() {
       }
       return;
     }
+    await removeDocumentFiles(paths);
     reload();
   }
 
@@ -558,12 +582,16 @@ function EmployeesView() {
     if (!forceDeleteEmployee) return;
     setForceDeleting(true);
     setForceDeleteError(null);
+    // Looked up first: once the employee is gone there is nothing left to find them by.
+    const paths = await documentPaths(forceDeleteEmployee.id);
     const { error } = await supabase.rpc('admin_force_delete_employee', { p_employee_id: forceDeleteEmployee.id });
-    setForceDeleting(false);
     if (error) {
+      setForceDeleting(false);
       setForceDeleteError(error.message);
       return;
     }
+    await removeDocumentFiles(paths);
+    setForceDeleting(false);
     setForceDeleteEmployee(null);
     reload();
   }
@@ -2136,8 +2164,8 @@ function EmployeesView() {
               <h3 className="text-lg font-semibold text-ink">Permanently delete {forceDeleteEmployee.name}?</h3>
             </div>
             <p className="mb-4 text-sm text-slate-600">
-              This erases their attendance logs, payroll history, tasks, leave requests, corrections, and CV entries —
-              everything, not just their profile. <span className="font-semibold text-critical">There is no undo.</span>{' '}
+              This erases their attendance logs, payroll history, tasks, leave requests, corrections, CV entries, and
+              uploaded documents — everything, not just their profile. <span className="font-semibold text-critical">There is no undo.</span>{' '}
               Their sign-in account (if any) is kept but unlinked, not deleted.
             </p>
             <label className="mb-1 block text-xs font-medium text-slate-600">

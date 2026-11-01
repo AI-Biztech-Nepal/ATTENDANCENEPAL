@@ -8,6 +8,7 @@ import { usePageTitle } from '@/lib/pageTitle';
 import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
+import EmployeeDocuments from '@/components/EmployeeDocuments';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -1151,6 +1152,8 @@ export default function EmployeeCvPage() {
           ))}
         </ul>
       </div>
+
+      <EmployeeDocuments employeeId={employee.id} companyId={employee.company_id ?? null} />
 
       {showEducationForm && (
         <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
