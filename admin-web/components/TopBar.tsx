@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import CalendarSystemSwitch from './CalendarSystemSwitch';
 import AccountMenu from './AccountMenu';
-import { usePendingApprovals } from '@/lib/pendingApprovals';
+import NotificationBell from './NotificationBell';
 
 export default function TopBar({
   title,
@@ -21,11 +20,7 @@ export default function TopBar({
   role: 'admin' | 'hr';
 }) {
   const router = useRouter();
-  const pending = usePendingApprovals();
   const [query, setQuery] = useState('');
-  // The bell opens whichever page holds what's waiting — GPS check-ins and
-  // corrections are both reviewed on Corrections.
-  const bellHref = pending.gps.count + pending.corrections.count > 0 ? '/corrections' : '/leave';
 
   function search(e: React.FormEvent) {
     e.preventDefault();
@@ -67,18 +62,7 @@ export default function TopBar({
 
           <CalendarSystemSwitch variant="pill" />
 
-          <Link
-            href={bellHref}
-            aria-label={pending.total > 0 ? `Notifications, ${pending.total} waiting` : 'Notifications'}
-            className="relative flex h-[42px] w-[42px] items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-          >
-            <BellIcon className="h-[18px] w-[18px]" />
-            {pending.total > 0 && (
-              <span className="absolute -right-[5px] -top-[5px] flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#dc2626] px-[5px] text-[10px] font-extrabold text-white">
-                {pending.total}
-              </span>
-            )}
-          </Link>
+          <NotificationBell />
 
           <div className="hidden h-8 w-px bg-slate-200 sm:block" />
 
@@ -92,15 +76,6 @@ function MenuIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-    </svg>
-  );
-}
-
-function BellIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path strokeLinecap="round" d="M13.7 21a2 2 0 0 1-3.4 0" />
     </svg>
   );
 }
