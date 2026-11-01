@@ -15,6 +15,15 @@ import type { Employee, Shift, Profile, Branch, Department } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
 import { usePageTitle } from '@/lib/pageTitle';
 import { fetchAll } from '@/lib/leaveBalance';
+import { downloadExcel } from '@/components/TableExportBar';
+import {
+  EMPLOYMENT_STATUS_LABEL,
+  EMPLOYMENT_TYPES,
+  STATUS_TONE,
+  effectiveStatus,
+  employmentTypeLabel,
+  withKnownColumns,
+} from '@/lib/employeeProfile';
 
 const PAGE_SIZE = 10;
 
@@ -36,6 +45,12 @@ const EMPTY_FORM = {
   emergency_contact_name: '',
   emergency_contact_relationship: '',
   emergency_contact_phone: '',
+  employment_type: '',
+  contract_start: '',
+  contract_end: '',
+  reporting_to: '',
+  official_phone: '',
+  personal_email: '',
 };
 
 const CSV_COLUMNS = ['employee_code', 'name', 'email', 'phone', 'department', 'designation', 'fingerprint_id'] as const;
@@ -108,6 +123,13 @@ function EmployeesView() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<Department[]>([]);
   const [filter, setFilter] = useState('All');
+  // Further narrowing on top of the Department filter above. 'All' = no filter.
+  const [branchFilter, setBranchFilter] = useState('All');
+  const [designationFilter, setDesignationFilter] = useState('All');
+  const [typeFilter, setTypeFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [companyName, setCompanyName] = useState('');
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [search, setSearch] = useState('');
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
@@ -182,6 +204,7 @@ function EmployeesView() {
   // is wrong whenever the resignation is being entered after the fact.
   const [resignEmployee, setResignEmployee] = useState<Employee | null>(null);
   const [resignDate, setResignDate] = useState('');
+  const [resignReason, setResignReason] = useState<'resigned' | 'terminated'>('resigned');
   const [resigning, setResigning] = useState(false);
   const [resignError, setResignError] = useState<string | null>(null);
 
@@ -212,6 +235,8 @@ function EmployeesView() {
     supabase.from('profiles').select('id, employee_id, role').then(({ data }) => setProfiles(data ?? []));
     supabase.from('branches').select('*').order('name').then(({ data }) => setBranches(data ?? []));
     supabase.from('departments').select('*').order('name').then(({ data }) => setDepartmentOptions(data ?? []));
+    // Heads the Excel / PDF export. An admin sees only their own company.
+    supabase.from('companies').select('name').limit(1).then(({ data }) => setCompanyName(data?.[0]?.name ?? ''));
     loadLoginEmails();
   }
 
@@ -360,12 +385,19 @@ function EmployeesView() {
       if (filter === 'Unenrolled') list = list.filter(e => !e.fingerprint_id);
       else if (filter !== 'All') list = list.filter(e => e.department === filter);
     }
+    // The Status filter offers Active / Probation / Suspended among current
+    // staff and Resigned / Terminated among former staff, so a value is
+    // always one that makes sense for the list it is applied to.
+    if (statusFilter !== 'All') list = list.filter(e => effectiveStatus(e) === statusFilter);
+    if (branchFilter !== 'All') list = list.filter(e => (branchFilter === 'none' ? !e.branch_id : e.branch_id === branchFilter));
+    if (designationFilter !== 'All') list = list.filter(e => (e.designation ?? '').trim() === designationFilter);
+    if (typeFilter !== 'All') list = list.filter(e => (typeFilter === 'none' ? !e.employment_type : e.employment_type === typeFilter));
 
     const term = search.trim().toLowerCase();
     if (term) {
       list = list.filter(e => {
         const shift = resolveShift(e, shifts);
-        return [e.name, e.employee_code, e.phone, e.email, e.department, e.designation, e.fingerprint_id, shift.name, formatShiftHours(shift)]
+        return [e.name, e.employee_code, e.phone, e.official_phone, e.email, e.personal_email, e.department, e.designation, e.fingerprint_id, shift.name, formatShiftHours(shift)]
           .filter(Boolean)
           .some(v => (v as string).toLowerCase().includes(term));
       });
@@ -374,7 +406,13 @@ function EmployeesView() {
     // instead of a just-added (often not-yet-enrolled) employee jumping to
     // the top and reshuffling everyone else.
     return [...list].sort((a, b) => a.employee_code.localeCompare(b.employee_code, undefined, { numeric: true }));
-  }, [employees, shifts, filter, search]);
+  }, [employees, shifts, filter, search, statusFilter, branchFilter, designationFilter, typeFilter]);
+
+  const designations = useMemo(
+    () =>
+      Array.from(new Set(employees.map(e => (e.designation ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [employees]
+  );
 
   const searchSuggestions = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -397,6 +435,10 @@ function EmployeesView() {
   async function handleAddEmployee(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
+    if (form.employment_type === 'contract' && form.contract_start && form.contract_end && form.contract_end < form.contract_start) {
+      setFormError('The contract end date is before the contract start date.');
+      return;
+    }
     setSaving(true);
     const { error } = await supabase.from('employees').insert({
       employee_code: form.employee_code,
@@ -416,6 +458,16 @@ function EmployeesView() {
       emergency_contact_name: form.emergency_contact_name || null,
       emergency_contact_relationship: form.emergency_contact_relationship || null,
       emergency_contact_phone: form.emergency_contact_phone || null,
+      // Only the HR-profile fields that were filled in are sent, so adding an
+      // employee keeps working before the HR-profile migration has been run.
+      ...withKnownColumns(null, {
+        employment_type: form.employment_type || null,
+        contract_start: form.employment_type === 'contract' ? form.contract_start || null : null,
+        contract_end: form.employment_type === 'contract' ? form.contract_end || null : null,
+        reporting_to: form.reporting_to || null,
+        official_phone: form.official_phone || null,
+        personal_email: form.personal_email || null,
+      }),
       status: 'active',
     });
     setSaving(false);
@@ -458,6 +510,7 @@ function EmployeesView() {
   function openResignModal(emp: Employee) {
     setResignEmployee(emp);
     setResignDate(emp.resigned_at ?? new Date().toISOString().slice(0, 10));
+    setResignReason(effectiveStatus(emp) === 'terminated' ? 'terminated' : 'resigned');
     setResignError(null);
   }
 
@@ -467,7 +520,14 @@ function EmployeesView() {
     setResignError(null);
     const { error } = await supabase
       .from('employees')
-      .update({ status: 'inactive', resigned_at: resignDate })
+      .update({
+        status: 'inactive',
+        resigned_at: resignDate,
+        // The HR label ("Resigned" or "Terminated"). Left out before the
+        // HR-profile migration has been run, when there's no such column to
+        // write — "Terminated" can't be recorded until then.
+        ...('employment_status' in resignEmployee || resignReason === 'terminated' ? { employment_status: resignReason } : {}),
+      })
       .eq('id', resignEmployee.id);
     setResigning(false);
     if (error) {
@@ -480,7 +540,10 @@ function EmployeesView() {
 
   async function handleRestore(emp: Employee) {
     if (!(await confirm(`Restore ${emp.name} to active? They'll show up in active views again.`, { title: 'Restore employee?', confirmLabel: 'Restore' }))) return;
-    const { error } = await supabase.from('employees').update({ status: 'active', resigned_at: null }).eq('id', emp.id);
+    const { error } = await supabase
+      .from('employees')
+      .update({ status: 'active', resigned_at: null, ...('employment_status' in emp ? { employment_status: 'active' } : {}) })
+      .eq('id', emp.id);
     if (error) alert(`Could not update: ${error.message}`);
     reload();
   }
@@ -691,6 +754,200 @@ function EmployeesView() {
     setResetResult(resetPassword);
   }
 
+  // One labelled text box on the Add Employee form.
+  function textField(key: keyof typeof EMPTY_FORM, label: string, required = false) {
+    return (
+      <div key={key}>
+        <label className="mb-1 block text-xs font-medium text-slate-600">{label}</label>
+        <input
+          required={required}
+          value={form[key]}
+          onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+        />
+      </div>
+    );
+  }
+
+  // Quiet by default: nothing is shown for an ordinary active permanent
+  // employee, so the badges only appear when there is something to flag.
+  function renderEmploymentBadges(emp: Employee) {
+    const status = effectiveStatus(emp);
+    return (
+      <>
+        {status !== 'active' && <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>}
+        {emp.employment_type && emp.employment_type !== 'permanent' && <Badge tone="neutral">{employmentTypeLabel(emp.employment_type)}</Badge>}
+      </>
+    );
+  }
+
+  // --- Directory export: everything the current filters match, not just the
+  // page of 10 on screen. -----------------------------------------------------
+  function directoryRows() {
+    const nameById = new Map(employees.map(e => [e.id, e.name]));
+    const branchById = new Map(branches.map(b => [b.id, b.name]));
+    const date = (value: string | null | undefined) => (value ? formatAdDate(value, system) : '');
+    return filtered.map((e, i) => ({
+      sn: i + 1,
+      code: e.employee_code,
+      biometric: e.fingerprint_id ?? '',
+      name: e.name,
+      designation: e.designation ?? '',
+      department: e.department ?? '',
+      outlet: (e.branch_id && branchById.get(e.branch_id)) || '',
+      type: employmentTypeLabel(e.employment_type),
+      joined: date(e.date_of_joining),
+      contractStart: date(e.employment_type === 'contract' ? e.contract_start : null),
+      contractEnd: date(e.employment_type === 'contract' ? e.contract_end : null),
+      reportsTo: (e.reporting_to && nameById.get(e.reporting_to)) || '',
+      phone: e.phone ?? '',
+      officialPhone: e.official_phone ?? '',
+      email: e.email ?? '',
+      personalEmail: e.personal_email ?? '',
+      status: EMPLOYMENT_STATUS_LABEL[effectiveStatus(e)],
+      lastDay: date(e.resigned_at),
+    }));
+  }
+
+  async function handleExportExcel() {
+    const rows = directoryRows();
+    await downloadExcel(
+      'employee-directory',
+      [
+        'S.N.',
+        'Employee ID',
+        'Biometric ID',
+        'Full name',
+        'Company',
+        'Designation',
+        'Department',
+        'Outlet',
+        'Employment type',
+        'Date of joining',
+        'Contract start',
+        'Contract end',
+        'Reporting to',
+        'Phone (personal)',
+        'Phone (official)',
+        'Email (official)',
+        'Email (personal)',
+        'Status',
+        'Last working date',
+      ],
+      rows.map(r => [
+        r.sn,
+        r.code,
+        r.biometric,
+        r.name,
+        companyName,
+        r.designation,
+        r.department,
+        r.outlet,
+        r.type,
+        r.joined,
+        r.contractStart,
+        r.contractEnd,
+        r.reportsTo,
+        r.phone,
+        r.officialPhone,
+        r.email,
+        r.personalEmail,
+        r.status,
+        r.lastDay,
+      ])
+    );
+  }
+
+  async function handleExportPdf() {
+    setExportingPdf(true);
+    try {
+      const rows = directoryRows();
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const marginX = 10;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const rowHeight = 7;
+
+      // Widths add up to the 277 mm between the margins.
+      const columns: { title: string; width: number; value: (r: (typeof rows)[number]) => string }[] = [
+        { title: 'S.N.', width: 9, value: r => String(r.sn) },
+        { title: 'Employee ID', width: 19, value: r => r.code },
+        { title: 'Full name', width: 43, value: r => r.name },
+        { title: 'Designation', width: 34, value: r => r.designation },
+        { title: 'Department', width: 28, value: r => r.department },
+        { title: 'Outlet', width: 28, value: r => r.outlet },
+        { title: 'Type', width: 17, value: r => r.type },
+        { title: 'Joined', width: 24, value: r => r.joined },
+        { title: 'Reports to', width: 31, value: r => r.reportsTo },
+        { title: 'Status', width: 20, value: r => r.status },
+        { title: 'Phone', width: 24, value: r => r.phone },
+      ];
+
+      function fit(text: string, width: number) {
+        const room = width - 2;
+        if (doc.getTextWidth(text) <= room) return text;
+        let out = text;
+        while (out.length > 1 && doc.getTextWidth(out + '...') > room) out = out.slice(0, -1);
+        return out + '...';
+      }
+
+      let y = 0;
+      function startPage() {
+        y = 14;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text(`${companyName ? companyName + ' — ' : ''}Employee Directory`, marginX, y);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(100);
+        doc.text(`${rows.length} employee${rows.length === 1 ? '' : 's'}  ·  ${new Date().toLocaleDateString()}`, marginX, y + 5);
+        doc.setTextColor(0);
+        y += 10;
+        doc.setFillColor(241, 245, 249);
+        doc.rect(marginX, y, pageWidth - marginX * 2, rowHeight, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        let x = marginX;
+        for (const col of columns) {
+          doc.text(fit(col.title, col.width), x + 1, y + 4.7);
+          x += col.width;
+        }
+        doc.setFont('helvetica', 'normal');
+        y += rowHeight;
+      }
+
+      startPage();
+      doc.setDrawColor(226, 232, 240);
+      for (const r of rows) {
+        if (y + rowHeight > pageHeight - 12) {
+          doc.addPage();
+          startPage();
+          doc.setDrawColor(226, 232, 240);
+        }
+        doc.setFontSize(8);
+        let x = marginX;
+        for (const col of columns) {
+          doc.text(fit(col.value(r) || '—', col.width), x + 1, y + 4.7);
+          x += col.width;
+        }
+        doc.line(marginX, y + rowHeight, pageWidth - marginX, y + rowHeight);
+        y += rowHeight;
+      }
+
+      const pages = doc.getNumberOfPages();
+      for (let p = 1; p <= pages; p++) {
+        doc.setPage(p);
+        doc.setFontSize(8);
+        doc.setTextColor(120);
+        doc.text(`Page ${p} of ${pages}`, pageWidth - marginX, pageHeight - 6, { align: 'right' });
+      }
+      doc.save('employee-directory.pdf');
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
   // Shared by the mobile card and desktop table — the badge is clickable in
   // both so a bugged device (one that never reported an enrollment back, or
   // reported a stale one) doesn't leave an admin stuck: clicking it opens a
@@ -765,6 +1022,9 @@ function EmployeesView() {
                 value={filter}
                 onChange={e => {
                   setFilter(e.target.value);
+                  // Switching between current and former staff changes which
+                  // statuses exist, so a leftover one would match nobody.
+                  setStatusFilter('All');
                   setPage(1);
                 }}
                 className="min-w-[13rem] appearance-none rounded-xl border border-slate-200/80 bg-white/80 py-2.5 pl-9 pr-8 text-sm font-medium text-ink shadow-sm backdrop-blur-sm transition-all duration-200 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 hover:border-accent/40"
@@ -823,6 +1083,22 @@ function EmployeesView() {
           </div>
 
           <div className="ml-auto flex gap-2">
+            <button
+              onClick={handleExportExcel}
+              disabled={filtered.length === 0}
+              title="Download everything the current filters show as an Excel file"
+              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-accent/40 hover:bg-white hover:shadow-md disabled:opacity-50"
+            >
+              ⭳ Excel
+            </button>
+            <button
+              onClick={handleExportPdf}
+              disabled={filtered.length === 0 || exportingPdf}
+              title="Download everything the current filters show as a PDF"
+              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-accent/40 hover:bg-white hover:shadow-md disabled:opacity-50"
+            >
+              {exportingPdf ? 'Preparing…' : '⭳ PDF'}
+            </button>
             <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCsvSelected} className="hidden" />
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -837,6 +1113,86 @@ function EmployeesView() {
                 className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-accent/90 hover:shadow-md"
               >
                 + Add Employee
+              </button>
+            )}
+          </div>
+
+          <div className="flex w-full flex-wrap items-end gap-x-4 gap-y-3 border-t border-slate-100 pt-4">
+            <FilterSelect
+              label="Outlet / branch"
+              value={branchFilter}
+              onChange={v => {
+                setBranchFilter(v);
+                setPage(1);
+              }}
+            >
+              <option value="All">All outlets</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+              <option value="none">Unassigned</option>
+            </FilterSelect>
+            <FilterSelect
+              label="Designation"
+              value={designationFilter}
+              onChange={v => {
+                setDesignationFilter(v);
+                setPage(1);
+              }}
+            >
+              <option value="All">All designations</option>
+              {designations.map(d => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </FilterSelect>
+            <FilterSelect
+              label="Employment type"
+              value={typeFilter}
+              onChange={v => {
+                setTypeFilter(v);
+                setPage(1);
+              }}
+            >
+              <option value="All">All types</option>
+              {EMPLOYMENT_TYPES.map(t => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+              <option value="none">Not set</option>
+            </FilterSelect>
+            <FilterSelect
+              label="Status"
+              value={statusFilter}
+              onChange={v => {
+                setStatusFilter(v);
+                setPage(1);
+              }}
+            >
+              <option value="All">{filter === 'Resigned' ? 'Resigned & terminated' : 'Active, probation & suspended'}</option>
+              {(filter === 'Resigned' ? (['resigned', 'terminated'] as const) : (['active', 'probation', 'suspended'] as const)).map(s => (
+                <option key={s} value={s}>
+                  {EMPLOYMENT_STATUS_LABEL[s]}
+                </option>
+              ))}
+            </FilterSelect>
+            {(branchFilter !== 'All' || designationFilter !== 'All' || typeFilter !== 'All' || statusFilter !== 'All') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBranchFilter('All');
+                  setDesignationFilter('All');
+                  setTypeFilter('All');
+                  setStatusFilter('All');
+                  setPage(1);
+                }}
+                className="pb-2.5 text-xs font-medium text-accent hover:underline"
+              >
+                Clear filters
               </button>
             )}
           </div>
@@ -926,6 +1282,7 @@ function EmployeesView() {
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     {renderBioEnrollment(emp)}
                     {linkedEmployeeIds.has(emp.id) && <Badge tone="good">Login Active</Badge>}
+                    {renderEmploymentBadges(emp)}
                     {emp.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
                   </div>
                 </div>
@@ -1153,6 +1510,7 @@ function EmployeesView() {
                             <Link href={`/employees/${emp.id}`} className="block truncate font-medium text-ink hover:text-accent hover:underline">
                               {emp.name}
                             </Link>
+                            {renderEmploymentBadges(emp)}
                             {emp.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
                           </div>
                           <div className="truncate text-xs text-slate-400">{emp.phone ?? '—'}</div>
@@ -1452,31 +1810,12 @@ function EmployeesView() {
             </div>
 
             <div className="overflow-y-auto px-6 py-4">
+              <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Basic details</h4>
               <div className="grid gap-3 sm:grid-cols-2">
-                {(
-                  [
-                    ['employee_code', 'Employee code', true],
-                    ['name', 'Full name', true],
-                    ['username', 'Username', false],
-                    ['email', 'Email', false],
-                    ['phone', 'Contact number', false],
-                    ['address', 'Address', false],
-                    ['designation', 'Designation', false],
-                    ['pan_no', 'PAN No.', false],
-                    ['ssf_no', 'SSF No.', false],
-                    ['fingerprint_id', 'Fingerprint / Biometric ID', false],
-                  ] as const
-                ).map(([key, label, required]) => (
-                  <div key={key}>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">{label}</label>
-                    <input
-                      required={required}
-                      value={form[key]}
-                      onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
-                    />
-                  </div>
-                ))}
+                {textField('employee_code', 'Employee code', true)}
+                {textField('name', 'Full name', true)}
+                {textField('username', 'Username')}
+                {textField('fingerprint_id', 'Fingerprint / Biometric ID')}
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Gender</label>
                   <select
@@ -1490,6 +1829,13 @@ function EmployeesView() {
                   </select>
                   <p className="mt-1 text-xs text-slate-400">Used for gender-specific holidays (e.g. Teej).</p>
                 </div>
+              </div>
+
+              <h4 className="mb-3 mt-5 border-t border-slate-100 pt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Employment
+              </h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {textField('designation', 'Designation')}
                 <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Department</label>
                   <select
@@ -1506,7 +1852,7 @@ function EmployeesView() {
                   </select>
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-600">Branch</label>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Outlet / branch</label>
                   <select
                     value={form.branch_id}
                     onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
@@ -1522,32 +1868,87 @@ function EmployeesView() {
                   {!form.branch_id && <p className="mt-1 text-xs text-slate-400">GPS check-in won&apos;t work until set.</p>}
                 </div>
                 <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Employment type</label>
+                  <select
+                    value={form.employment_type}
+                    onChange={e => setForm(f => ({ ...f, employment_type: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+                  >
+                    <option value="">Not set</option>
+                    {EMPLOYMENT_TYPES.map(t => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {form.employment_type === 'contract' && (
+                  <>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Contract start date</label>
+                      <DatePicker value={form.contract_start} onChange={v => setForm(f => ({ ...f, contract_start: v }))} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Contract end date</label>
+                      <DatePicker value={form.contract_end} onChange={v => setForm(f => ({ ...f, contract_end: v }))} />
+                    </div>
+                  </>
+                )}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-slate-600">Reporting to</label>
+                  <select
+                    value={form.reporting_to}
+                    onChange={e => setForm(f => ({ ...f, reporting_to: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+                  >
+                    <option value="">No one</option>
+                    {employees
+                      .filter(p => p.status === 'active')
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.employee_code})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div>
                   <label className="mb-1 block text-xs font-medium text-slate-600">Date of joining</label>
                   <DatePicker value={form.date_of_joining} onChange={v => setForm(f => ({ ...f, date_of_joining: v }))} />
                 </div>
               </div>
 
               <h4 className="mb-3 mt-5 border-t border-slate-100 pt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Contact
+              </h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {textField('phone', 'Phone (personal)')}
+                {textField('official_phone', 'Phone (official)')}
+                {textField('email', 'Email (official)')}
+                {textField('personal_email', 'Email (personal)')}
+                <div className="sm:col-span-2">{textField('address', 'Address')}</div>
+              </div>
+
+              <h4 className="mb-3 mt-5 border-t border-slate-100 pt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Statutory
+              </h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {textField('pan_no', 'PAN No.')}
+                {textField('ssf_no', 'SSF No.')}
+              </div>
+
+              <h4 className="mb-3 mt-5 border-t border-slate-100 pt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Emergency Contact
               </h4>
               <div className="grid gap-3 sm:grid-cols-3">
-                {(
-                  [
-                    ['emergency_contact_name', 'Name'],
-                    ['emergency_contact_relationship', 'Relationship'],
-                    ['emergency_contact_phone', 'Phone'],
-                  ] as const
-                ).map(([key, label]) => (
-                  <div key={key}>
-                    <label className="mb-1 block text-xs font-medium text-slate-600">{label}</label>
-                    <input
-                      value={form[key]}
-                      onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
-                    />
-                  </div>
-                ))}
+                {textField('emergency_contact_name', 'Name')}
+                {textField('emergency_contact_relationship', 'Relationship')}
+                {textField('emergency_contact_phone', 'Phone')}
               </div>
+              <p className="mt-4 text-xs text-slate-400">
+                Date of birth, permanent and temporary address, family, education and training can be added from the
+                employee&apos;s profile after saving.
+              </p>
               {formError && <p className="mt-3 text-sm text-critical">{formError}</p>}
             </div>
 
@@ -1777,14 +2178,29 @@ function EmployeesView() {
         >
           <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-lg" onClick={e => e.stopPropagation()}>
             <h3 className="mb-2 text-lg font-semibold text-ink">
-              {resignEmployee.status === 'active' ? `Mark ${resignEmployee.name} as resigned?` : `Resignation date for ${resignEmployee.name}`}
+              {resignEmployee.status === 'active' ? `Mark ${resignEmployee.name} as leaving?` : `Last working date for ${resignEmployee.name}`}
             </h3>
             <p className="mb-4 text-sm text-slate-600">
               {resignEmployee.status === 'active'
                 ? "They'll be removed from active views but their history is kept."
-                : 'Update the date their resignation takes effect.'}
+                : 'Update the date their employment ended.'}
             </p>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Resignation date</label>
+            {resignEmployee.status === 'active' && (
+              <>
+                <label className="mb-1 block text-xs font-medium text-slate-600">Reason for leaving</label>
+                <select
+                  value={resignReason}
+                  onChange={e => setResignReason(e.target.value as 'resigned' | 'terminated')}
+                  className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+                >
+                  <option value="resigned">Resigned</option>
+                  <option value="terminated">Terminated</option>
+                </select>
+              </>
+            )}
+            <label className="mb-1 block text-xs font-medium text-slate-600">
+              {resignReason === 'terminated' ? 'Last working date' : 'Resignation date'}
+            </label>
             <DatePicker value={resignDate} onChange={setResignDate} />
             {resignError && <p className="mt-3 text-sm text-critical">{resignError}</p>}
             <div className="mt-5 flex justify-end gap-2">
@@ -1801,7 +2217,7 @@ function EmployeesView() {
                 disabled={resigning || !resignDate}
                 className="rounded-lg bg-critical px-4 py-2 text-sm font-semibold text-white hover:bg-critical/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {resigning ? 'Saving…' : resignEmployee.status === 'active' ? 'Mark resigned' : 'Save date'}
+                {resigning ? 'Saving…' : resignEmployee.status === 'active' ? (resignReason === 'terminated' ? 'Mark terminated' : 'Mark resigned') : 'Save date'}
               </button>
             </div>
           </div>
@@ -1929,5 +2345,32 @@ function AlertIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
     </svg>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="group">
+      <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">
+        {label}
+      </label>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="min-w-[10rem] rounded-xl border border-slate-200/80 bg-white/80 py-2.5 pl-3 pr-3 text-sm font-medium text-ink shadow-sm backdrop-blur-sm transition-all duration-200 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 hover:border-accent/40"
+      >
+        {children}
+      </select>
+    </div>
   );
 }

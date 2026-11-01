@@ -57,6 +57,39 @@ export type Employee = {
    * Optional: the column comes from 20260911110000 and may not exist yet. */
   annual_leave_days?: number | null;
   created_at: string;
+
+  // HR profile columns (20261101120000_employee_hr_profile.sql). Optional:
+  // rows loaded before that migration has been run don't carry them.
+  employment_type?: 'permanent' | 'contract' | 'part_time' | null;
+  /** HR label layered on `status` — read it through effectiveStatus(). */
+  employment_status?: 'active' | 'probation' | 'suspended' | 'terminated' | 'resigned';
+  contract_start?: string | null;
+  contract_end?: string | null;
+  reporting_to?: string | null;
+  official_phone?: string | null;
+  personal_email?: string | null;
+  date_of_birth?: string | null;
+  nationality?: string | null;
+  marital_status?: 'single' | 'married' | 'other' | null;
+  blood_group?: string | null;
+  citizenship_no?: string | null;
+  citizenship_issued_district?: string | null;
+  citizenship_issue_date?: string | null;
+  permanent_province?: string | null;
+  permanent_district?: string | null;
+  permanent_municipality?: string | null;
+  permanent_ward?: string | null;
+  permanent_tole?: string | null;
+  temporary_province?: string | null;
+  temporary_district?: string | null;
+  temporary_municipality?: string | null;
+  temporary_ward?: string | null;
+  temporary_tole?: string | null;
+  father_name?: string | null;
+  mother_name?: string | null;
+  grandfather_name?: string | null;
+  spouse_name?: string | null;
+  emergency_contact_address?: string | null;
 };
 
 export type EmployeeEducation = {
@@ -64,7 +97,20 @@ export type EmployeeEducation = {
   employee_id: string;
   degree: string;
   institution: string | null;
+  /** Awarding board / university. Optional until the HR profile migration is run. */
+  board_university?: string | null;
   year: number | null;
+  /** Whether `year` is Bikram Sambat or AD. */
+  year_calendar?: 'AD' | 'BS';
+};
+
+export type EmployeeTraining = {
+  id: string;
+  employee_id: string;
+  title: string;
+  provider: string | null;
+  start_date: string | null;
+  end_date: string | null;
 };
 
 export type EmployeeWorkExperience = {
