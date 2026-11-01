@@ -26,7 +26,7 @@ import {
   type AttentionItem,
   type ProfileTab,
 } from '@/components/profile/ProfileParts';
-import { EditActionBar, EditSectionNav, type NavSection } from '@/components/profile/EditParts';
+import { EditActionBar } from '@/components/profile/EditParts';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -156,51 +156,6 @@ const FIELD_LABELS: Record<CoreKey, string> = {
   emergency_contact_address: 'Emergency contact address',
 };
 
-// The sections of the edit form, in order, for the list beside it.
-const SECTIONS = [
-  { id: 'employment', label: 'Employment' },
-  { id: 'personal', label: 'Personal' },
-  { id: 'contact', label: 'Contact' },
-  { id: 'address', label: 'Address' },
-  { id: 'family', label: 'Family' },
-  { id: 'emergency', label: 'Emergency' },
-  { id: 'payroll', label: 'Payroll' },
-] as const;
-type SectionId = (typeof SECTIONS)[number]['id'];
-
-// Every field in a section (to count what was edited) and the ones worth having filled in
-// (to say what is missing). Family and payroll have nothing required.
-const SECTION_FIELDS: Record<SectionId, CoreKey[]> = {
-  employment: ['name', 'username', 'employment_type', 'employment_status', 'contract_start', 'contract_end', 'reporting_to', 'department', 'designation', 'branch_id', 'date_of_joining'],
-  personal: ['gender', 'date_of_birth', 'nationality', 'marital_status', 'blood_group', 'citizenship_no', 'citizenship_issued_district', 'citizenship_issue_date'],
-  contact: ['phone', 'official_phone', 'email', 'personal_email'],
-  address: [
-    'permanent_province',
-    'permanent_district',
-    'permanent_municipality',
-    'permanent_ward',
-    'permanent_tole',
-    'temporary_province',
-    'temporary_district',
-    'temporary_municipality',
-    'temporary_ward',
-    'temporary_tole',
-    'address',
-  ],
-  family: ['father_name', 'mother_name', 'grandfather_name', 'spouse_name'],
-  emergency: ['emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone', 'emergency_contact_address'],
-  payroll: ['pan_no', 'ssf_no', 'allowance'],
-};
-const SECTION_REQUIRED: Record<SectionId, CoreKey[]> = {
-  employment: ['name', 'employment_type', 'department', 'designation', 'branch_id', 'date_of_joining'],
-  personal: ['gender', 'date_of_birth', 'nationality', 'marital_status', 'blood_group'],
-  contact: ['phone', 'email'],
-  address: ['permanent_province', 'permanent_district', 'permanent_municipality', 'permanent_ward', 'permanent_tole'],
-  family: [],
-  emergency: ['emergency_contact_name', 'emergency_contact_phone'],
-  payroll: [],
-};
-
 /** True when a temporary address has been filled in and is identical to the permanent one. */
 function addressesMatch(f: CoreForm) {
   const parts = ['province', 'district', 'municipality', 'ward', 'tole'] as const;
@@ -256,9 +211,8 @@ export default function EmployeeCvPage() {
   const [editingCore, setEditingCore] = useState(false);
   const [coreForm, setCoreForm] = useState<CoreForm>(EMPTY_CORE_FORM);
   const [savingCore, setSavingCore] = useState(false);
-  // "Same as permanent address" is ticked, and which section of the edit form is on screen.
+  // "Same as permanent address" is ticked.
   const [sameAddress, setSameAddress] = useState(false);
-  const [activeSection, setActiveSection] = useState('employment');
 
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -409,15 +363,6 @@ export default function EmployeeCvPage() {
     if (on) copyPermanentToTemporary();
   }
 
-  // After clicking a section, keep that one marked while the page scrolls to it (a section near the
-  // bottom can't reach the top, so the "which section is on screen" watcher would pick another).
-  const jumpLock = useRef(0);
-  function jumpTo(id: string) {
-    jumpLock.current = Date.now() + 1500;
-    setActiveSection(id);
-    document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
   async function handleDiscard() {
     if (editedKeys.length > 0 && !(await confirm('Discard your unsaved changes?', { title: 'Discard changes?', confirmLabel: 'Discard', tone: 'danger' }))) return;
     setEditingCore(false);
@@ -434,36 +379,6 @@ export default function EmployeeCvPage() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [editingCore, editedKeys.length]);
-
-  // The section list follows whichever section is on screen.
-  useEffect(() => {
-    if (!editingCore || typeof IntersectionObserver === 'undefined') return;
-    const els = SECTIONS.map(s => document.getElementById(`section-${s.id}`)).filter((el): el is HTMLElement => !!el);
-    if (els.length === 0) return;
-    const observer = new IntersectionObserver(
-      entries => {
-        if (Date.now() < jumpLock.current) return;
-        const first = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-        if (first) setActiveSection(first.target.id.replace('section-', ''));
-      },
-      { rootMargin: '-15% 0px -50% 0px' }
-    );
-    els.forEach(el => observer.observe(el));
-    return () => observer.disconnect();
-  }, [editingCore]);
-
-  const navSections: NavSection[] = SECTIONS.map(({ id, label }) => {
-    const edited = SECTION_FIELDS[id].filter(isEdited).length;
-    let missing = SECTION_REQUIRED[id].filter(k => !coreForm[k].trim()).length;
-    if (id === 'employment' && coreForm.employment_type === 'contract' && !coreForm.contract_end) missing += 1;
-    const hasRequired = SECTION_REQUIRED[id].length > 0;
-    return {
-      id,
-      label,
-      state: missing > 0 ? 'todo' : 'done',
-      note: missing > 0 ? `${missing} missing` : edited > 0 ? `${edited} edited` : hasRequired ? 'Complete' : 'Optional',
-    };
-  });
 
   // A nudge under the contract end date when it is close, or already past.
   const contractEndHint = (() => {
@@ -1093,8 +1008,6 @@ export default function EmployeeCvPage() {
           />
 
           <div className="flex flex-wrap items-start gap-5">
-            <EditSectionNav sections={navSections} active={activeSection} onJump={jumpTo} />
-
             <div className="flex min-w-0 flex-[1_1_640px] flex-col gap-5">
               <FormSection id="employment" title="Employment" hint="Where they work and under what terms.">
                 <TextField label="Full name" required value={coreForm.name} onChange={setField('name')} edited={isEdited('name')} />
