@@ -9,6 +9,7 @@ import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import EmployeeDocuments from '@/components/EmployeeDocuments';
+import EmployeeHistory from '@/components/EmployeeHistory';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -150,6 +151,8 @@ export default function EmployeeCvPage() {
   const [savingExperience, setSavingExperience] = useState(false);
 
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  // Bumped after a save so the history card re-reads what the save logged.
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   function reload() {
     supabase
@@ -272,6 +275,8 @@ export default function EmployeeCvPage() {
     }
     setEditingCore(false);
     reload();
+    // The database may just have logged a transfer / promotion / pay change.
+    setHistoryVersion(v => v + 1);
   }
 
   // A standing per-person exemption (e.g. for someone "in charge") — never
@@ -1027,6 +1032,8 @@ export default function EmployeeCvPage() {
           </button>
         </form>
       )}
+
+      <EmployeeHistory employeeId={employee.id} joinedOn={employee.date_of_joining} reloadKey={historyVersion} />
 
       <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-3 flex items-center justify-between">
