@@ -25,7 +25,7 @@ type Picked = { uri: string; name: string; size: number | null };
 /** An employee's documents: a checklist of the 17 kinds HR keeps, each with its uploaded
  * files. Files sit in a private bucket and are only ever opened through a short-lived
  * signed link made on the spot. */
-export default function DocumentsCard({ employeeId, companyId }: { employeeId: string; companyId: string | null }) {
+export default function DocumentsCard({ employeeId, companyId, defaultOpen }: { employeeId: string; companyId: string | null; defaultOpen?: boolean }) {
   const { system } = useCalendarSystem();
   const [docs, setDocs] = useState<EmployeeDocument[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
@@ -202,7 +202,7 @@ export default function DocumentsCard({ employeeId, companyId }: { employeeId: s
   const summary = status === 'ready' ? `${typesOnFile} of ${DOCUMENT_TYPES.length} kinds on file` : status === 'unavailable' ? 'Not set up yet' : 'Loading…';
 
   return (
-    <CollapsibleCard title="Documents" summary={summary}>
+    <CollapsibleCard title="Documents" summary={summary} defaultOpen={defaultOpen}>
       <Text style={styles.intro}>PDF, image or Word file, up to 10 MB each. Stored privately — only the owner and HR can open them.</Text>
 
       {status === 'unavailable' && (

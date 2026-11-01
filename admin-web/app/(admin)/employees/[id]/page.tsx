@@ -13,10 +13,24 @@ import EmployeeHistory from '@/components/EmployeeHistory';
 import EmployeeSeparation from '@/components/EmployeeSeparation';
 import EmployeePerformance from '@/components/EmployeePerformance';
 import EmployeeConduct from '@/components/EmployeeConduct';
+import {
+  AttentionCard,
+  DocumentProgress,
+  EmergencyCard,
+  Fact,
+  FactGrid,
+  ProfileCard,
+  ProfileTabs,
+  ReportingLine,
+  type AttentionItem,
+  type ProfileTab,
+} from '@/components/profile/ProfileParts';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { SKILL_CATEGORIES } from '@/lib/skillCategories';
+import { DOCUMENT_TYPES } from '@/lib/employeeDocuments';
+import { contractAlerts, startOfToday } from '@/lib/hrAlerts';
 import {
   BLOOD_GROUPS,
   EMPLOYMENT_STATUS_LABEL,
@@ -50,6 +64,14 @@ function tenureDays(dateOfJoining: string | null, resignedAt: string | null) {
   const start = new Date(dateOfJoining).getTime();
   const end = resignedAt ? new Date(resignedAt).getTime() : Date.now();
   return Math.max(0, Math.floor((end - start) / 86400000));
+}
+
+/** "Contract ends in 10 days" / "Contract ended 3 days ago". */
+function contractLabel(daysLeft: number) {
+  if (daysLeft < 0) return `Contract ended ${-daysLeft} day${daysLeft === -1 ? '' : 's'} ago`;
+  if (daysLeft === 0) return 'Contract ends today';
+  if (daysLeft === 1) return 'Contract ends tomorrow';
+  return `Contract ends in ${daysLeft} days`;
 }
 
 const EMPTY_EDUCATION_FORM = { degree: '', institution: '', board_university: '', year: '', year_calendar: 'AD' };
@@ -156,6 +178,12 @@ export default function EmployeeCvPage() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   // Bumped after a save so the history card re-reads what the save logged.
   const [historyVersion, setHistoryVersion] = useState(0);
+  // Which section of the profile is showing, plus the small facts the side cards need.
+  const [tab, setTab] = useState<'overview' | 'records' | 'documents' | 'exit'>('overview');
+  const [docTypes, setDocTypes] = useState<string[] | null>(null);
+  const [openConduct, setOpenConduct] = useState<number | null>(null);
+  const [exitStatus, setExitStatus] = useState<string | null>(null);
+  const [directReports, setDirectReports] = useState<{ id: string; name: string }[] | null>(null);
 
   function reload() {
     supabase
@@ -220,6 +248,38 @@ export default function EmployeeCvPage() {
     if (employeeId) reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
+
+  // The side cards (needs attention, documents, reporting line) read a few small facts of
+  // their own. Each query may fail — before its migration there is no such table or column —
+  // and that card then just leaves the item out. Re-read when the tab changes, so edits made
+  // in another tab show up in the side cards.
+  useEffect(() => {
+    if (!employeeId) return;
+    supabase
+      .from('employee_documents')
+      .select('doc_type')
+      .eq('employee_id', employeeId)
+      .then(({ data, error }) => setDocTypes(error ? null : (data ?? []).map(d => d.doc_type as string)));
+    supabase
+      .from('employee_conduct_records')
+      .select('id', { count: 'exact', head: true })
+      .eq('employee_id', employeeId)
+      .neq('status', 'closed')
+      .then(({ count, error }) => setOpenConduct(error ? null : (count ?? 0)));
+    supabase
+      .from('employee_separations')
+      .select('settlement_status')
+      .eq('employee_id', employeeId)
+      .maybeSingle()
+      .then(({ data, error }) => setExitStatus(error ? null : ((data?.settlement_status as string | undefined) ?? 'none')));
+    supabase
+      .from('employees')
+      .select('id, name')
+      .eq('reporting_to', employeeId)
+      .eq('status', 'active')
+      .order('name')
+      .then(({ data, error }) => setDirectReports(error ? null : ((data ?? []) as { id: string; name: string }[])));
+  }, [employeeId, tab, historyVersion]);
 
   const setField = (key: CoreKey) => (value: string) => setCoreForm(f => ({ ...f, [key]: value }));
 
@@ -648,176 +708,173 @@ export default function EmployeeCvPage() {
   // themselves, plus whoever is already chosen even if they have since left.
   const managerChoices = people.filter(p => p.id !== employee.id && (p.status === 'active' || p.id === coreForm.reporting_to));
 
+  // A contract that ends within a month, or already has, for someone still working.
+  const contractNotice =
+    employee.status === 'active' && isContract
+      ? (contractAlerts(
+          [
+            {
+              id: employee.id,
+              name: employee.name,
+              designation: employee.designation,
+              profile_photo_url: employee.profile_photo_url,
+              employment_type: employee.employment_type ?? null,
+              contract_end: employee.contract_end ?? null,
+              date_of_birth: null,
+            },
+          ],
+          startOfToday()
+        )[0] ?? null)
+      : null;
+  const haveDocs = docTypes ? DOCUMENT_TYPES.filter(t => docTypes.includes(t.value)).length : null;
+  const missingDocs = docTypes ? DOCUMENT_TYPES.filter(t => !docTypes.includes(t.value)).map(t => t.label) : null;
+  const exitOpen = exitStatus !== null && exitStatus !== 'none' && exitStatus !== 'completed';
+  const attention: AttentionItem[] = [];
+  if (contractNotice) {
+    attention.push({
+      key: 'contract',
+      title: contractLabel(contractNotice.daysLeft),
+      detail: formatAdDate(contractNotice.endKey, system),
+      action: { label: 'Renew', onClick: () => setEditingCore(true) },
+    });
+  }
+  if (missingDocs && missingDocs.length > 0) {
+    attention.push({
+      key: 'docs',
+      title: `${missingDocs.length} document${missingDocs.length === 1 ? '' : 's'} missing`,
+      detail: missingDocs.slice(0, 3).join(', ') + (missingDocs.length > 3 ? ` and ${missingDocs.length - 3} more` : ''),
+      action: { label: 'Open', onClick: () => setTab('documents') },
+    });
+  }
+  if (openConduct) {
+    attention.push({
+      key: 'conduct',
+      title: `${openConduct} conduct record${openConduct === 1 ? '' : 's'} still open`,
+      action: { label: 'Open', onClick: () => setTab('records') },
+    });
+  }
+  if (exitOpen) {
+    attention.push({
+      key: 'exit',
+      title: `Exit in progress — settlement ${exitStatus}`,
+      action: { label: 'Open', onClick: () => setTab('exit') },
+    });
+  }
+  const profileTabs: ProfileTab[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'records', label: 'Records', badge: openConduct ? { text: `${openConduct} open`, tone: 'warn' } : undefined },
+    {
+      id: 'documents',
+      label: 'Documents',
+      badge: haveDocs !== null ? { text: `${haveDocs} / ${DOCUMENT_TYPES.length}`, tone: missingDocs && missingDocs.length > 0 ? 'warn' : 'good' } : undefined,
+    },
+    { id: 'exit', label: 'Exit', badge: exitOpen ? { text: 'Open', tone: 'warn' } : undefined },
+  ];
+
   return (
     <>
       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelected} className="hidden" />
 
-      <div className="mb-5 flex items-center justify-between">
-        <Link href="/employees" className="text-sm font-medium text-accent hover:underline">
-          {'←'} Employee Directory
-        </Link>
-        <div className="flex gap-2">
-          <Link
-            href={`/attendance?employee=${employee.id}`}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            View Attendance
-          </Link>
+      <Link href="/employees" className="mb-4 inline-block text-sm font-medium text-accent hover:underline">
+        {'←'} Employee Directory
+      </Link>
+
+      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-6">
+        <div className="flex flex-wrap items-center gap-5">
           <button
-            onClick={downloadPdf}
-            disabled={generatingPdf}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
-          >
-            {generatingPdf ? 'Generating…' : '⬇ Download PDF'}
-          </button>
-          <button
-            onClick={handleToggleExempt}
-            title="Never flag this employee Late or Absent, even without a punch — for staff who are in charge and aren't required to clock in/out"
-            className={`rounded-lg border px-4 py-2 text-sm font-medium ${
-              employee.attendance_exempt
-                ? 'border-accent bg-accent/10 text-accent'
-                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+            type="button"
+            onClick={openPhotoPicker}
+            title={employee.profile_photo_url ? 'Change photo' : 'Add photo'}
+            className={`relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full text-2xl font-semibold text-accent ${
+              employee.profile_photo_url ? 'bg-accent/10' : 'border-2 border-dashed border-accent/40 bg-accent/5 hover:bg-accent/10'
             }`}
           >
-            {employee.attendance_exempt ? '✓ Excused from Attendance' : 'Excuse from Attendance'}
+            {uploadingPhoto ? (
+              <span className="text-sm">…</span>
+            ) : employee.profile_photo_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
+            ) : (
+              <CameraIcon className="h-7 w-7" />
+            )}
           </button>
-          {!editingCore && (
-            <button
-              onClick={() => setEditingCore(true)}
-              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              ✎ Edit
+          <div className="min-w-0 flex-1 basis-80">
+            <h1 className="flex flex-wrap items-center gap-2 text-[28px] font-extrabold leading-tight tracking-tight text-ink">
+              {employee.name}
+              <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>
+              {employee.employment_type && <Badge tone="neutral">{employmentTypeLabel(employee.employment_type)}</Badge>}
+              {employee.blood_group && <Badge tone="critical">Blood group {employee.blood_group}</Badge>}
+              {employee.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
+            </h1>
+            <p className="mt-1.5 text-[15px] font-bold text-slate-700">{[employee.designation, employee.department, branch?.name].filter(Boolean).join(' · ') || '—'}</p>
+            <p className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] font-semibold text-slate-600">
+              {employee.phone && (
+                <a href={`tel:${employee.phone}`} className="hover:underline">
+                  {employee.phone}
+                </a>
+              )}
+              {employee.email && <span>{employee.email}</span>}
+            </p>
+            <button type="button" onClick={openPhotoPicker} className="mt-1 text-xs font-medium text-accent hover:underline">
+              {employee.profile_photo_url ? 'Change photo' : '+ Add photo'}
             </button>
-          )}
-        </div>
-      </div>
-
-      {!editingCore ? (
-        <div className="mb-5 rounded-xl border border-slate-200 bg-white p-6">
-          <div className="mb-2 flex items-center gap-4">
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {!editingCore && (
+              <button
+                type="button"
+                onClick={() => setEditingCore(true)}
+                className="flex h-[42px] items-center gap-2 rounded-xl bg-accent px-4 text-sm font-extrabold text-white hover:bg-accent/90"
+              >
+                ✎ Edit profile
+              </button>
+            )}
+            <Link
+              href={`/attendance?employee=${employee.id}`}
+              className="flex h-[42px] items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Attendance
+            </Link>
             <button
-              onClick={openPhotoPicker}
-              title={employee.profile_photo_url ? 'Change photo' : 'Add photo'}
-              className={`relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full text-2xl font-semibold text-accent ${
-                employee.profile_photo_url ? 'bg-accent/10' : 'border-2 border-dashed border-accent/40 bg-accent/5 hover:bg-accent/10'
+              type="button"
+              onClick={downloadPdf}
+              disabled={generatingPdf}
+              className="flex h-[42px] items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            >
+              {generatingPdf ? 'Generating…' : '⬇ CV PDF'}
+            </button>
+            <button
+              type="button"
+              onClick={handleToggleExempt}
+              title="Never flag this employee Late or Absent, even without a punch — for staff who are in charge and aren't required to clock in/out"
+              className={`flex h-[42px] items-center rounded-xl border px-4 text-sm font-bold ${
+                employee.attendance_exempt ? 'border-accent bg-accent/10 text-accent' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
               }`}
             >
-              {uploadingPhoto ? (
-                <span className="text-sm">…</span>
-              ) : employee.profile_photo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
-              ) : (
-                <CameraIcon className="h-7 w-7" />
-              )}
+              {employee.attendance_exempt ? '✓ Excused from Attendance' : 'Excuse from Attendance'}
             </button>
-            <div>
-              <h1 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-ink">
-                {employee.name}
-                <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>
-                {employee.employment_type && <Badge tone="neutral">{employmentTypeLabel(employee.employment_type)}</Badge>}
-                {employee.blood_group && <Badge tone="critical">Blood group {employee.blood_group}</Badge>}
-                {employee.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
-              </h1>
-              <p className="text-sm text-slate-500">
-                {employee.designation ?? '—'} {employee.department && `· ${employee.department}`}
-              </p>
-              <p className="text-xs text-slate-400">{[employee.phone, branch?.name].filter(Boolean).join('  ·  ') || '—'}</p>
-              {employee.email && <p className="text-xs text-slate-400">{employee.email}</p>}
-              <button onClick={openPhotoPicker} className="mt-1 text-xs font-medium text-accent hover:underline">
-                {employee.profile_photo_url ? 'Change photo' : '+ Add photo'}
-              </button>
-            </div>
           </div>
-
-          <InfoGrid title="Employment">
-            <Info label="Employee code">{employee.employee_code}</Info>
-            <Info label="Username">{employee.username}</Info>
-            <Info label="Biometric / Registration ID">{employee.fingerprint_id}</Info>
-            <Info label="Employment type">{employmentTypeLabel(employee.employment_type)}</Info>
-            <Info label="Status">
-              <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>
-            </Info>
-            <Info label="Reporting to">
-              {manager ? (
-                <Link href={`/employees/${manager.id}`} className="text-accent hover:underline">
-                  {manager.name}
-                </Link>
-              ) : null}
-            </Info>
-            <Info label="Outlet / branch">{branch?.name}</Info>
-            <Info label="Department">{employee.department}</Info>
-            <Info label="Designation">{employee.designation}</Info>
-            <Info label="Date of joining">{employee.date_of_joining ? formatAdDate(employee.date_of_joining, system) : null}</Info>
-            <Info label={employee.resigned_at ? 'Days worked' : 'Days with company'}>{days !== null ? `${days} days` : null}</Info>
-            {employee.resigned_at && <Info label="Last working date">{formatAdDate(employee.resigned_at, system)}</Info>}
-            {isContract && (
-              <>
-                <Info label="Contract start">{employee.contract_start ? formatAdDate(employee.contract_start, system) : null}</Info>
-                <Info label="Contract end">{employee.contract_end ? formatAdDate(employee.contract_end, system) : null}</Info>
-              </>
-            )}
-          </InfoGrid>
-
-          <InfoGrid title="Personal">
-            <Info label="Gender">{employee.gender ? <span className="capitalize">{employee.gender}</span> : null}</Info>
-            <Info label="Date of birth">{employee.date_of_birth ? formatAdDate(employee.date_of_birth, system) : null}</Info>
-            <Info label="Nationality">{employee.nationality}</Info>
-            <Info label="Marital status">
-              {employee.marital_status ? <span className="capitalize">{employee.marital_status}</span> : null}
-            </Info>
-            <Info label="Blood group">{employee.blood_group}</Info>
-            <Info label="Citizenship no.">{employee.citizenship_no}</Info>
-            <Info label="Citizenship issued district">{employee.citizenship_issued_district}</Info>
-            <Info label="Citizenship issue date">
-              {employee.citizenship_issue_date ? formatAdDate(employee.citizenship_issue_date, system) : null}
-            </Info>
-          </InfoGrid>
-
-          <InfoGrid title="Contact">
-            <Info label="Phone (personal)">{employee.phone}</Info>
-            <Info label="Phone (official)">{employee.official_phone}</Info>
-            <Info label="Email (official)">{employee.email}</Info>
-            <Info label="Email (personal)">{employee.personal_email}</Info>
-          </InfoGrid>
-
-          <InfoGrid title="Address">
-            <Info label="Permanent address" wide>
-              {permanentAddress}
-            </Info>
-            <Info label="Temporary address" wide>
-              {temporaryAddress}
-            </Info>
-            {employee.address && (
-              <Info label="Other address note" wide>
-                {employee.address}
-              </Info>
-            )}
-          </InfoGrid>
-
-          <InfoGrid title="Family">
-            <Info label="Father's name">{employee.father_name}</Info>
-            <Info label="Mother's name">{employee.mother_name}</Info>
-            <Info label="Grandfather's name">{employee.grandfather_name}</Info>
-            <Info label="Spouse's name">{employee.spouse_name}</Info>
-          </InfoGrid>
-
-          <InfoGrid title="Emergency contact">
-            <Info label="Name">{employee.emergency_contact_name}</Info>
-            <Info label="Relationship">{employee.emergency_contact_relationship}</Info>
-            <Info label="Mobile no.">{employee.emergency_contact_phone}</Info>
-            <Info label="Address" wide>
-              {employee.emergency_contact_address}
-            </Info>
-          </InfoGrid>
-
-          <InfoGrid title="Payroll & statutory">
-            <Info label="PAN No.">{employee.pan_no}</Info>
-            <Info label="SSF No.">{employee.ssf_no}</Info>
-            <Info label="Allowance">{employee.allowance != null ? employee.allowance.toLocaleString() : null}</Info>
-          </InfoGrid>
         </div>
-      ) : (
+        <dl className="mt-5 grid gap-x-5 gap-y-4 border-t border-slate-200 pt-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
+          <Fact label="Employee ID">{employee.employee_code}</Fact>
+          <Fact label="Joined">{employee.date_of_joining ? formatAdDate(employee.date_of_joining, system) : null}</Fact>
+          <Fact label={employee.resigned_at ? 'Time with the company' : 'With the company'}>{days !== null ? formatDuration(days) : null}</Fact>
+          <Fact label="Reports to">
+            {manager ? (
+              <Link href={`/employees/${manager.id}`} className="text-accent hover:underline">
+                {manager.name}
+              </Link>
+            ) : null}
+          </Fact>
+          {isContract ? (
+            <Fact label="Contract ends">{employee.contract_end ? formatAdDate(employee.contract_end, system) : null}</Fact>
+          ) : (
+            <Fact label="Outlet / branch">{branch?.name}</Fact>
+          )}
+        </dl>
+      </section>
+
+      {editingCore ? (
         <form onSubmit={handleSaveCore} className="mb-5 rounded-xl border border-slate-200 bg-white p-6">
           <div className="mb-4 flex items-center gap-4">
             <button
@@ -1035,32 +1092,137 @@ export default function EmployeeCvPage() {
             {savingCore ? 'Saving…' : 'Save changes'}
           </button>
         </form>
-      )}
+      ) : (
+        <>
+          {contractNotice && (
+            <div role="status" className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-warning-bg px-4 py-3 text-warning-text">
+              <span className="min-w-[240px] flex-1 text-sm font-semibold">
+                <strong className="font-extrabold">{contractLabel(contractNotice.daysLeft)}</strong> — {formatAdDate(contractNotice.endKey, system)}. Renew it, or start the exit if the person is
+                leaving.
+              </span>
+              <button type="button" onClick={() => setEditingCore(true)} className="h-9 rounded-lg bg-[#8a4b06] px-3.5 text-[13px] font-extrabold text-white hover:opacity-90">
+                Renew contract
+              </button>
+              <button type="button" onClick={() => setTab('exit')} className="h-9 rounded-lg border border-amber-400 px-3.5 text-[13px] font-extrabold text-warning-text hover:bg-white/50">
+                Start exit
+              </button>
+            </div>
+          )}
 
+          <ProfileTabs tabs={profileTabs} active={tab} onChange={id => setTab(id as typeof tab)} />
+
+          <div hidden={tab !== 'overview'}>
+            <div className="flex flex-wrap items-start gap-5">
+              <div className="flex min-w-0 flex-[2_1_520px] flex-col gap-5">
+              <ProfileCard title="Employment" action="Edit" onAction={() => setEditingCore(true)}>
+                <FactGrid>
+                  <Fact label="Employee code">{employee.employee_code}</Fact>
+                  <Fact label="Username">{employee.username}</Fact>
+                  <Fact label="Biometric / Registration ID">{employee.fingerprint_id}</Fact>
+                  <Fact label="Employment type">{employmentTypeLabel(employee.employment_type)}</Fact>
+                  <Fact label="Status">
+                    <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>
+                  </Fact>
+                  <Fact label="Reporting to">
+                    {manager ? (
+                      <Link href={`/employees/${manager.id}`} className="text-accent hover:underline">
+                        {manager.name}
+                      </Link>
+                    ) : null}
+                  </Fact>
+                  <Fact label="Outlet / branch">{branch?.name}</Fact>
+                  <Fact label="Department">{employee.department}</Fact>
+                  <Fact label="Designation">{employee.designation}</Fact>
+                  <Fact label="Date of joining">{employee.date_of_joining ? formatAdDate(employee.date_of_joining, system) : null}</Fact>
+                  <Fact label={employee.resigned_at ? 'Days worked' : 'Days with company'}>{days !== null ? `${days} days` : null}</Fact>
+                  {employee.resigned_at && <Fact label="Last working date">{formatAdDate(employee.resigned_at, system)}</Fact>}
+                  {isContract && (
+                    <>
+                      <Fact label="Contract start">{employee.contract_start ? formatAdDate(employee.contract_start, system) : null}</Fact>
+                      <Fact label="Contract end">{employee.contract_end ? formatAdDate(employee.contract_end, system) : null}</Fact>
+                    </>
+                  )}
+                </FactGrid>
+              </ProfileCard>
+
+              <ProfileCard title="Personal" action="Edit" onAction={() => setEditingCore(true)}>
+                <FactGrid>
+                  <Fact label="Gender">{employee.gender ? <span className="capitalize">{employee.gender}</span> : null}</Fact>
+                  <Fact label="Date of birth">{employee.date_of_birth ? formatAdDate(employee.date_of_birth, system) : null}</Fact>
+                  <Fact label="Nationality">{employee.nationality}</Fact>
+                  <Fact label="Marital status">{employee.marital_status ? <span className="capitalize">{employee.marital_status}</span> : null}</Fact>
+                  <Fact label="Blood group">{employee.blood_group}</Fact>
+                  <Fact label="Citizenship no.">{employee.citizenship_no}</Fact>
+                  <Fact label="Citizenship issued district">{employee.citizenship_issued_district}</Fact>
+                  <Fact label="Citizenship issue date">{employee.citizenship_issue_date ? formatAdDate(employee.citizenship_issue_date, system) : null}</Fact>
+                </FactGrid>
+              </ProfileCard>
+
+              <ProfileCard title="Contact & address" action="Edit" onAction={() => setEditingCore(true)}>
+                <FactGrid min={220}>
+                  <Fact label="Phone (personal)">{employee.phone}</Fact>
+                  <Fact label="Phone (official)">{employee.official_phone}</Fact>
+                  <Fact label="Email (official)">{employee.email}</Fact>
+                  <Fact label="Email (personal)">{employee.personal_email}</Fact>
+                  <Fact label="Permanent address" wide>
+                    {permanentAddress}
+                  </Fact>
+                  <Fact label="Temporary address" wide>
+                    {temporaryAddress}
+                  </Fact>
+                  {employee.address && (
+                    <Fact label="Other address note" wide>
+                      {employee.address}
+                    </Fact>
+                  )}
+                </FactGrid>
+              </ProfileCard>
+
+              <ProfileCard title="Family" action="Edit" onAction={() => setEditingCore(true)}>
+                <FactGrid>
+                  <Fact label="Father's name">{employee.father_name}</Fact>
+                  <Fact label="Mother's name">{employee.mother_name}</Fact>
+                  <Fact label="Grandfather's name">{employee.grandfather_name}</Fact>
+                  <Fact label="Spouse's name">{employee.spouse_name}</Fact>
+                </FactGrid>
+              </ProfileCard>
+
+              <ProfileCard title="Payroll & statutory" action="Edit" onAction={() => setEditingCore(true)}>
+                <FactGrid>
+                  <Fact label="PAN No.">{employee.pan_no}</Fact>
+                  <Fact label="SSF No.">{employee.ssf_no}</Fact>
+                  <Fact label="Allowance">{employee.allowance != null ? employee.allowance.toLocaleString() : null}</Fact>
+                </FactGrid>
+              </ProfileCard>
+              </div>
+              <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-5">
+              <EmergencyCard
+                bloodGroup={employee.blood_group}
+                name={employee.emergency_contact_name}
+                relationship={employee.emergency_contact_relationship}
+                phone={employee.emergency_contact_phone}
+                address={employee.emergency_contact_address}
+                onEdit={() => setEditingCore(true)}
+              />
+              <AttentionCard items={attention} />
+              {haveDocs !== null && missingDocs && (
+                <DocumentProgress have={haveDocs} total={DOCUMENT_TYPES.length} missing={missingDocs} onOpen={() => setTab('documents')} />
+              )}
+              <ReportingLine manager={manager ? { id: manager.id, name: manager.name } : null} directReports={directReports} />
+              </div>
+            </div>
+          </div>
+
+          <div hidden={tab !== 'records'}>
+            <div className="flex flex-wrap items-start gap-x-5">
+              <div className="min-w-0 flex-[2_1_520px]">
       <EmployeeHistory employeeId={employee.id} joinedOn={employee.date_of_joining} reloadKey={historyVersion} />
 
-      <EmployeeSeparation employee={employee} onEmployeeChanged={reload} />
+      <EmployeePerformance employeeId={employee.id} managerName={manager?.name ?? null} />
 
-      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">Skills</h2>
-          <button onClick={() => setShowSkillForm(true)} className="text-xs font-medium text-accent hover:underline">
-            + Add
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {employee.skills.map(skill => (
-            <span key={skill} className="flex items-center gap-1 rounded-full bg-good-bg px-3 py-1 text-xs font-medium text-good-text">
-              {skill}
-              <button onClick={() => removeSkill(skill)} className="text-good-text/60 hover:text-good-text">
-                ×
-              </button>
-            </span>
-          ))}
-          {employee.skills.length === 0 && <p className="text-xs text-slate-400">No skills added yet.</p>}
-        </div>
-      </div>
-
+      <EmployeeConduct employeeId={employee.id} />
+              </div>
+              <div className="min-w-0 flex-[1_1_320px]">
       <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-3 flex items-center justify-between">
           <div>
@@ -1166,11 +1328,38 @@ export default function EmployeeCvPage() {
         </ul>
       </div>
 
-      <EmployeePerformance employeeId={employee.id} managerName={manager?.name ?? null} />
+      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-ink">Skills</h2>
+          <button onClick={() => setShowSkillForm(true)} className="text-xs font-medium text-accent hover:underline">
+            + Add
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {employee.skills.map(skill => (
+            <span key={skill} className="flex items-center gap-1 rounded-full bg-good-bg px-3 py-1 text-xs font-medium text-good-text">
+              {skill}
+              <button onClick={() => removeSkill(skill)} className="text-good-text/60 hover:text-good-text">
+                ×
+              </button>
+            </span>
+          ))}
+          {employee.skills.length === 0 && <p className="text-xs text-slate-400">No skills added yet.</p>}
+        </div>
+      </div>
+              </div>
+            </div>
+          </div>
 
-      <EmployeeConduct employeeId={employee.id} />
-
+          <div hidden={tab !== 'documents'}>
       <EmployeeDocuments employeeId={employee.id} companyId={employee.company_id ?? null} />
+          </div>
+
+          <div hidden={tab !== 'exit'}>
+      <EmployeeSeparation employee={employee} onEmployeeChanged={reload} />
+          </div>
+        </>
+      )}
 
       {showEducationForm && (
         <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
@@ -1419,15 +1608,6 @@ function InfoBox({ className = '', children }: { className?: string; children: R
   return (
     <div className={`overflow-hidden rounded-lg border border-slate-200 ${className}`}>
       <div className="-mb-px -mr-px grid grid-cols-2 text-sm sm:grid-cols-3">{children}</div>
-    </div>
-  );
-}
-
-function InfoGrid({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mt-5">
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
-      <InfoBox>{children}</InfoBox>
     </div>
   );
 }

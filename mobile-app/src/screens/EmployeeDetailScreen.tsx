@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Image, Linking } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { formatAdDate } from '../lib/calendar';
@@ -14,8 +14,11 @@ import {
   WORKING_STATUSES,
   effectiveStatus,
   employmentTypeLabel,
+  formatDuration,
   withKnownColumns,
 } from '../lib/employeeProfile';
+import { DOCUMENT_TYPES } from '../lib/employeeDocuments';
+import { contractAlerts, startOfToday } from '../lib/hrAlerts';
 import type { Branch, Department, Employee } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
@@ -65,6 +68,16 @@ function formFromEmployee(row: Record<string, unknown>): FormState {
   return form;
 }
 
+/** "Contract ends in 10 days" / "Contract ended 3 days ago". */
+function contractLabel(daysLeft: number) {
+  if (daysLeft < 0) return `Contract ended ${-daysLeft} day${daysLeft === -1 ? '' : 's'} ago`;
+  if (daysLeft === 0) return 'Contract ends today';
+  if (daysLeft === 1) return 'Contract ends tomorrow';
+  return `Contract ends in ${daysLeft} days`;
+}
+
+type Tab = 'overview' | 'records' | 'docs' | 'exit';
+
 type PersonOption = Pick<Employee, 'id' | 'name' | 'employee_code' | 'status'>;
 
 export default function EmployeeDetailScreen({ route }: any) {
@@ -85,6 +98,14 @@ export default function EmployeeDetailScreen({ route }: any) {
   const [managerSearch, setManagerSearch] = useState('');
   // Bumped after a save so the history card re-reads what the database just logged.
   const [historyVersion, setHistoryVersion] = useState(0);
+  // Which section is showing, plus the small facts the tab labels and the overview need.
+  const [tab, setTab] = useState<Tab>('overview');
+  const [docTypes, setDocTypes] = useState<string[] | null>(null);
+  const [openConduct, setOpenConduct] = useState<number | null>(null);
+  const [exitStatus, setExitStatus] = useState<string | null>(null);
+  const [photoFailed, setPhotoFailed] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+  const yRef = useRef({ overview: 0, employment: 0 });
 
   /** Re-read the employee. The form is only reset when `resetForm` — a change made in one of
    * the cards below shouldn't throw away what is half typed above. */
@@ -125,6 +146,28 @@ export default function EmployeeDetailScreen({ route }: any) {
     setSaved(false);
     setForm(f => ({ ...f, [key]: value }));
   };
+  // Each query may fail — before its migration there is no such table — and the label then
+  // just leaves that item out. Re-read when the tab changes, so edits made in another tab show.
+  useEffect(() => {
+    supabase
+      .from('employee_documents')
+      .select('doc_type')
+      .eq('employee_id', employeeId)
+      .then(({ data, error: e }) => setDocTypes(e ? null : (data ?? []).map((d: { doc_type: string }) => d.doc_type)));
+    supabase
+      .from('employee_conduct_records')
+      .select('id', { count: 'exact', head: true })
+      .eq('employee_id', employeeId)
+      .neq('status', 'closed')
+      .then(({ count, error: e }) => setOpenConduct(e ? null : (count ?? 0)));
+    supabase
+      .from('employee_separations')
+      .select('settlement_status')
+      .eq('employee_id', employeeId)
+      .maybeSingle()
+      .then(({ data, error: e }) => setExitStatus(e ? null : ((data as { settlement_status?: string } | null)?.settlement_status ?? 'none')));
+  }, [employeeId, tab, historyVersion]);
+
   const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(baseline), [form, baseline]);
 
   function copyPermanentToTemporary() {
@@ -218,29 +261,171 @@ export default function EmployeeDetailScreen({ route }: any) {
       return !q || p.name.toLowerCase().includes(q) || p.employee_code.toLowerCase().includes(q);
     });
 
+  const savedManager = people.find(p => p.id === employee.reporting_to);
+  const isContract = employee.employment_type === 'contract';
+  const initials =
+    employee.name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(w => w[0])
+      .join('')
+      .toUpperCase() || '?';
+  const tenure = employee.date_of_joining
+    ? Math.max(0, Math.floor(((employee.resigned_at ? new Date(employee.resigned_at).getTime() : Date.now()) - new Date(employee.date_of_joining).getTime()) / 86400000))
+    : null;
+  // A contract that ends within a month, or already has, for someone still working.
+  const contractNotice =
+    stillWorking && isContract
+      ? (contractAlerts(
+          [
+            {
+              id: employee.id,
+              name: employee.name,
+              designation: employee.designation,
+              profile_photo_url: employee.profile_photo_url,
+              employment_type: employee.employment_type ?? null,
+              contract_end: employee.contract_end ?? null,
+              date_of_birth: null,
+            },
+          ],
+          startOfToday()
+        )[0] ?? null)
+      : null;
+  const haveDocs = docTypes ? DOCUMENT_TYPES.filter(t => docTypes.includes(t.value)).length : null;
+  const exitOpen = exitStatus !== null && exitStatus !== 'none' && exitStatus !== 'completed';
+  const hasEmergency = !!(employee.emergency_contact_name || employee.emergency_contact_phone);
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'records', label: openConduct ? `Records · ${openConduct} open` : 'Records' },
+    { id: 'docs', label: haveDocs !== null ? `Docs · ${haveDocs}/${DOCUMENT_TYPES.length}` : 'Docs' },
+    { id: 'exit', label: exitOpen ? 'Exit · open' : 'Exit' },
+  ];
+
   const departmentOptions = departments.map(d => ({ label: d.name, value: d.name }));
   if (form.department && !departments.some(d => d.name === form.department)) departmentOptions.unshift({ label: form.department, value: form.department });
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
       <View style={styles.headerCard}>
-        <View style={styles.headerBadges}>
-          <Text style={styles.name}>{employee.name}</Text>
+        <View style={styles.headerTop}>
+          {employee.profile_photo_url && !photoFailed ? (
+            <Image source={{ uri: employee.profile_photo_url }} style={styles.avatar} onError={() => setPhotoFailed(true)} accessibilityLabel={employee.name} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarFallback]}>
+              <Text style={styles.avatarText}>{initials}</Text>
+            </View>
+          )}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.name}>{employee.name}</Text>
+            <Text style={styles.subtitle}>
+              {employee.designation ?? '—'}
+              {employee.department ? ` · ${employee.department}` : ''}
+            </Text>
+            <Text style={styles.meta}>{[employee.employee_code, branchName].filter(Boolean).join('  ·  ')}</Text>
+          </View>
         </View>
-        <View style={styles.headerBadges}>
+        <View style={[styles.headerBadges, { marginTop: 12, marginBottom: 0 }]}>
           <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>
           {!!employee.employment_type && <Badge tone="neutral">{employmentTypeLabel(employee.employment_type)}</Badge>}
           {!!employee.blood_group && <Badge tone="critical">Blood group {employee.blood_group}</Badge>}
           {employee.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
         </View>
-        <Text style={styles.subtitle}>
-          {employee.designation ?? '—'}
-          {employee.department ? ` · ${employee.department}` : ''}
-        </Text>
-        <Text style={styles.meta}>{[employee.employee_code, branchName].filter(Boolean).join('  ·  ')}</Text>
-        {!!employee.resigned_at && <Text style={styles.meta}>Last working date: {formatAdDate(employee.resigned_at, system)}</Text>}
+        {!!employee.resigned_at && <Text style={[styles.meta, { marginTop: 8 }]}>Last working date: {formatAdDate(employee.resigned_at, system)}</Text>}
+        {(!!employee.phone || !!employee.email) && (
+          <View style={styles.actionRow}>
+            {!!employee.phone && <ActionButton label="Call" onPress={() => Linking.openURL(`tel:${employee.phone}`)} />}
+            {!!employee.email && <ActionButton label="Email" onPress={() => Linking.openURL(`mailto:${employee.email}`)} />}
+          </View>
+        )}
       </View>
 
+      {contractNotice && (
+        <View style={styles.strip} accessibilityRole="alert">
+          <Text style={styles.stripText}>
+            <Text style={styles.stripStrong}>{contractLabel(contractNotice.daysLeft)}</Text> · {formatAdDate(contractNotice.endKey, system)}
+          </Text>
+          <View style={styles.stripActions}>
+            <TouchableOpacity
+              style={styles.stripPrimary}
+              accessibilityRole="button"
+              accessibilityLabel="Renew contract"
+              onPress={() => {
+                setTab('overview');
+                // The other tabs are hidden, so the Overview has no height until it is shown again — scroll after it has been.
+                setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, yRef.current.overview + yRef.current.employment - 8), animated: true }), 120);
+              }}
+            >
+              <Text style={styles.stripPrimaryText}>Renew</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.stripSecondary} accessibilityRole="button" accessibilityLabel="Start exit" onPress={() => setTab('exit')}>
+              <Text style={styles.stripSecondaryText}>Start exit</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      <View style={styles.tabs}>
+        {tabs.map(t => (
+          <TouchableOpacity
+            key={t.id}
+            onPress={() => setTab(t.id)}
+            accessibilityRole="button"
+            accessibilityLabel={`Tab: ${t.label}`}
+            accessibilityState={{ selected: tab === t.id }}
+            style={[styles.tabPill, tab === t.id && styles.tabPillOn]}
+          >
+            <Text style={[styles.tabText, tab === t.id && styles.tabTextOn]}>{t.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={tab === 'overview' ? undefined : styles.hidden} onLayout={e => { yRef.current.overview = e.nativeEvent.layout.y; }}>
+      <View style={[styles.emergency, !hasEmergency && !employee.blood_group && { borderColor: colors.slate200 }]}>
+        <View style={[styles.bloodTile, !employee.blood_group && styles.bloodTileEmpty]}>
+          <Text style={[styles.bloodText, !employee.blood_group && { color: colors.slate500 }]}>{employee.blood_group || '—'}</Text>
+          <Text style={[styles.bloodLabel, !employee.blood_group && { color: colors.slate500 }]}>Blood</Text>
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.emergencyKicker}>EMERGENCY CONTACT</Text>
+          {hasEmergency ? (
+            <>
+              {!!employee.emergency_contact_name && <Text style={styles.emergencyName}>{employee.emergency_contact_name}</Text>}
+              <Text style={styles.emergencySub}>{[employee.emergency_contact_relationship, employee.emergency_contact_phone].filter(Boolean).join(' · ')}</Text>
+            </>
+          ) : (
+            <Text style={styles.emergencySub}>None on file yet. Add one under Family &amp; emergency contact.</Text>
+          )}
+        </View>
+        {!!employee.emergency_contact_phone && (
+          <TouchableOpacity
+            style={styles.callBtn}
+            accessibilityRole="button"
+            accessibilityLabel={`Call ${employee.emergency_contact_name || 'emergency contact'}`}
+            onPress={() => Linking.openURL(`tel:${employee.emergency_contact_phone}`)}
+          >
+            <Text style={styles.callBtnText}>Call</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.factsCard}>
+        <Text style={styles.factsTitle}>AT A GLANCE</Text>
+        <View style={styles.factsGrid}>
+          <QuickFact label="Joined" value={employee.date_of_joining ? formatAdDate(employee.date_of_joining, system) : null} />
+          <QuickFact label={employee.resigned_at ? 'Time with the company' : 'With the company'} value={tenure !== null ? formatDuration(tenure) : null} />
+          <QuickFact label="Reports to" value={savedManager?.name ?? null} />
+          {isContract ? (
+            <QuickFact label="Contract ends" value={employee.contract_end ? formatAdDate(employee.contract_end, system) : null} />
+          ) : (
+            <QuickFact label="Outlet / branch" value={branchName ?? null} />
+          )}
+          <QuickFact label="Phone" value={employee.phone} />
+          <QuickFact label="Documents" value={haveDocs !== null ? `${haveDocs} of ${DOCUMENT_TYPES.length}` : null} />
+        </View>
+      </View>
+
+      <View onLayout={e => { yRef.current.employment = e.nativeEvent.layout.y; }}>
       <CollapsibleCard title="Employment" summary={[employmentTypeLabel(form.employment_type), form.designation, manager ? `Reports to ${manager.name}` : ''].filter(Boolean).join(' · ') || undefined} defaultOpen>
         <Field label="Full name" value={form.name} onChangeText={set('name')} />
         <Choice
@@ -280,6 +465,7 @@ export default function EmployeeDetailScreen({ route }: any) {
         <Field label="Fingerprint / Biometric ID" value={form.fingerprint_id} onChangeText={set('fingerprint_id')} />
         <DateField label="Date of joining" value={form.date_of_joining} onChange={set('date_of_joining')} />
       </CollapsibleCard>
+      </View>
 
       <CollapsibleCard title="Personal">
         <Choice label="Gender" options={[{ label: 'Female', value: 'female' }, { label: 'Male', value: 'male' }]} value={form.gender} onChange={v => set('gender')(v ?? '')} allowNone />
@@ -334,15 +520,24 @@ export default function EmployeeDetailScreen({ route }: any) {
         {dirty && <Button label="Discard changes" tone="ghost" onPress={() => { setForm(baseline); setError(null); }} disabled={saving} />}
       </View>
 
-      <View style={{ height: 8 }} />
-      <HistoryCard employeeId={employee.id} joinedOn={employee.date_of_joining} reloadKey={historyVersion} />
-      <SeparationCard employee={employee} onEmployeeChanged={() => reload(false)} />
-      <EducationCard employeeId={employee.id} />
-      <TrainingCard employeeId={employee.id} />
-      <ExperienceCard employee={employee} />
-      <PerformanceCard employeeId={employee.id} managerName={manager?.name ?? null} />
-      <ConductCard employeeId={employee.id} />
-      <DocumentsCard employeeId={employee.id} companyId={employee.company_id ?? null} />
+      </View>
+
+      <View style={tab === 'records' ? undefined : styles.hidden}>
+        <HistoryCard employeeId={employee.id} joinedOn={employee.date_of_joining} reloadKey={historyVersion} />
+        <EducationCard employeeId={employee.id} />
+        <TrainingCard employeeId={employee.id} />
+        <ExperienceCard employee={employee} />
+        <PerformanceCard employeeId={employee.id} managerName={manager?.name ?? null} />
+        <ConductCard employeeId={employee.id} />
+      </View>
+
+      <View style={tab === 'docs' ? undefined : styles.hidden}>
+        <DocumentsCard employeeId={employee.id} companyId={employee.company_id ?? null} defaultOpen />
+      </View>
+
+      <View style={tab === 'exit' ? undefined : styles.hidden}>
+        <SeparationCard employee={employee} onEmployeeChanged={() => reload(false)} defaultOpen />
+      </View>
 
       <Sheet visible={pickingManager} title="Reporting to" onClose={() => setPickingManager(false)}>
         <TextInput
@@ -365,6 +560,23 @@ export default function EmployeeDetailScreen({ route }: any) {
         {managerChoices.length > 60 && <Text style={styles.hint}>Showing the first 60 — type to narrow it down.</Text>}
       </Sheet>
     </ScrollView>
+  );
+}
+
+function ActionButton({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.actionBtn} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+      <Text style={styles.actionBtnText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function QuickFact({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <View style={styles.factCell}>
+      <Text style={styles.factLabel}>{label}</Text>
+      <Text style={styles.factValue}>{value || '—'}</Text>
+    </View>
   );
 }
 
@@ -397,6 +609,43 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.slate50 },
   warn: { color: colors.warningText, fontSize: 13, textAlign: 'center', padding: 24 },
   headerCard: { backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, padding: 14, marginBottom: 12 },
+  hidden: { display: 'none' },
+  headerTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  avatar: { height: 64, width: 64, borderRadius: 32 },
+  avatarFallback: { backgroundColor: colors.accentLight, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 20, fontWeight: '800', color: colors.accent },
+  actionRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  actionBtn: { flex: 1, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: colors.slate200, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  actionBtnText: { fontSize: 13, fontWeight: '800', color: colors.accent },
+  strip: { backgroundColor: colors.warningBg, borderRadius: 14, borderWidth: 1, borderColor: '#f0d49b', padding: 12, marginBottom: 12 },
+  stripText: { fontSize: 13, color: colors.warningText, fontWeight: '600' },
+  stripStrong: { fontWeight: '800' },
+  stripActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  stripPrimary: { minHeight: 44, paddingHorizontal: 16, borderRadius: 12, backgroundColor: '#8a4b06', alignItems: 'center', justifyContent: 'center' },
+  stripPrimaryText: { color: colors.white, fontSize: 13, fontWeight: '800' },
+  stripSecondary: { minHeight: 44, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#d9a85a', alignItems: 'center', justifyContent: 'center' },
+  stripSecondaryText: { color: colors.warningText, fontSize: 13, fontWeight: '800' },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  tabPill: { minHeight: 44, paddingHorizontal: 11, borderRadius: 22, borderWidth: 1, borderColor: colors.slate200, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
+  tabPillOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+  tabText: { fontSize: 13, fontWeight: '800', color: colors.slate500 },
+  tabTextOn: { color: colors.white },
+  emergency: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: '#f5c2c0', padding: 12, marginBottom: 12 },
+  bloodTile: { height: 64, width: 64, borderRadius: 16, backgroundColor: colors.criticalBg, alignItems: 'center', justifyContent: 'center' },
+  bloodTileEmpty: { backgroundColor: colors.slate100 },
+  bloodText: { fontSize: 24, fontWeight: '800', color: colors.criticalText, lineHeight: 26 },
+  bloodLabel: { fontSize: 11, fontWeight: '800', color: colors.criticalText, marginTop: 2 },
+  emergencyKicker: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6, color: colors.criticalText },
+  emergencyName: { fontSize: 15, fontWeight: '800', color: colors.ink, marginTop: 2 },
+  emergencySub: { fontSize: 12, fontWeight: '600', color: colors.slate500, marginTop: 2 },
+  callBtn: { minWidth: 56, minHeight: 44, borderRadius: 22, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14 },
+  callBtnText: { color: colors.white, fontSize: 13, fontWeight: '800' },
+  factsCard: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.slate200, padding: 14, marginBottom: 12 },
+  factsTitle: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6, color: colors.slate500 },
+  factsGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10, rowGap: 12 },
+  factCell: { width: '50%', paddingRight: 10 },
+  factLabel: { fontSize: 12, fontWeight: '600', color: colors.slate500 },
+  factValue: { fontSize: 14, fontWeight: '700', color: colors.ink, marginTop: 2 },
   headerBadges: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 4 },
   name: { fontSize: 18, fontWeight: '800', color: colors.ink },
   subtitle: { fontSize: 13, color: colors.slate500, marginTop: 2 },

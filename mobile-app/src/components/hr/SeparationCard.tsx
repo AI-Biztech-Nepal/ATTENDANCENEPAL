@@ -156,7 +156,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 /** The exit checklist and final settlement for someone leaving — one record per employee,
  * started while they work out their notice or once they are marked as having left.
  * Owner / HR only: it holds what the person is owed. */
-export default function SeparationCard({ employee, onEmployeeChanged }: { employee: Employee; onEmployeeChanged: () => void }) {
+export default function SeparationCard({ employee, onEmployeeChanged, defaultOpen }: { employee: Employee; onEmployeeChanged: () => void; defaultOpen?: boolean }) {
   const { system } = useCalendarSystem();
   const [sep, setSep] = useState<EmployeeSeparation | null>(null);
   const [form, setForm] = useState<Form | null>(null);
@@ -357,7 +357,7 @@ export default function SeparationCard({ employee, onEmployeeChanged }: { employ
         : 'Loading…';
 
   return (
-    <CollapsibleCard title="Separation & final settlement" summary={summary}>
+    <CollapsibleCard title="Separation & final settlement" summary={summary} defaultOpen={defaultOpen}>
       <Text style={styles.intro}>The exit checklist and what the employee is owed. Only the owner and HR can see this.</Text>
 
       {status === 'unavailable' && (
