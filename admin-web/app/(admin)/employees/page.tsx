@@ -17,6 +17,7 @@ import { usePageTitle } from '@/lib/pageTitle';
 import { fetchAll } from '@/lib/leaveBalance';
 import { downloadExcel } from '@/components/TableExportBar';
 import { DOCUMENTS_BUCKET } from '@/lib/employeeDocuments';
+import type { SettlementStatus } from '@/lib/employeeSeparation';
 import {
   EMPLOYMENT_STATUS_LABEL,
   EMPLOYMENT_TYPES,
@@ -130,6 +131,8 @@ function EmployeesView() {
   const [typeFilter, setTypeFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [companyName, setCompanyName] = useState('');
+  // Where each leaver (or person serving notice) stands on their final settlement.
+  const [separations, setSeparations] = useState<Record<string, SettlementStatus>>({});
   const [exportingPdf, setExportingPdf] = useState(false);
   const [search, setSearch] = useState('');
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -238,6 +241,13 @@ function EmployeesView() {
     supabase.from('departments').select('*').order('name').then(({ data }) => setDepartmentOptions(data ?? []));
     // Heads the Excel / PDF export. An admin sees only their own company.
     supabase.from('companies').select('name').limit(1).then(({ data }) => setCompanyName(data?.[0]?.name ?? ''));
+    // Empty (not an error) until the separation migration has been run.
+    supabase
+      .from('employee_separations')
+      .select('employee_id, settlement_status')
+      .then(({ data }) =>
+        setSeparations(Object.fromEntries((data ?? []).map(r => [r.employee_id as string, r.settlement_status as SettlementStatus])))
+      );
     loadLoginEmails();
   }
 
@@ -389,7 +399,13 @@ function EmployeesView() {
     // The Status filter offers Active / Probation / Suspended among current
     // staff and Resigned / Terminated among former staff, so a value is
     // always one that makes sense for the list it is applied to.
-    if (statusFilter !== 'All') list = list.filter(e => effectiveStatus(e) === statusFilter);
+    if (statusFilter === 'settlement_pending') {
+      // Leavers whose final settlement isn't finished. Someone with no
+      // separation record isn't tracked, so isn't "pending".
+      list = list.filter(e => !!separations[e.id] && separations[e.id] !== 'completed');
+    } else if (statusFilter !== 'All') {
+      list = list.filter(e => effectiveStatus(e) === statusFilter);
+    }
     if (branchFilter !== 'All') list = list.filter(e => (branchFilter === 'none' ? !e.branch_id : e.branch_id === branchFilter));
     if (designationFilter !== 'All') list = list.filter(e => (e.designation ?? '').trim() === designationFilter);
     if (typeFilter !== 'All') list = list.filter(e => (typeFilter === 'none' ? !e.employment_type : e.employment_type === typeFilter));
@@ -407,7 +423,7 @@ function EmployeesView() {
     // instead of a just-added (often not-yet-enrolled) employee jumping to
     // the top and reshuffling everyone else.
     return [...list].sort((a, b) => a.employee_code.localeCompare(b.employee_code, undefined, { numeric: true }));
-  }, [employees, shifts, filter, search, statusFilter, branchFilter, designationFilter, typeFilter]);
+  }, [employees, shifts, filter, search, statusFilter, branchFilter, designationFilter, typeFilter, separations]);
 
   const designations = useMemo(
     () =>
@@ -558,6 +574,17 @@ function EmployeesView() {
       setResignError(error.message);
       return;
     }
+    // Start the exit checklist for them (or, if one is already under way, keep
+    // its last working date in step with this one). Errors are ignored: until
+    // the separation migration has been run there is no table, and the profile
+    // page offers "Start checklist" as a fallback.
+    await supabase
+      .from('employee_separations')
+      .upsert(
+        { employee_id: resignEmployee.id, separation_type: resignReason === 'terminated' ? 'termination' : 'resignation', last_working_on: resignDate },
+        { onConflict: 'employee_id', ignoreDuplicates: true }
+      );
+    await supabase.from('employee_separations').update({ last_working_on: resignDate }).eq('employee_id', resignEmployee.id);
     setResignEmployee(null);
     reload();
   }
@@ -801,9 +828,14 @@ function EmployeesView() {
   // employee, so the badges only appear when there is something to flag.
   function renderEmploymentBadges(emp: Employee) {
     const status = effectiveStatus(emp);
+    const settlement = separations[emp.id];
     return (
       <>
         {status !== 'active' && <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>}
+        {/* Someone still working who has a separation record is serving notice. */}
+        {emp.status === 'active' && settlement && <Badge tone="warning">Notice period</Badge>}
+        {emp.status !== 'active' && settlement === 'pending' && <Badge tone="warning">Settlement pending</Badge>}
+        {emp.status !== 'active' && settlement === 'processed' && <Badge tone="info">Settlement processed</Badge>}
         {emp.employment_type && emp.employment_type !== 'permanent' && <Badge tone="neutral">{employmentTypeLabel(emp.employment_type)}</Badge>}
       </>
     );
@@ -1207,6 +1239,7 @@ function EmployeesView() {
                   {EMPLOYMENT_STATUS_LABEL[s]}
                 </option>
               ))}
+              {filter === 'Resigned' && <option value="settlement_pending">Settlement not completed</option>}
             </FilterSelect>
             {(branchFilter !== 'All' || designationFilter !== 'All' || typeFilter !== 'All' || statusFilter !== 'All') && (
               <button

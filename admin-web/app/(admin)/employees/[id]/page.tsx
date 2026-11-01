@@ -10,6 +10,7 @@ import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import EmployeeDocuments from '@/components/EmployeeDocuments';
 import EmployeeHistory from '@/components/EmployeeHistory';
+import EmployeeSeparation from '@/components/EmployeeSeparation';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -1034,6 +1035,8 @@ export default function EmployeeCvPage() {
       )}
 
       <EmployeeHistory employeeId={employee.id} joinedOn={employee.date_of_joining} reloadKey={historyVersion} />
+
+      <EmployeeSeparation employee={employee} onEmployeeChanged={reload} />
 
       <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-3 flex items-center justify-between">
