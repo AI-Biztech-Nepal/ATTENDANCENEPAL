@@ -11,6 +11,8 @@ import PhotoCropModal from '@/components/PhotoCropModal';
 import EmployeeDocuments from '@/components/EmployeeDocuments';
 import EmployeeHistory from '@/components/EmployeeHistory';
 import EmployeeSeparation from '@/components/EmployeeSeparation';
+import EmployeePerformance from '@/components/EmployeePerformance';
+import EmployeeConduct from '@/components/EmployeeConduct';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -1162,6 +1164,10 @@ export default function EmployeeCvPage() {
           ))}
         </ul>
       </div>
+
+      <EmployeePerformance employeeId={employee.id} managerName={manager?.name ?? null} />
+
+      <EmployeeConduct employeeId={employee.id} />
 
       <EmployeeDocuments employeeId={employee.id} companyId={employee.company_id ?? null} />
 
