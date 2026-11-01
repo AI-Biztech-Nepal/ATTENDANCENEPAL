@@ -998,7 +998,6 @@ export default function EmployeeCvPage() {
       {editingCore ? (
         <form onSubmit={handleSaveCore} className="mb-5">
           <EditActionBar
-            position="top"
             name={employee.name}
             photoUrl={employee.profile_photo_url}
             changed={editedKeys.length}
@@ -1170,15 +1169,6 @@ export default function EmployeeCvPage() {
             </div>
           </div>
 
-          <EditActionBar
-            position="bottom"
-            name={employee.name}
-            photoUrl={employee.profile_photo_url}
-            changed={editedKeys.length}
-            changedLabels={editedLabels}
-            saving={savingCore}
-            onDiscard={handleDiscard}
-          />
         </form>
       ) : (
         <>
