@@ -26,7 +26,7 @@ import {
   type AttentionItem,
   type ProfileTab,
 } from '@/components/profile/ProfileParts';
-import { EditActionBar } from '@/components/profile/EditParts';
+import SectionDialog from '@/components/profile/SectionDialog';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -162,6 +162,54 @@ function addressesMatch(f: CoreForm) {
   return parts.some(p => f[`permanent_${p}`]) && parts.every(p => f[`permanent_${p}`] === f[`temporary_${p}`]);
 }
 
+// The pop-ups for editing the profile: one per card on the Overview tab. Each lists the fields it covers
+// (to count what was edited, and so that saving it sends only those fields).
+type SectionId = 'employment' | 'personal' | 'contact' | 'family' | 'emergency' | 'payroll';
+const SECTION_META: Record<SectionId, { title: string; hint?: string; tone?: 'danger'; fields: CoreKey[] }> = {
+  employment: {
+    title: 'Employment',
+    hint: 'Where they work and under what terms.',
+    fields: ['name', 'username', 'employment_type', 'employment_status', 'contract_start', 'contract_end', 'reporting_to', 'department', 'designation', 'branch_id', 'date_of_joining'],
+  },
+  personal: {
+    title: 'Personal',
+    hint: 'Identity details used on the CV and for government records.',
+    fields: ['gender', 'date_of_birth', 'nationality', 'marital_status', 'blood_group', 'citizenship_no', 'citizenship_issued_district', 'citizenship_issue_date'],
+  },
+  contact: {
+    title: 'Contact & address',
+    fields: [
+      'phone',
+      'official_phone',
+      'email',
+      'personal_email',
+      'permanent_province',
+      'permanent_district',
+      'permanent_municipality',
+      'permanent_ward',
+      'permanent_tole',
+      'temporary_province',
+      'temporary_district',
+      'temporary_municipality',
+      'temporary_ward',
+      'temporary_tole',
+      'address',
+    ],
+  },
+  family: { title: 'Family', fields: ['father_name', 'mother_name', 'grandfather_name', 'spouse_name'] },
+  emergency: {
+    title: 'Emergency contact',
+    hint: 'Who to call first. Shown on the profile next to the blood group.',
+    tone: 'danger',
+    fields: ['emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone', 'emergency_contact_address'],
+  },
+  payroll: {
+    title: 'Payroll & statutory',
+    hint: 'Basic salary is set on the Payroll page. PF / SSF / TDS rates are company-wide (Payroll › Salary Structure).',
+    fields: ['pan_no', 'ssf_no', 'allowance'],
+  },
+};
+
 function formFromEmployee(row: Record<string, unknown>): CoreForm {
   const form = { ...EMPTY_CORE_FORM };
   for (const key of CORE_KEYS) {
@@ -208,7 +256,9 @@ export default function EmployeeCvPage() {
   const [experience, setExperience] = useState<EmployeeWorkExperience[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [editingCore, setEditingCore] = useState(false);
+  // Which section's pop-up is open (null = none), and an error to show inside it.
+  const [editingSection, setEditingSection] = useState<SectionId | null>(null);
+  const [dialogError, setDialogError] = useState('');
   const [coreForm, setCoreForm] = useState<CoreForm>(EMPTY_CORE_FORM);
   const [savingCore, setSavingCore] = useState(false);
   // "Same as permanent address" is ticked.
@@ -344,12 +394,12 @@ export default function EmployeeCvPage() {
 
   const setField = (key: CoreKey) => (value: string) => setCoreForm(f => ({ ...f, [key]: value }));
 
-  // What has been changed so far, compared with what is saved — drives the "Edited" marks, the
-  // unsaved-changes bar and the section list beside the form.
+  // What has been changed so far in the open pop-up, compared with what is saved — drives the
+  // "Edited" marks and the unsaved-changes line at the bottom of the pop-up.
   const original = useMemo(() => (employee ? formFromEmployee(employee as unknown as Record<string, unknown>) : EMPTY_CORE_FORM), [employee]);
   const isEdited = (key: CoreKey) => coreForm[key] !== original[key];
-  const editedKeys = CORE_KEYS.filter(isEdited);
-  const editedLabels = editedKeys.map(k => FIELD_LABELS[k]);
+  const sectionEdited = (editingSection ? SECTION_META[editingSection].fields : []).filter(isEdited);
+  const sectionEditedLabels = sectionEdited.map(k => FIELD_LABELS[k]);
 
   // While "Same as permanent address" is ticked, the temporary address follows the permanent one.
   const setPermanentField = (key: CoreKey) => (value: string) =>
@@ -363,22 +413,31 @@ export default function EmployeeCvPage() {
     if (on) copyPermanentToTemporary();
   }
 
-  async function handleDiscard() {
-    if (editedKeys.length > 0 && !(await confirm('Discard your unsaved changes?', { title: 'Discard changes?', confirmLabel: 'Discard', tone: 'danger' }))) return;
-    setEditingCore(false);
-    reload();
+  // Each card on the Overview tab edits its own section in a pop-up. Opening one starts from what is saved.
+  function openSection(id: SectionId) {
+    if (!employee) return;
+    const fresh = formFromEmployee(employee as unknown as Record<string, unknown>);
+    setCoreForm(fresh);
+    setSameAddress(addressesMatch(fresh));
+    setDialogError('');
+    setEditingSection(id);
+  }
+  async function closeSection() {
+    if (sectionEdited.length > 0 && !(await confirm('Discard your unsaved changes?', { title: 'Discard changes?', confirmLabel: 'Discard', tone: 'danger' }))) return;
+    setEditingSection(null);
+    setCoreForm(original);
   }
 
   // Leaving the page with unsaved changes asks first.
   useEffect(() => {
-    if (!editingCore || editedKeys.length === 0) return;
+    if (!editingSection || sectionEdited.length === 0) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [editingCore, editedKeys.length]);
+  }, [editingSection, sectionEdited.length]);
 
   // A nudge under the contract end date when it is close, or already past.
   const contractEndHint = (() => {
@@ -404,10 +463,10 @@ export default function EmployeeCvPage() {
 
   async function handleSaveCore(e: React.FormEvent) {
     e.preventDefault();
-    if (!employee) return;
+    if (!employee || !editingSection) return;
     const isContract = coreForm.employment_type === 'contract';
-    if (isContract && coreForm.contract_start && coreForm.contract_end && coreForm.contract_end < coreForm.contract_start) {
-      alert('The contract end date is before the contract start date.');
+    if (editingSection === 'employment' && isContract && coreForm.contract_start && coreForm.contract_end && coreForm.contract_end < coreForm.contract_start) {
+      setDialogError('The contract end date is before the contract start date.');
       return;
     }
 
@@ -436,15 +495,20 @@ export default function EmployeeCvPage() {
     if (employee.status === 'active' && ('employment_status' in employee || coreForm.employment_status !== 'active')) {
       payload.employment_status = coreForm.employment_status || 'active';
     }
+    // Only the fields this pop-up covers are sent, so saving one section can never overwrite
+    // a change someone else made to another section in the meantime.
+    const allowed = new Set<string>(SECTION_META[editingSection].fields);
+    for (const key of Object.keys(payload)) if (!allowed.has(key)) delete payload[key];
 
     setSavingCore(true);
+    setDialogError('');
     const { error } = await supabase.from('employees').update(payload).eq('id', employee.id);
     setSavingCore(false);
     if (error) {
-      alert(`Could not save: ${error.message}`);
+      setDialogError(`Could not save: ${error.message}`);
       return;
     }
-    setEditingCore(false);
+    setEditingSection(null);
     reload();
     // The database may just have logged a transfer / promotion / pay change.
     setHistoryVersion(v => v + 1);
@@ -843,7 +907,7 @@ export default function EmployeeCvPage() {
       key: 'contract',
       title: contractLabel(contractNotice.daysLeft),
       detail: formatAdDate(contractNotice.endKey, system),
-      action: { label: 'Renew', onClick: () => setEditingCore(true) },
+      action: { label: 'Renew', onClick: () => openSection('employment') },
     });
   }
   if (missingDocs && missingDocs.length > 0) {
@@ -878,6 +942,179 @@ export default function EmployeeCvPage() {
     },
     { id: 'exit', label: 'Exit', badge: exitOpen ? { text: 'Open', tone: 'warn' } : undefined },
   ];
+
+  // The fields shown inside each section's pop-up.
+  function renderSectionFields(id: SectionId) {
+    if (!employee) return null;
+    switch (id) {
+      case 'employment':
+        return (
+          <FieldGrid>
+                <TextField label="Full name" required value={coreForm.name} onChange={setField('name')} edited={isEdited('name')} />
+                <TextField label="Username" value={coreForm.username} onChange={setField('username')} edited={isEdited('username')} hint="Used to sign in on the phone app" />
+                <SegmentField
+                  label="Employment type"
+                  value={coreForm.employment_type}
+                  onChange={setField('employment_type')} edited={isEdited('employment_type')}
+                  options={EMPLOYMENT_TYPES.map(t => ({ value: t.value, label: t.label }))}
+                />
+                {employee.status === 'active' ? (
+                  <SegmentField
+                    label="Employment status"
+                    value={coreForm.employment_status}
+                    onChange={setField('employment_status')} edited={isEdited('employment_status')}
+                    clearable={false}
+                    options={WORKING_STATUSES.map(s => ({ value: s, label: EMPLOYMENT_STATUS_LABEL[s] }))}
+                  />
+                ) : (
+                  <div>
+                    <span className="mb-1.5 block text-xs font-extrabold text-slate-700">Employment status</span>
+                    <p className="py-2 text-sm font-semibold text-ink">{EMPLOYMENT_STATUS_LABEL[status]}</p>
+                    <p className="text-xs font-semibold text-slate-500">Restore the employee from the directory to change this.</p>
+                  </div>
+                )}
+                {coreForm.employment_type === 'contract' && (
+                  <>
+                    <DateField label="Contract start date" value={coreForm.contract_start} onChange={setField('contract_start')} edited={isEdited('contract_start')} />
+                    <DateField label="Contract end date" value={coreForm.contract_end} onChange={setField('contract_end')} edited={isEdited('contract_end')} hint={contractEndHint} hintTone="warn" />
+                  </>
+                )}
+                <SelectField label="Reporting to" value={coreForm.reporting_to} onChange={setField('reporting_to')} edited={isEdited('reporting_to')}>
+                  <option value="">No one</option>
+                  {managerChoices.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.employee_code})
+                    </option>
+                  ))}
+                </SelectField>
+                <SelectField label="Department" value={coreForm.department} onChange={setField('department')} edited={isEdited('department')}>
+                  <option value="">Unassigned</option>
+                  {coreForm.department && !departmentOptions.some(d => d.name === coreForm.department) && (
+                    <option value={coreForm.department}>{coreForm.department}</option>
+                  )}
+                  {departmentOptions.map(d => (
+                    <option key={d.id} value={d.name}>
+                      {d.name}
+                    </option>
+                  ))}
+                </SelectField>
+                <TextField label="Designation" value={coreForm.designation} onChange={setField('designation')} edited={isEdited('designation')} />
+                <SelectField label="Outlet / branch" value={coreForm.branch_id} onChange={setField('branch_id')} edited={isEdited('branch_id')}>
+                  <option value="">Unassigned</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </SelectField>
+                <DateField label="Date of joining" value={coreForm.date_of_joining} onChange={setField('date_of_joining')} edited={isEdited('date_of_joining')} />
+                <TextField label="Employee code" value={employee.employee_code} onChange={() => {}} readOnly />
+                <TextField label="Biometric ID" value={employee.fingerprint_id ?? ''} onChange={() => {}} readOnly hint="Set by the fingerprint device" />
+              </FieldGrid>
+        );
+      case 'personal':
+        return (
+          <FieldGrid>
+                <SegmentField
+                  label="Gender"
+                  value={coreForm.gender}
+                  onChange={setField('gender')} edited={isEdited('gender')}
+                  options={[
+                    { value: 'female', label: 'Female' },
+                    { value: 'male', label: 'Male' },
+                  ]}
+                />
+                <DateField label="Date of birth" value={coreForm.date_of_birth} onChange={setField('date_of_birth')} edited={isEdited('date_of_birth')} />
+                <TextField label="Nationality" placeholder="Nepali" value={coreForm.nationality} onChange={setField('nationality')} edited={isEdited('nationality')} />
+                <SegmentField
+                  label="Marital status"
+                  value={coreForm.marital_status}
+                  onChange={setField('marital_status')} edited={isEdited('marital_status')}
+                  options={MARITAL_STATUSES.map(m => ({ value: m.value, label: m.label }))}
+                />
+                <SegmentField
+                  wide
+                  tone="danger"
+                  label="Blood group"
+                  value={coreForm.blood_group}
+                  onChange={setField('blood_group')} edited={isEdited('blood_group')}
+                  options={BLOOD_GROUPS.map(b => ({ value: b, label: b }))}
+                />
+                <TextField label="Citizenship no." value={coreForm.citizenship_no} onChange={setField('citizenship_no')} edited={isEdited('citizenship_no')} />
+                <TextField
+                  label="Citizenship issued district"
+                  value={coreForm.citizenship_issued_district}
+                  onChange={setField('citizenship_issued_district')} edited={isEdited('citizenship_issued_district')}
+                />
+                <DateField label="Citizenship issue date" value={coreForm.citizenship_issue_date} onChange={setField('citizenship_issue_date')} edited={isEdited('citizenship_issue_date')} />
+              </FieldGrid>
+        );
+      case 'contact':
+        return (
+          <FieldGrid>
+                <TextField label="Phone (personal)" value={coreForm.phone} onChange={setField('phone')} edited={isEdited('phone')} />
+                <TextField label="Phone (official)" value={coreForm.official_phone} onChange={setField('official_phone')} edited={isEdited('official_phone')} />
+                <TextField
+                  label="Email (official)"
+                  type="email"
+                  value={coreForm.email}
+                  onChange={setField('email')} edited={isEdited('email')}
+                  hint="Also the email this person signs in with"
+                />
+                <TextField label="Email (personal)" type="email" value={coreForm.personal_email} onChange={setField('personal_email')} edited={isEdited('personal_email')} />
+              
+                <h3 className="col-span-full -mb-2 text-[13px] font-extrabold tracking-wide text-slate-500">PERMANENT ADDRESS</h3>
+                <AddressFields kind="permanent" form={coreForm} setField={setPermanentField} isEdited={isEdited} />
+
+                <h3 className="col-span-full -mb-2 mt-2 text-[13px] font-extrabold tracking-wide text-slate-500">TEMPORARY ADDRESS</h3>
+                <label className="col-span-full flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                  <input type="checkbox" checked={sameAddress} onChange={e => toggleSameAddress(e.target.checked)} className="h-5 w-5 accent-[#047857]" />
+                  <span className="text-sm font-bold text-ink">Same as permanent address</span>
+                  {sameAddress && <span className="ml-auto min-w-0 truncate text-[13px] font-semibold text-slate-500">{formatAddress(coreForm, 'permanent')}</span>}
+                </label>
+                {!sameAddress && <AddressFields kind="temporary" form={coreForm} setField={setField} isEdited={isEdited} />}
+
+                <h3 className="col-span-full -mb-2 mt-2 text-[13px] font-extrabold tracking-wide text-slate-500">OTHER NOTE</h3>
+                <label className="col-span-full block">
+                  <span className="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold text-slate-700">Note{isEdited('address') && <EditedTag />}</span>
+                  <textarea
+                    value={coreForm.address}
+                    onChange={e => setField('address')(e.target.value)}
+                    rows={2}
+                    placeholder="Anything that doesn't fit above (landmark, current rented room…)"
+                    className={`${FIELD_BORDER} min-h-[72px] w-full py-2.5 ${isEdited('address') ? FIELD_EDITED : ''}`}
+                  />
+                </label>
+              </FieldGrid>
+        );
+      case 'family':
+        return (
+          <FieldGrid>
+                <TextField label="Father's name" value={coreForm.father_name} onChange={setField('father_name')} edited={isEdited('father_name')} />
+                <TextField label="Mother's name" value={coreForm.mother_name} onChange={setField('mother_name')} edited={isEdited('mother_name')} />
+                <TextField label="Grandfather's name" value={coreForm.grandfather_name} onChange={setField('grandfather_name')} edited={isEdited('grandfather_name')} />
+                <TextField label="Spouse's name" value={coreForm.spouse_name} onChange={setField('spouse_name')} edited={isEdited('spouse_name')} />
+              </FieldGrid>
+        );
+      case 'emergency':
+        return (
+          <FieldGrid>
+                <TextField label="Name" value={coreForm.emergency_contact_name} onChange={setField('emergency_contact_name')} edited={isEdited('emergency_contact_name')} />
+                <TextField label="Relationship" value={coreForm.emergency_contact_relationship} onChange={setField('emergency_contact_relationship')} edited={isEdited('emergency_contact_relationship')} />
+                <TextField label="Mobile no." value={coreForm.emergency_contact_phone} onChange={setField('emergency_contact_phone')} edited={isEdited('emergency_contact_phone')} />
+                <TextField label="Address" value={coreForm.emergency_contact_address} onChange={setField('emergency_contact_address')} edited={isEdited('emergency_contact_address')} />
+              </FieldGrid>
+        );
+      case 'payroll':
+        return (
+          <FieldGrid>
+                <TextField label="PAN No." value={coreForm.pan_no} onChange={setField('pan_no')} edited={isEdited('pan_no')} />
+                <TextField label="SSF No." value={coreForm.ssf_no} onChange={setField('ssf_no')} edited={isEdited('ssf_no')} />
+                <TextField label="Allowance" type="number" min="0" step="0.01" value={coreForm.allowance} onChange={setField('allowance')} edited={isEdited('allowance')} />
+              </FieldGrid>
+        );
+    }
+  }
 
   return (
     <>
@@ -941,15 +1178,6 @@ export default function EmployeeCvPage() {
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {!editingCore && (
-              <button
-                type="button"
-                onClick={() => setEditingCore(true)}
-                className="flex h-[42px] items-center gap-2 rounded-xl bg-accent px-4 text-sm font-extrabold text-white hover:bg-accent/90"
-              >
-                ✎ Edit profile
-              </button>
-            )}
             <Link
               href={`/attendance?employee=${employee.id}`}
               className="flex h-[42px] items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"
@@ -995,175 +1223,6 @@ export default function EmployeeCvPage() {
         </dl>
       </section>
 
-      {editingCore ? (
-        <form onSubmit={handleSaveCore} className="mb-5">
-          <div className="flex flex-wrap items-start gap-5">
-            <div className="flex min-w-0 flex-[1_1_640px] flex-col gap-5">
-              <FormSection id="employment" title="Employment" hint="Where they work and under what terms.">
-                <TextField label="Full name" required value={coreForm.name} onChange={setField('name')} edited={isEdited('name')} />
-                <TextField label="Username" value={coreForm.username} onChange={setField('username')} edited={isEdited('username')} hint="Used to sign in on the phone app" />
-                <SegmentField
-                  label="Employment type"
-                  value={coreForm.employment_type}
-                  onChange={setField('employment_type')} edited={isEdited('employment_type')}
-                  options={EMPLOYMENT_TYPES.map(t => ({ value: t.value, label: t.label }))}
-                />
-                {employee.status === 'active' ? (
-                  <SegmentField
-                    label="Employment status"
-                    value={coreForm.employment_status}
-                    onChange={setField('employment_status')} edited={isEdited('employment_status')}
-                    clearable={false}
-                    options={WORKING_STATUSES.map(s => ({ value: s, label: EMPLOYMENT_STATUS_LABEL[s] }))}
-                  />
-                ) : (
-                  <div>
-                    <span className="mb-1.5 block text-xs font-extrabold text-slate-700">Employment status</span>
-                    <p className="py-2 text-sm font-semibold text-ink">{EMPLOYMENT_STATUS_LABEL[status]}</p>
-                    <p className="text-xs font-semibold text-slate-500">Restore the employee from the directory to change this.</p>
-                  </div>
-                )}
-                {coreForm.employment_type === 'contract' && (
-                  <>
-                    <DateField label="Contract start date" value={coreForm.contract_start} onChange={setField('contract_start')} edited={isEdited('contract_start')} />
-                    <DateField label="Contract end date" value={coreForm.contract_end} onChange={setField('contract_end')} edited={isEdited('contract_end')} hint={contractEndHint} hintTone="warn" />
-                  </>
-                )}
-                <SelectField label="Reporting to" value={coreForm.reporting_to} onChange={setField('reporting_to')} edited={isEdited('reporting_to')}>
-                  <option value="">No one</option>
-                  {managerChoices.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.employee_code})
-                    </option>
-                  ))}
-                </SelectField>
-                <SelectField label="Department" value={coreForm.department} onChange={setField('department')} edited={isEdited('department')}>
-                  <option value="">Unassigned</option>
-                  {coreForm.department && !departmentOptions.some(d => d.name === coreForm.department) && (
-                    <option value={coreForm.department}>{coreForm.department}</option>
-                  )}
-                  {departmentOptions.map(d => (
-                    <option key={d.id} value={d.name}>
-                      {d.name}
-                    </option>
-                  ))}
-                </SelectField>
-                <TextField label="Designation" value={coreForm.designation} onChange={setField('designation')} edited={isEdited('designation')} />
-                <SelectField label="Outlet / branch" value={coreForm.branch_id} onChange={setField('branch_id')} edited={isEdited('branch_id')}>
-                  <option value="">Unassigned</option>
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </SelectField>
-                <DateField label="Date of joining" value={coreForm.date_of_joining} onChange={setField('date_of_joining')} edited={isEdited('date_of_joining')} />
-                <TextField label="Employee code" value={employee.employee_code} onChange={() => {}} readOnly />
-                <TextField label="Biometric ID" value={employee.fingerprint_id ?? ''} onChange={() => {}} readOnly hint="Set by the fingerprint device" />
-              </FormSection>
-
-              <FormSection id="personal" title="Personal" hint="Identity details used on the CV and for government records.">
-                <SegmentField
-                  label="Gender"
-                  value={coreForm.gender}
-                  onChange={setField('gender')} edited={isEdited('gender')}
-                  options={[
-                    { value: 'female', label: 'Female' },
-                    { value: 'male', label: 'Male' },
-                  ]}
-                />
-                <DateField label="Date of birth" value={coreForm.date_of_birth} onChange={setField('date_of_birth')} edited={isEdited('date_of_birth')} />
-                <TextField label="Nationality" placeholder="Nepali" value={coreForm.nationality} onChange={setField('nationality')} edited={isEdited('nationality')} />
-                <SegmentField
-                  label="Marital status"
-                  value={coreForm.marital_status}
-                  onChange={setField('marital_status')} edited={isEdited('marital_status')}
-                  options={MARITAL_STATUSES.map(m => ({ value: m.value, label: m.label }))}
-                />
-                <SegmentField
-                  wide
-                  tone="danger"
-                  label="Blood group"
-                  value={coreForm.blood_group}
-                  onChange={setField('blood_group')} edited={isEdited('blood_group')}
-                  options={BLOOD_GROUPS.map(b => ({ value: b, label: b }))}
-                />
-                <TextField label="Citizenship no." value={coreForm.citizenship_no} onChange={setField('citizenship_no')} edited={isEdited('citizenship_no')} />
-                <TextField
-                  label="Citizenship issued district"
-                  value={coreForm.citizenship_issued_district}
-                  onChange={setField('citizenship_issued_district')} edited={isEdited('citizenship_issued_district')}
-                />
-                <DateField label="Citizenship issue date" value={coreForm.citizenship_issue_date} onChange={setField('citizenship_issue_date')} edited={isEdited('citizenship_issue_date')} />
-              </FormSection>
-
-              <FormSection id="contact" title="Contact">
-                <TextField label="Phone (personal)" value={coreForm.phone} onChange={setField('phone')} edited={isEdited('phone')} />
-                <TextField label="Phone (official)" value={coreForm.official_phone} onChange={setField('official_phone')} edited={isEdited('official_phone')} />
-                <TextField
-                  label="Email (official)"
-                  type="email"
-                  value={coreForm.email}
-                  onChange={setField('email')} edited={isEdited('email')}
-                  hint="Also the email this person signs in with"
-                />
-                <TextField label="Email (personal)" type="email" value={coreForm.personal_email} onChange={setField('personal_email')} edited={isEdited('personal_email')} />
-              </FormSection>
-
-              <FormSection id="address" title="Address">
-                <h3 className="col-span-full -mb-2 text-[13px] font-extrabold tracking-wide text-slate-500">PERMANENT ADDRESS</h3>
-                <AddressFields kind="permanent" form={coreForm} setField={setPermanentField} isEdited={isEdited} />
-
-                <h3 className="col-span-full -mb-2 mt-2 text-[13px] font-extrabold tracking-wide text-slate-500">TEMPORARY ADDRESS</h3>
-                <label className="col-span-full flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
-                  <input type="checkbox" checked={sameAddress} onChange={e => toggleSameAddress(e.target.checked)} className="h-5 w-5 accent-[#047857]" />
-                  <span className="text-sm font-bold text-ink">Same as permanent address</span>
-                  {sameAddress && <span className="ml-auto min-w-0 truncate text-[13px] font-semibold text-slate-500">{formatAddress(coreForm, 'permanent')}</span>}
-                </label>
-                {!sameAddress && <AddressFields kind="temporary" form={coreForm} setField={setField} isEdited={isEdited} />}
-
-                <h3 className="col-span-full -mb-2 mt-2 text-[13px] font-extrabold tracking-wide text-slate-500">OTHER NOTE</h3>
-                <label className="col-span-full block">
-                  <span className="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold text-slate-700">Note{isEdited('address') && <EditedTag />}</span>
-                  <textarea
-                    value={coreForm.address}
-                    onChange={e => setField('address')(e.target.value)}
-                    rows={2}
-                    placeholder="Anything that doesn't fit above (landmark, current rented room…)"
-                    className={`${FIELD_BORDER} min-h-[72px] w-full py-2.5 ${isEdited('address') ? FIELD_EDITED : ''}`}
-                  />
-                </label>
-              </FormSection>
-
-              <FormSection id="family" title="Family">
-                <TextField label="Father's name" value={coreForm.father_name} onChange={setField('father_name')} edited={isEdited('father_name')} />
-                <TextField label="Mother's name" value={coreForm.mother_name} onChange={setField('mother_name')} edited={isEdited('mother_name')} />
-                <TextField label="Grandfather's name" value={coreForm.grandfather_name} onChange={setField('grandfather_name')} edited={isEdited('grandfather_name')} />
-                <TextField label="Spouse's name" value={coreForm.spouse_name} onChange={setField('spouse_name')} edited={isEdited('spouse_name')} />
-              </FormSection>
-
-              <FormSection id="emergency" title="Emergency contact" hint="Who to call first. Shown on the profile next to the blood group." tone="danger">
-                <TextField label="Name" value={coreForm.emergency_contact_name} onChange={setField('emergency_contact_name')} edited={isEdited('emergency_contact_name')} />
-                <TextField label="Relationship" value={coreForm.emergency_contact_relationship} onChange={setField('emergency_contact_relationship')} edited={isEdited('emergency_contact_relationship')} />
-                <TextField label="Mobile no." value={coreForm.emergency_contact_phone} onChange={setField('emergency_contact_phone')} edited={isEdited('emergency_contact_phone')} />
-                <TextField label="Address" value={coreForm.emergency_contact_address} onChange={setField('emergency_contact_address')} edited={isEdited('emergency_contact_address')} />
-              </FormSection>
-
-              <FormSection
-                id="payroll"
-                title="Payroll & statutory"
-                hint="Basic salary is set on the Payroll page. PF / SSF / TDS rates are company-wide (Payroll › Salary Structure)."
-              >
-                <TextField label="PAN No." value={coreForm.pan_no} onChange={setField('pan_no')} edited={isEdited('pan_no')} />
-                <TextField label="SSF No." value={coreForm.ssf_no} onChange={setField('ssf_no')} edited={isEdited('ssf_no')} />
-                <TextField label="Allowance" type="number" min="0" step="0.01" value={coreForm.allowance} onChange={setField('allowance')} edited={isEdited('allowance')} />
-              </FormSection>
-            </div>
-          </div>
-
-          <EditActionBar changed={editedKeys.length} changedLabels={editedLabels} saving={savingCore} onDiscard={handleDiscard} />
-        </form>
-      ) : (
         <>
           {contractNotice && (
             <div role="status" className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-200 bg-warning-bg px-4 py-3 text-warning-text">
@@ -1171,7 +1230,7 @@ export default function EmployeeCvPage() {
                 <strong className="font-extrabold">{contractLabel(contractNotice.daysLeft)}</strong> — {formatAdDate(contractNotice.endKey, system)}. Renew it, or start the exit if the person is
                 leaving.
               </span>
-              <button type="button" onClick={() => setEditingCore(true)} className="h-9 rounded-lg bg-[#8a4b06] px-3.5 text-[13px] font-extrabold text-white hover:opacity-90">
+              <button type="button" onClick={() => openSection('employment')} className="h-9 rounded-lg bg-[#8a4b06] px-3.5 text-[13px] font-extrabold text-white hover:opacity-90">
                 Renew contract
               </button>
               <button type="button" onClick={() => setTab('exit')} className="h-9 rounded-lg border border-amber-400 px-3.5 text-[13px] font-extrabold text-warning-text hover:bg-white/50">
@@ -1185,7 +1244,7 @@ export default function EmployeeCvPage() {
           <div hidden={tab !== 'overview'}>
             <div className="flex flex-wrap items-start gap-5">
               <div className="flex min-w-0 flex-[2_1_520px] flex-col gap-5">
-              <ProfileCard title="Employment" action="Edit" onAction={() => setEditingCore(true)}>
+              <ProfileCard title="Employment" action="Edit" onAction={() => openSection('employment')}>
                 <FactGrid>
                   <Fact label="Employee code">{employee.employee_code}</Fact>
                   <Fact label="Username">{employee.username}</Fact>
@@ -1216,7 +1275,7 @@ export default function EmployeeCvPage() {
                 </FactGrid>
               </ProfileCard>
 
-              <ProfileCard title="Personal" action="Edit" onAction={() => setEditingCore(true)}>
+              <ProfileCard title="Personal" action="Edit" onAction={() => openSection('personal')}>
                 <FactGrid>
                   <Fact label="Gender">{employee.gender ? <span className="capitalize">{employee.gender}</span> : null}</Fact>
                   <Fact label="Date of birth">{employee.date_of_birth ? formatAdDate(employee.date_of_birth, system) : null}</Fact>
@@ -1229,7 +1288,7 @@ export default function EmployeeCvPage() {
                 </FactGrid>
               </ProfileCard>
 
-              <ProfileCard title="Contact & address" action="Edit" onAction={() => setEditingCore(true)}>
+              <ProfileCard title="Contact & address" action="Edit" onAction={() => openSection('contact')}>
                 <FactGrid min={220}>
                   <Fact label="Phone (personal)">{employee.phone}</Fact>
                   <Fact label="Phone (official)">{employee.official_phone}</Fact>
@@ -1249,7 +1308,7 @@ export default function EmployeeCvPage() {
                 </FactGrid>
               </ProfileCard>
 
-              <ProfileCard title="Family" action="Edit" onAction={() => setEditingCore(true)}>
+              <ProfileCard title="Family" action="Edit" onAction={() => openSection('family')}>
                 <FactGrid>
                   <Fact label="Father's name">{employee.father_name}</Fact>
                   <Fact label="Mother's name">{employee.mother_name}</Fact>
@@ -1258,7 +1317,7 @@ export default function EmployeeCvPage() {
                 </FactGrid>
               </ProfileCard>
 
-              <ProfileCard title="Payroll & statutory" action="Edit" onAction={() => setEditingCore(true)}>
+              <ProfileCard title="Payroll & statutory" action="Edit" onAction={() => openSection('payroll')}>
                 <FactGrid>
                   <Fact label="PAN No.">{employee.pan_no}</Fact>
                   <Fact label="SSF No.">{employee.ssf_no}</Fact>
@@ -1273,7 +1332,7 @@ export default function EmployeeCvPage() {
                 relationship={employee.emergency_contact_relationship}
                 phone={employee.emergency_contact_phone}
                 address={employee.emergency_contact_address}
-                onEdit={() => setEditingCore(true)}
+                onEdit={() => openSection('emergency')}
               />
               <AttentionCard items={attention} />
               {haveDocs !== null && missingDocs && (
@@ -1430,6 +1489,21 @@ export default function EmployeeCvPage() {
       <EmployeeSeparation employee={employee} onEmployeeChanged={reload} />
           </div>
         </>
+
+      {editingSection && (
+        <SectionDialog
+          title={SECTION_META[editingSection].title}
+          hint={SECTION_META[editingSection].hint}
+          tone={SECTION_META[editingSection].tone}
+          changed={sectionEdited.length}
+          changedLabels={sectionEditedLabels}
+          saving={savingCore}
+          error={dialogError}
+          onClose={closeSection}
+          onSubmit={handleSaveCore}
+        >
+          {renderSectionFields(editingSection)}
+        </SectionDialog>
       )}
 
       {showEducationForm && (
@@ -1694,27 +1768,12 @@ function EditedTag() {
   return <span className="rounded-full bg-warning-bg px-[7px] py-px text-[10px] font-extrabold text-warning-text">Edited</span>;
 }
 
-function FormSection({
-  id,
-  title,
-  hint,
-  tone = 'default',
-  children,
-}: {
-  id: string;
-  title: string;
-  hint?: string;
-  tone?: 'default' | 'danger';
-  children: React.ReactNode;
-}) {
+/** The fields of one pop-up, laid out in as many columns as fit. */
+function FieldGrid({ children }: { children: React.ReactNode }) {
   return (
-    <section id={`section-${id}`} className={`scroll-mt-28 rounded-2xl border bg-white p-5 ${tone === 'danger' ? 'border-rose-200' : 'border-slate-200'}`}>
-      <h2 className="text-base font-extrabold text-ink">{title}</h2>
-      {hint && <p className="mt-1 text-[13px] font-semibold text-slate-500">{hint}</p>}
-      <div className="mt-[18px] grid gap-x-5 gap-y-[18px]" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-        {children}
-      </div>
-    </section>
+    <div className="grid gap-x-5 gap-y-[18px]" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+      {children}
+    </div>
   );
 }
 

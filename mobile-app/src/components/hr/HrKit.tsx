@@ -78,9 +78,22 @@ export function Button({
 }
 
 /** A tappable text link, the phone's version of the website's small "Edit" / "Delete" links. */
-export function LinkText({ label, onPress, tone = 'accent', disabled }: { label: string; onPress: () => void; tone?: 'accent' | 'critical'; disabled?: boolean }) {
+export function LinkText({
+  label,
+  onPress,
+  tone = 'accent',
+  disabled,
+  accessibilityLabel,
+}: {
+  label: string;
+  onPress: () => void;
+  tone?: 'accent' | 'critical';
+  disabled?: boolean;
+  /** For a link whose visible text ("Edit") isn't enough on its own ("Edit Employment"). */
+  accessibilityLabel?: string;
+}) {
   return (
-    <TouchableOpacity onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityLabel={label} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}>
+    <TouchableOpacity onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label} hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}>
       <Text style={[styles.link, tone === 'critical' && { color: colors.criticalText }, disabled && { opacity: 0.5 }]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -101,16 +114,20 @@ export function CollapsibleCard({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const toggle = () => setOpen(o => !o);
   return (
     <View style={styles.card}>
-      <TouchableOpacity onPress={() => setOpen(o => !o)} accessibilityRole="button" accessibilityLabel={`${title}, ${open ? 'collapse' : 'expand'}`} accessibilityState={{ expanded: open }} style={styles.cardHeader}>
-        <View style={{ flex: 1 }}>
+      {/* `right` (e.g. an Edit link) is a control of its own, so it sits beside the toggle, not inside it. */}
+      <View style={styles.cardHeader}>
+        <TouchableOpacity onPress={toggle} accessibilityRole="button" accessibilityLabel={`${title}, ${open ? 'collapse' : 'expand'}`} accessibilityState={{ expanded: open }} style={styles.cardToggle}>
           <Text style={styles.cardTitle}>{title}</Text>
           {summary ? <Text style={styles.cardSummary}>{summary}</Text> : null}
-        </View>
+        </TouchableOpacity>
         {right}
-        <Text style={styles.chevron}>{open ? '▾' : '▸'}</Text>
-      </TouchableOpacity>
+        <TouchableOpacity onPress={toggle} accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.cardChevron}>
+          <Text style={styles.chevron}>{open ? '▾' : '▸'}</Text>
+        </TouchableOpacity>
+      </View>
       {open && <View style={styles.cardBody}>{children}</View>}
     </View>
   );
@@ -272,6 +289,8 @@ export function Sheet({
   saving,
   submitLabel,
   closeLabel = 'Cancel',
+  submitDisabled,
+  note,
   error,
   children,
 }: {
@@ -283,6 +302,10 @@ export function Sheet({
   saving?: boolean;
   submitLabel?: string;
   closeLabel?: string;
+  /** Greys out the action — e.g. nothing to save yet. */
+  submitDisabled?: boolean;
+  /** A line above the buttons, like "2 unsaved changes · Designation, Salary". */
+  note?: string;
   error?: string;
   children: React.ReactNode;
 }) {
@@ -297,9 +320,14 @@ export function Sheet({
             {children}
             {error ? <Text style={styles.sheetError}>{error}</Text> : null}
           </ScrollView>
+          {note && !error ? (
+            <Text style={styles.sheetNote} numberOfLines={2}>
+              {note}
+            </Text>
+          ) : null}
           <View style={styles.sheetFooter}>
             <Button label={closeLabel} tone="ghost" onPress={onClose} disabled={saving} />
-            {onSubmit && <Button label={saving ? 'Saving…' : submitLabel ?? 'Save'} onPress={onSubmit} disabled={saving} />}
+            {onSubmit && <Button label={saving ? 'Saving…' : submitLabel ?? 'Save'} onPress={onSubmit} disabled={saving || submitDisabled} />}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -328,7 +356,9 @@ const styles = StyleSheet.create({
   link: { fontSize: 12, fontWeight: '700', color: colors.accent },
 
   card: { backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, marginBottom: 12, overflow: 'hidden' },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center' },
+  cardToggle: { flex: 1, padding: 14, paddingRight: 8 },
+  cardChevron: { paddingVertical: 14, paddingLeft: 10, paddingRight: 14 },
   cardTitle: { fontSize: 14, fontWeight: '800', color: colors.ink },
   cardSummary: { fontSize: 12, color: colors.slate500, marginTop: 2 },
   chevron: { fontSize: 16, color: colors.slate400, width: 18, textAlign: 'center' },
@@ -360,6 +390,7 @@ const styles = StyleSheet.create({
   sheetTitle: { fontSize: 17, fontWeight: '800', color: colors.ink },
   sheetSubtitle: { fontSize: 12, color: colors.slate500, marginTop: 2, marginBottom: 4 },
   sheetError: { fontSize: 12, color: colors.criticalText, marginTop: 10 },
+  sheetNote: { fontSize: 12, fontWeight: '600', color: colors.slate500, marginTop: 10 },
   sheetFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 12 },
 
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 7, borderBottomWidth: 1, borderBottomColor: colors.slate100 },
