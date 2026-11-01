@@ -22,7 +22,7 @@ import { contractAlerts, startOfToday } from '../lib/hrAlerts';
 import type { Branch, Department, Employee } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
-import { Button, Choice, CollapsibleCard, DateField, Field, InfoRow, LinkText, Notice, Sheet, SubHeading } from '../components/hr/HrKit';
+import { Button, Choice, CollapsibleCard, DateField, Field, InfoRow, LinkText, Notice, Sheet, SubHeading, confirmAsync } from '../components/hr/HrKit';
 import HistoryCard from '../components/hr/HistoryCard';
 import SeparationCard from '../components/hr/SeparationCard';
 import { EducationCard, ExperienceCard, TrainingCard } from '../components/hr/CvCards';
@@ -67,6 +67,88 @@ function formFromEmployee(row: Record<string, unknown>): FormState {
   if (!form.employment_status) form.employment_status = 'active';
   return form;
 }
+
+// Human names for every field, so the unsaved-changes bar can say what was touched.
+const FIELD_LABELS: Record<FormKey, string> = {
+  name: 'Full name',
+  email: 'Email (official)',
+  phone: 'Phone (personal)',
+  gender: 'Gender',
+  department: 'Department',
+  designation: 'Designation',
+  branch_id: 'Outlet / branch',
+  date_of_joining: 'Date of joining',
+  address: 'Other address note',
+  fingerprint_id: 'Biometric ID',
+  emergency_contact_name: 'Emergency contact name',
+  emergency_contact_relationship: 'Emergency contact relationship',
+  emergency_contact_phone: 'Emergency contact mobile',
+  pan_no: 'PAN No.',
+  ssf_no: 'SSF No.',
+  salary: 'Salary',
+  allowance: 'Allowance',
+  employment_type: 'Employment type',
+  employment_status: 'Employment status',
+  contract_start: 'Contract start date',
+  contract_end: 'Contract end date',
+  reporting_to: 'Reporting to',
+  official_phone: 'Phone (official)',
+  personal_email: 'Email (personal)',
+  date_of_birth: 'Date of birth',
+  nationality: 'Nationality',
+  marital_status: 'Marital status',
+  blood_group: 'Blood group',
+  citizenship_no: 'Citizenship no.',
+  citizenship_issued_district: 'Citizenship issued district',
+  citizenship_issue_date: 'Citizenship issue date',
+  permanent_province: 'Permanent province',
+  permanent_district: 'Permanent district',
+  permanent_municipality: 'Permanent municipality',
+  permanent_ward: 'Permanent ward',
+  permanent_tole: 'Permanent tole',
+  temporary_province: 'Temporary province',
+  temporary_district: 'Temporary district',
+  temporary_municipality: 'Temporary municipality',
+  temporary_ward: 'Temporary ward',
+  temporary_tole: 'Temporary tole',
+  father_name: "Father's name",
+  mother_name: "Mother's name",
+  grandfather_name: "Grandfather's name",
+  spouse_name: "Spouse's name",
+  emergency_contact_address: 'Emergency contact address',
+};
+
+// Every field in a section (to count what was edited) and the ones worth having filled in
+// (to say what is missing) — they feed the little chip on each section's header.
+type SectionId = 'employment' | 'personal' | 'contact' | 'address' | 'family' | 'pay';
+const SECTION_FIELDS: Record<SectionId, FormKey[]> = {
+  employment: ['name', 'employment_type', 'employment_status', 'contract_start', 'contract_end', 'reporting_to', 'department', 'designation', 'branch_id', 'fingerprint_id', 'date_of_joining'],
+  personal: ['gender', 'date_of_birth', 'nationality', 'marital_status', 'blood_group', 'citizenship_no', 'citizenship_issued_district', 'citizenship_issue_date'],
+  contact: ['phone', 'official_phone', 'email', 'personal_email'],
+  address: [
+    'permanent_province',
+    'permanent_district',
+    'permanent_municipality',
+    'permanent_ward',
+    'permanent_tole',
+    'temporary_province',
+    'temporary_district',
+    'temporary_municipality',
+    'temporary_ward',
+    'temporary_tole',
+    'address',
+  ],
+  family: ['father_name', 'mother_name', 'grandfather_name', 'spouse_name', 'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone', 'emergency_contact_address'],
+  pay: ['salary', 'allowance', 'pan_no', 'ssf_no'],
+};
+const SECTION_REQUIRED: Record<SectionId, FormKey[]> = {
+  employment: ['name', 'employment_type', 'department', 'designation', 'branch_id', 'date_of_joining'],
+  personal: ['gender', 'date_of_birth', 'nationality', 'marital_status', 'blood_group'],
+  contact: ['phone', 'email'],
+  address: ['permanent_province', 'permanent_district', 'permanent_municipality', 'permanent_ward', 'permanent_tole'],
+  family: ['emergency_contact_name', 'emergency_contact_phone'],
+  pay: [],
+};
 
 /** "Contract ends in 10 days" / "Contract ended 3 days ago". */
 function contractLabel(daysLeft: number) {
@@ -303,11 +385,41 @@ export default function EmployeeDetailScreen({ route }: any) {
     { id: 'exit', label: exitOpen ? 'Exit · open' : 'Exit' },
   ];
 
+  // What has been changed so far — drives the "Edited" marks, the chip on each section header
+  // and the unsaved-changes bar at the bottom.
+  const isEdited = (key: FormKey) => form[key] !== baseline[key];
+  const editedKeys = FORM_KEYS.filter(isEdited);
+  const editedLabels = editedKeys.map(k => FIELD_LABELS[k]);
+  const sectionChip = (id: SectionId) => {
+    const edited = SECTION_FIELDS[id].filter(isEdited).length;
+    let missing = SECTION_REQUIRED[id].filter(k => !form[k].trim()).length;
+    if (id === 'employment' && form.employment_type === 'contract' && !form.contract_end) missing += 1;
+    if (missing > 0) return <Badge tone="warning">{`${missing} missing`}</Badge>;
+    if (edited > 0) return <Badge tone="warning">{`${edited} edited`}</Badge>;
+    return SECTION_REQUIRED[id].length > 0 ? <Badge tone="good">Complete</Badge> : <Badge tone="neutral">Optional</Badge>;
+  };
+  // A nudge under the contract end date when it is close, or already past.
+  const contractEndHint = (() => {
+    if (form.employment_type !== 'contract' || !form.contract_end) return undefined;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(form.contract_end);
+    if (!m) return undefined;
+    const days = Math.round((new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() - startOfToday().getTime()) / 86400000);
+    if (days < 0) return `Ended ${-days} day${days === -1 ? '' : 's'} ago — set a later date to renew.`;
+    if (days <= 31) return `${days === 0 ? 'Ends today' : `Ends in ${days} day${days === 1 ? '' : 's'}`} — set a later date to renew.`;
+    return undefined;
+  })();
+  async function handleDiscard() {
+    if (editedKeys.length > 0 && !(await confirmAsync('Discard changes?', `Throw away ${editedKeys.length} unsaved change${editedKeys.length === 1 ? '' : 's'}?`, 'Discard', true))) return;
+    setForm(baseline);
+    setError(null);
+  }
+
   const departmentOptions = departments.map(d => ({ label: d.name, value: d.name }));
   if (form.department && !departments.some(d => d.name === form.department)) departmentOptions.unshift({ label: form.department, value: form.department });
 
   return (
-    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+    <View style={{ flex: 1, backgroundColor: colors.slate50 }}>
+    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: dirty || saving ? 120 : 40 }} keyboardShouldPersistTaps="handled">
       <View style={styles.headerCard}>
         <View style={styles.headerTop}>
           {employee.profile_photo_url && !photoFailed ? (
@@ -429,13 +541,13 @@ export default function EmployeeDetailScreen({ route }: any) {
       </View>
 
       <View onLayout={e => { yRef.current.employment = e.nativeEvent.layout.y; }}>
-      <CollapsibleCard title="Employment" summary={[employmentTypeLabel(form.employment_type), form.designation, manager ? `Reports to ${manager.name}` : ''].filter(Boolean).join(' · ') || undefined} defaultOpen>
-        <Field label="Full name" value={form.name} onChangeText={set('name')} />
+      <CollapsibleCard title="Employment" right={sectionChip('employment')} summary={[employmentTypeLabel(form.employment_type), form.designation, manager ? `Reports to ${manager.name}` : ''].filter(Boolean).join(' · ') || undefined} defaultOpen>
+        <Field label="Full name" value={form.name} onChangeText={set('name')} edited={isEdited('name')} />
         <Choice
           label="Employment type"
           options={EMPLOYMENT_TYPES.map(t => ({ label: t.label, value: t.value }))}
           value={form.employment_type}
-          onChange={v => set('employment_type')(v ?? '')}
+          onChange={v => set('employment_type')(v ?? '')} edited={isEdited('employment_type')}
           allowNone
         />
         {stillWorking ? (
@@ -443,7 +555,7 @@ export default function EmployeeDetailScreen({ route }: any) {
             label="Employment status"
             options={WORKING_STATUSES.map(s => ({ label: EMPLOYMENT_STATUS_LABEL[s], value: s }))}
             value={form.employment_status}
-            onChange={v => v && set('employment_status')(v)}
+            onChange={v => v && set('employment_status')(v)} edited={isEdited('employment_status')}
           />
         ) : (
           <InfoRow label="Employment status" value={EMPLOYMENT_STATUS_LABEL[status]} />
@@ -451,8 +563,8 @@ export default function EmployeeDetailScreen({ route }: any) {
         {!stillWorking && <Text style={styles.hint}>Restore the employee from the directory to change this.</Text>}
         {form.employment_type === 'contract' && (
           <>
-            <DateField label="Contract start date" value={form.contract_start} onChange={set('contract_start')} />
-            <DateField label="Contract end date" value={form.contract_end} onChange={set('contract_end')} />
+            <DateField label="Contract start date" value={form.contract_start} onChange={set('contract_start')} edited={isEdited('contract_start')} />
+            <DateField label="Contract end date" value={form.contract_end} onChange={set('contract_end')} edited={isEdited('contract_end')} hint={contractEndHint} hintTone="warn" />
           </>
         )}
         <View style={{ marginTop: 10 }}>
@@ -462,66 +574,62 @@ export default function EmployeeDetailScreen({ route }: any) {
             <Text style={styles.chevron}>▾</Text>
           </TouchableOpacity>
         </View>
-        <Choice label="Department" options={departmentOptions} value={form.department} onChange={v => set('department')(v ?? '')} allowNone noneLabel="Unassigned" />
-        <Field label="Designation" value={form.designation} onChangeText={set('designation')} />
-        <Choice label="Outlet / branch" options={branches.map(b => ({ label: b.name, value: b.id }))} value={form.branch_id} onChange={v => set('branch_id')(v ?? '')} allowNone noneLabel="Unassigned" />
-        <Field label="Fingerprint / Biometric ID" value={form.fingerprint_id} onChangeText={set('fingerprint_id')} />
-        <DateField label="Date of joining" value={form.date_of_joining} onChange={set('date_of_joining')} />
+        <Choice label="Department" options={departmentOptions} value={form.department} onChange={v => set('department')(v ?? '')} edited={isEdited('department')} allowNone noneLabel="Unassigned" />
+        <Field label="Designation" value={form.designation} onChangeText={set('designation')} edited={isEdited('designation')} />
+        <Choice label="Outlet / branch" options={branches.map(b => ({ label: b.name, value: b.id }))} value={form.branch_id} onChange={v => set('branch_id')(v ?? '')} edited={isEdited('branch_id')} allowNone noneLabel="Unassigned" />
+        <Field label="Fingerprint / Biometric ID" value={form.fingerprint_id} onChangeText={set('fingerprint_id')} edited={isEdited('fingerprint_id')} />
+        <DateField label="Date of joining" value={form.date_of_joining} onChange={set('date_of_joining')} edited={isEdited('date_of_joining')} />
       </CollapsibleCard>
       </View>
 
-      <CollapsibleCard title="Personal">
-        <Choice label="Gender" options={[{ label: 'Female', value: 'female' }, { label: 'Male', value: 'male' }]} value={form.gender} onChange={v => set('gender')(v ?? '')} allowNone />
-        <DateField label="Date of birth" value={form.date_of_birth} onChange={set('date_of_birth')} />
-        <Field label="Nationality" value={form.nationality} onChangeText={set('nationality')} placeholder="Nepali" />
-        <Choice label="Marital status" options={MARITAL_STATUSES.map(m => ({ label: m.label, value: m.value }))} value={form.marital_status} onChange={v => set('marital_status')(v ?? '')} allowNone />
-        <Choice label="Blood group" options={BLOOD_GROUPS.map(b => ({ label: b, value: b }))} value={form.blood_group} onChange={v => set('blood_group')(v ?? '')} allowNone />
-        <Field label="Citizenship no." value={form.citizenship_no} onChangeText={set('citizenship_no')} />
-        <Field label="Citizenship issued district" value={form.citizenship_issued_district} onChangeText={set('citizenship_issued_district')} />
-        <DateField label="Citizenship issue date" value={form.citizenship_issue_date} onChange={set('citizenship_issue_date')} />
+      <CollapsibleCard title="Personal" right={sectionChip('personal')}>
+        <Choice label="Gender" options={[{ label: 'Female', value: 'female' }, { label: 'Male', value: 'male' }]} value={form.gender} onChange={v => set('gender')(v ?? '')} edited={isEdited('gender')} allowNone />
+        <DateField label="Date of birth" value={form.date_of_birth} onChange={set('date_of_birth')} edited={isEdited('date_of_birth')} />
+        <Field label="Nationality" value={form.nationality} onChangeText={set('nationality')} edited={isEdited('nationality')} placeholder="Nepali" />
+        <Choice label="Marital status" options={MARITAL_STATUSES.map(m => ({ label: m.label, value: m.value }))} value={form.marital_status} onChange={v => set('marital_status')(v ?? '')} edited={isEdited('marital_status')} allowNone />
+        <Choice label="Blood group" options={BLOOD_GROUPS.map(b => ({ label: b, value: b }))} value={form.blood_group} onChange={v => set('blood_group')(v ?? '')} edited={isEdited('blood_group')} tone="danger" allowNone />
+        <Field label="Citizenship no." value={form.citizenship_no} onChangeText={set('citizenship_no')} edited={isEdited('citizenship_no')} />
+        <Field label="Citizenship issued district" value={form.citizenship_issued_district} onChangeText={set('citizenship_issued_district')} edited={isEdited('citizenship_issued_district')} />
+        <DateField label="Citizenship issue date" value={form.citizenship_issue_date} onChange={set('citizenship_issue_date')} edited={isEdited('citizenship_issue_date')} />
       </CollapsibleCard>
 
-      <CollapsibleCard title="Contact">
-        <Field label="Phone (personal)" value={form.phone} onChangeText={set('phone')} keyboardType="phone-pad" />
-        <Field label="Phone (official)" value={form.official_phone} onChangeText={set('official_phone')} keyboardType="phone-pad" />
-        <Field label="Email (official)" value={form.email} onChangeText={set('email')} keyboardType="email-address" hint="Also the email this person's login is linked to." />
-        <Field label="Email (personal)" value={form.personal_email} onChangeText={set('personal_email')} keyboardType="email-address" />
+      <CollapsibleCard title="Contact" right={sectionChip('contact')}>
+        <Field label="Phone (personal)" value={form.phone} onChangeText={set('phone')} edited={isEdited('phone')} keyboardType="phone-pad" />
+        <Field label="Phone (official)" value={form.official_phone} onChangeText={set('official_phone')} edited={isEdited('official_phone')} keyboardType="phone-pad" />
+        <Field label="Email (official)" value={form.email} onChangeText={set('email')} edited={isEdited('email')} keyboardType="email-address" hint="Also the email this person's login is linked to." />
+        <Field label="Email (personal)" value={form.personal_email} onChangeText={set('personal_email')} edited={isEdited('personal_email')} keyboardType="email-address" />
       </CollapsibleCard>
 
-      <CollapsibleCard title="Address">
+      <CollapsibleCard title="Address" right={sectionChip('address')}>
         <SubHeading title="Permanent address" />
-        <AddressFields kind="permanent" form={form} set={set} />
+        <AddressFields kind="permanent" form={form} set={set} isEdited={isEdited} />
         <SubHeading title="Temporary address" action={<LinkText label="Same as permanent" onPress={copyPermanentToTemporary} />} />
-        <AddressFields kind="temporary" form={form} set={set} />
+        <AddressFields kind="temporary" form={form} set={set} isEdited={isEdited} />
         <SubHeading title="Other address note" />
-        <Field label="Note" value={form.address} onChangeText={set('address')} multiline placeholder="Anything that doesn't fit above (landmark, current rented room…)" />
+        <Field label="Note" value={form.address} onChangeText={set('address')} edited={isEdited('address')} multiline placeholder="Anything that doesn't fit above (landmark, current rented room…)" />
       </CollapsibleCard>
 
-      <CollapsibleCard title="Family & emergency contact">
-        <Field label="Father's name" value={form.father_name} onChangeText={set('father_name')} />
-        <Field label="Mother's name" value={form.mother_name} onChangeText={set('mother_name')} />
-        <Field label="Grandfather's name" value={form.grandfather_name} onChangeText={set('grandfather_name')} />
-        <Field label="Spouse's name" value={form.spouse_name} onChangeText={set('spouse_name')} />
+      <CollapsibleCard title="Family & emergency contact" right={sectionChip('family')}>
+        <Field label="Father's name" value={form.father_name} onChangeText={set('father_name')} edited={isEdited('father_name')} />
+        <Field label="Mother's name" value={form.mother_name} onChangeText={set('mother_name')} edited={isEdited('mother_name')} />
+        <Field label="Grandfather's name" value={form.grandfather_name} onChangeText={set('grandfather_name')} edited={isEdited('grandfather_name')} />
+        <Field label="Spouse's name" value={form.spouse_name} onChangeText={set('spouse_name')} edited={isEdited('spouse_name')} />
         <SubHeading title="Emergency contact" />
-        <Field label="Name" value={form.emergency_contact_name} onChangeText={set('emergency_contact_name')} />
-        <Field label="Relationship" value={form.emergency_contact_relationship} onChangeText={set('emergency_contact_relationship')} />
-        <Field label="Mobile no." value={form.emergency_contact_phone} onChangeText={set('emergency_contact_phone')} keyboardType="phone-pad" />
-        <Field label="Address" value={form.emergency_contact_address} onChangeText={set('emergency_contact_address')} />
+        <Field label="Name" value={form.emergency_contact_name} onChangeText={set('emergency_contact_name')} edited={isEdited('emergency_contact_name')} />
+        <Field label="Relationship" value={form.emergency_contact_relationship} onChangeText={set('emergency_contact_relationship')} edited={isEdited('emergency_contact_relationship')} />
+        <Field label="Mobile no." value={form.emergency_contact_phone} onChangeText={set('emergency_contact_phone')} edited={isEdited('emergency_contact_phone')} keyboardType="phone-pad" />
+        <Field label="Address" value={form.emergency_contact_address} onChangeText={set('emergency_contact_address')} edited={isEdited('emergency_contact_address')} />
       </CollapsibleCard>
 
-      <CollapsibleCard title="Pay & statutory">
-        <Field label="Salary" value={form.salary} onChangeText={set('salary')} keyboardType="numeric" />
-        <Field label="Allowance" value={form.allowance} onChangeText={set('allowance')} keyboardType="numeric" />
-        <Field label="PAN No." value={form.pan_no} onChangeText={set('pan_no')} />
-        <Field label="SSF No." value={form.ssf_no} onChangeText={set('ssf_no')} />
+      <CollapsibleCard title="Pay & statutory" right={sectionChip('pay')}>
+        <Field label="Salary" value={form.salary} onChangeText={set('salary')} edited={isEdited('salary')} keyboardType="numeric" />
+        <Field label="Allowance" value={form.allowance} onChangeText={set('allowance')} edited={isEdited('allowance')} keyboardType="numeric" />
+        <Field label="PAN No." value={form.pan_no} onChangeText={set('pan_no')} edited={isEdited('pan_no')} />
+        <Field label="SSF No." value={form.ssf_no} onChangeText={set('ssf_no')} edited={isEdited('ssf_no')} />
       </CollapsibleCard>
 
       {error && <Notice tone="error">{error}</Notice>}
       {saved && !dirty && <Notice tone="ok">Saved.</Notice>}
-      <View style={styles.saveRow}>
-        <Button label={saving ? 'Saving…' : 'Save changes'} onPress={handleSave} disabled={saving || !dirty} />
-        {dirty && <Button label="Discard changes" tone="ghost" onPress={() => { setForm(baseline); setError(null); }} disabled={saving} />}
-      </View>
 
       </View>
 
@@ -573,6 +681,21 @@ export default function EmployeeDetailScreen({ route }: any) {
         {managerChoices.length > 60 && <Text style={styles.hint}>Showing the first 60 — type to narrow it down.</Text>}
       </Sheet>
     </ScrollView>
+      {(dirty || saving) && (
+        <View style={styles.saveBar}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.saveBarTitle}>
+              {editedKeys.length} unsaved change{editedKeys.length === 1 ? '' : 's'}
+            </Text>
+            <Text style={[styles.saveBarSub, !!error && { color: colors.criticalText }]} numberOfLines={1}>
+              {error ?? editedLabels.slice(0, 3).join(', ') + (editedLabels.length > 3 ? ` and ${editedLabels.length - 3} more` : '')}
+            </Text>
+          </View>
+          <Button label="Discard" tone="ghost" onPress={handleDiscard} disabled={saving} />
+          <Button label={saving ? 'Saving…' : 'Save changes'} onPress={handleSave} disabled={saving || !dirty} />
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -601,18 +724,32 @@ function PersonRow({ label, active, onPress }: { label: string; active: boolean;
   );
 }
 
-function AddressFields({ kind, form, set }: { kind: 'permanent' | 'temporary'; form: FormState; set: (key: FormKey) => (value: string) => void }) {
+function AddressFields({
+  kind,
+  form,
+  set,
+  isEdited,
+}: {
+  kind: 'permanent' | 'temporary';
+  form: FormState;
+  set: (key: FormKey) => (value: string) => void;
+  isEdited: (key: FormKey) => boolean;
+}) {
   const provinceKey = `${kind}_province` as FormKey;
   const province = form[provinceKey];
   const options: { label: string; value: string }[] = NEPAL_PROVINCES.map(p => ({ label: p, value: p }));
   if (province && !(NEPAL_PROVINCES as readonly string[]).includes(province)) options.unshift({ label: province, value: province });
+  const district = `${kind}_district` as FormKey;
+  const municipality = `${kind}_municipality` as FormKey;
+  const ward = `${kind}_ward` as FormKey;
+  const tole = `${kind}_tole` as FormKey;
   return (
     <>
-      <Choice label="Province" options={options} value={province} onChange={v => set(provinceKey)(v ?? '')} allowNone />
-      <Field label="District" value={form[`${kind}_district` as FormKey]} onChangeText={set(`${kind}_district` as FormKey)} />
-      <Field label="Municipality" value={form[`${kind}_municipality` as FormKey]} onChangeText={set(`${kind}_municipality` as FormKey)} />
-      <Field label="Ward no." value={form[`${kind}_ward` as FormKey]} onChangeText={set(`${kind}_ward` as FormKey)} keyboardType="number-pad" />
-      <Field label="Tole" value={form[`${kind}_tole` as FormKey]} onChangeText={set(`${kind}_tole` as FormKey)} />
+      <Choice label="Province" options={options} value={province} onChange={v => set(provinceKey)(v ?? '')} allowNone edited={isEdited(provinceKey)} />
+      <Field label="District" value={form[district]} onChangeText={set(district)} edited={isEdited(district)} />
+      <Field label="Municipality" value={form[municipality]} onChangeText={set(municipality)} edited={isEdited(municipality)} />
+      <Field label="Ward no." value={form[ward]} onChangeText={set(ward)} keyboardType="number-pad" edited={isEdited(ward)} />
+      <Field label="Tole" value={form[tole]} onChangeText={set(tole)} edited={isEdited(tole)} />
     </>
   );
 }
@@ -623,6 +760,9 @@ const styles = StyleSheet.create({
   warn: { color: colors.warningText, fontSize: 13, textAlign: 'center', padding: 24 },
   headerCard: { backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, padding: 14, marginBottom: 12 },
   hidden: { display: 'none' },
+  saveBar: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.white, borderTopWidth: 1, borderTopColor: colors.slate200 },
+  saveBarTitle: { fontSize: 13, fontWeight: '800', color: colors.warningText },
+  saveBarSub: { fontSize: 11, fontWeight: '600', color: colors.slate500, marginTop: 1 },
   photoBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', alignItems: 'center', justifyContent: 'center', padding: 20 },
   photoLarge: { width: '100%', aspectRatio: 1, maxHeight: '70%', borderRadius: 16, backgroundColor: colors.white },
   photoName: { color: colors.white, fontSize: 16, fontWeight: '800', marginTop: 16 },

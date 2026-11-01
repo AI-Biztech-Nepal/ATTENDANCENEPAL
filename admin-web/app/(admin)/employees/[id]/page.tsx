@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
@@ -26,6 +26,7 @@ import {
   type AttentionItem,
   type ProfileTab,
 } from '@/components/profile/ProfileParts';
+import { EditActionBar, EditSectionNav, type NavSection } from '@/components/profile/EditParts';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -106,6 +107,106 @@ type CoreForm = Record<CoreKey, string>;
 
 const EMPTY_CORE_FORM = Object.fromEntries(CORE_KEYS.map(k => [k, ''])) as CoreForm;
 
+// Human names for every field, so the unsaved-changes bar can say what was touched.
+const FIELD_LABELS: Record<CoreKey, string> = {
+  name: 'Full name',
+  username: 'Username',
+  email: 'Email (official)',
+  phone: 'Phone (personal)',
+  gender: 'Gender',
+  department: 'Department',
+  designation: 'Designation',
+  branch_id: 'Outlet / branch',
+  date_of_joining: 'Date of joining',
+  address: 'Other address note',
+  emergency_contact_name: 'Emergency contact name',
+  emergency_contact_relationship: 'Emergency contact relationship',
+  emergency_contact_phone: 'Emergency contact mobile',
+  pan_no: 'PAN No.',
+  ssf_no: 'SSF No.',
+  allowance: 'Allowance',
+  employment_type: 'Employment type',
+  employment_status: 'Employment status',
+  contract_start: 'Contract start date',
+  contract_end: 'Contract end date',
+  reporting_to: 'Reporting to',
+  official_phone: 'Phone (official)',
+  personal_email: 'Email (personal)',
+  date_of_birth: 'Date of birth',
+  nationality: 'Nationality',
+  marital_status: 'Marital status',
+  blood_group: 'Blood group',
+  citizenship_no: 'Citizenship no.',
+  citizenship_issued_district: 'Citizenship issued district',
+  citizenship_issue_date: 'Citizenship issue date',
+  permanent_province: 'Permanent province',
+  permanent_district: 'Permanent district',
+  permanent_municipality: 'Permanent municipality',
+  permanent_ward: 'Permanent ward',
+  permanent_tole: 'Permanent tole',
+  temporary_province: 'Temporary province',
+  temporary_district: 'Temporary district',
+  temporary_municipality: 'Temporary municipality',
+  temporary_ward: 'Temporary ward',
+  temporary_tole: 'Temporary tole',
+  father_name: "Father's name",
+  mother_name: "Mother's name",
+  grandfather_name: "Grandfather's name",
+  spouse_name: "Spouse's name",
+  emergency_contact_address: 'Emergency contact address',
+};
+
+// The sections of the edit form, in order, for the list beside it.
+const SECTIONS = [
+  { id: 'employment', label: 'Employment' },
+  { id: 'personal', label: 'Personal' },
+  { id: 'contact', label: 'Contact' },
+  { id: 'address', label: 'Address' },
+  { id: 'family', label: 'Family' },
+  { id: 'emergency', label: 'Emergency' },
+  { id: 'payroll', label: 'Payroll' },
+] as const;
+type SectionId = (typeof SECTIONS)[number]['id'];
+
+// Every field in a section (to count what was edited) and the ones worth having filled in
+// (to say what is missing). Family and payroll have nothing required.
+const SECTION_FIELDS: Record<SectionId, CoreKey[]> = {
+  employment: ['name', 'username', 'employment_type', 'employment_status', 'contract_start', 'contract_end', 'reporting_to', 'department', 'designation', 'branch_id', 'date_of_joining'],
+  personal: ['gender', 'date_of_birth', 'nationality', 'marital_status', 'blood_group', 'citizenship_no', 'citizenship_issued_district', 'citizenship_issue_date'],
+  contact: ['phone', 'official_phone', 'email', 'personal_email'],
+  address: [
+    'permanent_province',
+    'permanent_district',
+    'permanent_municipality',
+    'permanent_ward',
+    'permanent_tole',
+    'temporary_province',
+    'temporary_district',
+    'temporary_municipality',
+    'temporary_ward',
+    'temporary_tole',
+    'address',
+  ],
+  family: ['father_name', 'mother_name', 'grandfather_name', 'spouse_name'],
+  emergency: ['emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone', 'emergency_contact_address'],
+  payroll: ['pan_no', 'ssf_no', 'allowance'],
+};
+const SECTION_REQUIRED: Record<SectionId, CoreKey[]> = {
+  employment: ['name', 'employment_type', 'department', 'designation', 'branch_id', 'date_of_joining'],
+  personal: ['gender', 'date_of_birth', 'nationality', 'marital_status', 'blood_group'],
+  contact: ['phone', 'email'],
+  address: ['permanent_province', 'permanent_district', 'permanent_municipality', 'permanent_ward', 'permanent_tole'],
+  family: [],
+  emergency: ['emergency_contact_name', 'emergency_contact_phone'],
+  payroll: [],
+};
+
+/** True when a temporary address has been filled in and is identical to the permanent one. */
+function addressesMatch(f: CoreForm) {
+  const parts = ['province', 'district', 'municipality', 'ward', 'tole'] as const;
+  return parts.some(p => f[`permanent_${p}`]) && parts.every(p => f[`permanent_${p}`] === f[`temporary_${p}`]);
+}
+
 function formFromEmployee(row: Record<string, unknown>): CoreForm {
   const form = { ...EMPTY_CORE_FORM };
   for (const key of CORE_KEYS) {
@@ -155,6 +256,9 @@ export default function EmployeeCvPage() {
   const [editingCore, setEditingCore] = useState(false);
   const [coreForm, setCoreForm] = useState<CoreForm>(EMPTY_CORE_FORM);
   const [savingCore, setSavingCore] = useState(false);
+  // "Same as permanent address" is ticked, and which section of the edit form is on screen.
+  const [sameAddress, setSameAddress] = useState(false);
+  const [activeSection, setActiveSection] = useState('employment');
 
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -199,6 +303,7 @@ export default function EmployeeCvPage() {
           // it hasn't been run yet, so the page degrades instead of crashing.
           setEmployee({ ...data, skills: data.skills ?? [] });
           setCoreForm(formFromEmployee(data));
+          setSameAddress(addressesMatch(formFromEmployee(data)));
           if (data.branch_id) {
             supabase
               .from('branches')
@@ -284,6 +389,92 @@ export default function EmployeeCvPage() {
   }, [employeeId, tab, historyVersion]);
 
   const setField = (key: CoreKey) => (value: string) => setCoreForm(f => ({ ...f, [key]: value }));
+
+  // What has been changed so far, compared with what is saved — drives the "Edited" marks, the
+  // unsaved-changes bar and the section list beside the form.
+  const original = useMemo(() => (employee ? formFromEmployee(employee as unknown as Record<string, unknown>) : EMPTY_CORE_FORM), [employee]);
+  const isEdited = (key: CoreKey) => coreForm[key] !== original[key];
+  const editedKeys = CORE_KEYS.filter(isEdited);
+  const editedLabels = editedKeys.map(k => FIELD_LABELS[k]);
+
+  // While "Same as permanent address" is ticked, the temporary address follows the permanent one.
+  const setPermanentField = (key: CoreKey) => (value: string) =>
+    setCoreForm(f => {
+      const next = { ...f, [key]: value };
+      if (sameAddress) next[key.replace('permanent_', 'temporary_') as CoreKey] = value;
+      return next;
+    });
+  function toggleSameAddress(on: boolean) {
+    setSameAddress(on);
+    if (on) copyPermanentToTemporary();
+  }
+
+  // After clicking a section, keep that one marked while the page scrolls to it (a section near the
+  // bottom can't reach the top, so the "which section is on screen" watcher would pick another).
+  const jumpLock = useRef(0);
+  function jumpTo(id: string) {
+    jumpLock.current = Date.now() + 1500;
+    setActiveSection(id);
+    document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  async function handleDiscard() {
+    if (editedKeys.length > 0 && !(await confirm('Discard your unsaved changes?', { title: 'Discard changes?', confirmLabel: 'Discard', tone: 'danger' }))) return;
+    setEditingCore(false);
+    reload();
+  }
+
+  // Leaving the page with unsaved changes asks first.
+  useEffect(() => {
+    if (!editingCore || editedKeys.length === 0) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [editingCore, editedKeys.length]);
+
+  // The section list follows whichever section is on screen.
+  useEffect(() => {
+    if (!editingCore || typeof IntersectionObserver === 'undefined') return;
+    const els = SECTIONS.map(s => document.getElementById(`section-${s.id}`)).filter((el): el is HTMLElement => !!el);
+    if (els.length === 0) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        if (Date.now() < jumpLock.current) return;
+        const first = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (first) setActiveSection(first.target.id.replace('section-', ''));
+      },
+      { rootMargin: '-15% 0px -50% 0px' }
+    );
+    els.forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, [editingCore]);
+
+  const navSections: NavSection[] = SECTIONS.map(({ id, label }) => {
+    const edited = SECTION_FIELDS[id].filter(isEdited).length;
+    let missing = SECTION_REQUIRED[id].filter(k => !coreForm[k].trim()).length;
+    if (id === 'employment' && coreForm.employment_type === 'contract' && !coreForm.contract_end) missing += 1;
+    const hasRequired = SECTION_REQUIRED[id].length > 0;
+    return {
+      id,
+      label,
+      state: missing > 0 ? 'todo' : 'done',
+      note: missing > 0 ? `${missing} missing` : edited > 0 ? `${edited} edited` : hasRequired ? 'Complete' : 'Optional',
+    };
+  });
+
+  // A nudge under the contract end date when it is close, or already past.
+  const contractEndHint = (() => {
+    if (coreForm.employment_type !== 'contract' || !coreForm.contract_end) return undefined;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(coreForm.contract_end);
+    if (!m) return undefined;
+    const days = Math.round((new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() - startOfToday().getTime()) / 86400000);
+    if (days < 0) return `Ended ${-days} day${days === -1 ? '' : 's'} ago — set a later date to renew.`;
+    if (days <= 31) return `${days === 0 ? 'Ends today' : `Ends in ${days} day${days === 1 ? '' : 's'}`} — set a later date to renew.`;
+    return undefined;
+  })();
 
   function copyPermanentToTemporary() {
     setCoreForm(f => ({
@@ -890,222 +1081,191 @@ export default function EmployeeCvPage() {
       </section>
 
       {editingCore ? (
-        <form onSubmit={handleSaveCore} className="mb-5 rounded-xl border border-slate-200 bg-white p-6">
-          <div className="mb-4 flex items-center gap-4">
-            <button
-              type="button"
-              onClick={openPhotoPicker}
-              title={employee.profile_photo_url ? 'Change photo' : 'Add photo'}
-              className={`relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full text-2xl font-semibold text-accent ${
-                employee.profile_photo_url ? 'bg-accent/10' : 'border-2 border-dashed border-accent/40 bg-accent/5 hover:bg-accent/10'
-              }`}
-            >
-              {uploadingPhoto ? (
-                <span className="text-sm">…</span>
-              ) : employee.profile_photo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
-              ) : (
-                <CameraIcon className="h-7 w-7" />
-              )}
-            </button>
-            <div>
-              <button type="button" onClick={openPhotoPicker} className="text-xs font-medium text-accent hover:underline">
-                {employee.profile_photo_url ? 'Change photo' : '+ Add photo'}
-              </button>
-              <div className="mt-2 flex gap-4 text-xs text-slate-400">
-                <span>Code: {employee.employee_code}</span>
-                <span>Biometric ID: {employee.fingerprint_id ?? '—'}</span>
-              </div>
+        <form onSubmit={handleSaveCore} className="mb-5">
+          <EditActionBar
+            position="top"
+            name={employee.name}
+            photoUrl={employee.profile_photo_url}
+            changed={editedKeys.length}
+            changedLabels={editedLabels}
+            saving={savingCore}
+            onDiscard={handleDiscard}
+          />
+
+          <div className="flex flex-wrap items-start gap-5">
+            <EditSectionNav sections={navSections} active={activeSection} onJump={jumpTo} />
+
+            <div className="flex min-w-0 flex-[1_1_640px] flex-col gap-5">
+              <FormSection id="employment" title="Employment" hint="Where they work and under what terms.">
+                <TextField label="Full name" required value={coreForm.name} onChange={setField('name')} edited={isEdited('name')} />
+                <TextField label="Username" value={coreForm.username} onChange={setField('username')} edited={isEdited('username')} hint="Used to sign in on the phone app" />
+                <SegmentField
+                  label="Employment type"
+                  value={coreForm.employment_type}
+                  onChange={setField('employment_type')} edited={isEdited('employment_type')}
+                  options={EMPLOYMENT_TYPES.map(t => ({ value: t.value, label: t.label }))}
+                />
+                {employee.status === 'active' ? (
+                  <SegmentField
+                    label="Employment status"
+                    value={coreForm.employment_status}
+                    onChange={setField('employment_status')} edited={isEdited('employment_status')}
+                    clearable={false}
+                    options={WORKING_STATUSES.map(s => ({ value: s, label: EMPLOYMENT_STATUS_LABEL[s] }))}
+                  />
+                ) : (
+                  <div>
+                    <span className="mb-1.5 block text-xs font-extrabold text-slate-700">Employment status</span>
+                    <p className="py-2 text-sm font-semibold text-ink">{EMPLOYMENT_STATUS_LABEL[status]}</p>
+                    <p className="text-xs font-semibold text-slate-500">Restore the employee from the directory to change this.</p>
+                  </div>
+                )}
+                {coreForm.employment_type === 'contract' && (
+                  <>
+                    <DateField label="Contract start date" value={coreForm.contract_start} onChange={setField('contract_start')} edited={isEdited('contract_start')} />
+                    <DateField label="Contract end date" value={coreForm.contract_end} onChange={setField('contract_end')} edited={isEdited('contract_end')} hint={contractEndHint} hintTone="warn" />
+                  </>
+                )}
+                <SelectField label="Reporting to" value={coreForm.reporting_to} onChange={setField('reporting_to')} edited={isEdited('reporting_to')}>
+                  <option value="">No one</option>
+                  {managerChoices.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.employee_code})
+                    </option>
+                  ))}
+                </SelectField>
+                <SelectField label="Department" value={coreForm.department} onChange={setField('department')} edited={isEdited('department')}>
+                  <option value="">Unassigned</option>
+                  {coreForm.department && !departmentOptions.some(d => d.name === coreForm.department) && (
+                    <option value={coreForm.department}>{coreForm.department}</option>
+                  )}
+                  {departmentOptions.map(d => (
+                    <option key={d.id} value={d.name}>
+                      {d.name}
+                    </option>
+                  ))}
+                </SelectField>
+                <TextField label="Designation" value={coreForm.designation} onChange={setField('designation')} edited={isEdited('designation')} />
+                <SelectField label="Outlet / branch" value={coreForm.branch_id} onChange={setField('branch_id')} edited={isEdited('branch_id')}>
+                  <option value="">Unassigned</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </SelectField>
+                <DateField label="Date of joining" value={coreForm.date_of_joining} onChange={setField('date_of_joining')} edited={isEdited('date_of_joining')} />
+                <TextField label="Biometric ID" value={employee.fingerprint_id ?? ''} onChange={() => {}} readOnly hint="Set by the fingerprint device" />
+              </FormSection>
+
+              <FormSection id="personal" title="Personal" hint="Identity details used on the CV and for government records.">
+                <SegmentField
+                  label="Gender"
+                  value={coreForm.gender}
+                  onChange={setField('gender')} edited={isEdited('gender')}
+                  options={[
+                    { value: 'female', label: 'Female' },
+                    { value: 'male', label: 'Male' },
+                  ]}
+                />
+                <DateField label="Date of birth" value={coreForm.date_of_birth} onChange={setField('date_of_birth')} edited={isEdited('date_of_birth')} />
+                <TextField label="Nationality" placeholder="Nepali" value={coreForm.nationality} onChange={setField('nationality')} edited={isEdited('nationality')} />
+                <SegmentField
+                  label="Marital status"
+                  value={coreForm.marital_status}
+                  onChange={setField('marital_status')} edited={isEdited('marital_status')}
+                  options={MARITAL_STATUSES.map(m => ({ value: m.value, label: m.label }))}
+                />
+                <SegmentField
+                  wide
+                  tone="danger"
+                  label="Blood group"
+                  value={coreForm.blood_group}
+                  onChange={setField('blood_group')} edited={isEdited('blood_group')}
+                  options={BLOOD_GROUPS.map(b => ({ value: b, label: b }))}
+                />
+                <TextField label="Citizenship no." value={coreForm.citizenship_no} onChange={setField('citizenship_no')} edited={isEdited('citizenship_no')} />
+                <TextField
+                  label="Citizenship issued district"
+                  value={coreForm.citizenship_issued_district}
+                  onChange={setField('citizenship_issued_district')} edited={isEdited('citizenship_issued_district')}
+                />
+                <DateField label="Citizenship issue date" value={coreForm.citizenship_issue_date} onChange={setField('citizenship_issue_date')} edited={isEdited('citizenship_issue_date')} />
+              </FormSection>
+
+              <FormSection id="contact" title="Contact">
+                <TextField label="Phone (personal)" value={coreForm.phone} onChange={setField('phone')} edited={isEdited('phone')} />
+                <TextField label="Phone (official)" value={coreForm.official_phone} onChange={setField('official_phone')} edited={isEdited('official_phone')} />
+                <TextField
+                  label="Email (official)"
+                  type="email"
+                  value={coreForm.email}
+                  onChange={setField('email')} edited={isEdited('email')}
+                  hint="Also the email this person signs in with"
+                />
+                <TextField label="Email (personal)" type="email" value={coreForm.personal_email} onChange={setField('personal_email')} edited={isEdited('personal_email')} />
+              </FormSection>
+
+              <FormSection id="address" title="Address">
+                <h3 className="col-span-full -mb-2 text-[13px] font-extrabold tracking-wide text-slate-500">PERMANENT ADDRESS</h3>
+                <AddressFields kind="permanent" form={coreForm} setField={setPermanentField} isEdited={isEdited} />
+
+                <h3 className="col-span-full -mb-2 mt-2 text-[13px] font-extrabold tracking-wide text-slate-500">TEMPORARY ADDRESS</h3>
+                <label className="col-span-full flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3">
+                  <input type="checkbox" checked={sameAddress} onChange={e => toggleSameAddress(e.target.checked)} className="h-5 w-5 accent-[#047857]" />
+                  <span className="text-sm font-bold text-ink">Same as permanent address</span>
+                  {sameAddress && <span className="ml-auto min-w-0 truncate text-[13px] font-semibold text-slate-500">{formatAddress(coreForm, 'permanent')}</span>}
+                </label>
+                {!sameAddress && <AddressFields kind="temporary" form={coreForm} setField={setField} isEdited={isEdited} />}
+
+                <h3 className="col-span-full -mb-2 mt-2 text-[13px] font-extrabold tracking-wide text-slate-500">OTHER NOTE</h3>
+                <label className="col-span-full block">
+                  <span className="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold text-slate-700">Note{isEdited('address') && <EditedTag />}</span>
+                  <textarea
+                    value={coreForm.address}
+                    onChange={e => setField('address')(e.target.value)}
+                    rows={2}
+                    placeholder="Anything that doesn't fit above (landmark, current rented room…)"
+                    className={`${FIELD_BORDER} min-h-[72px] w-full py-2.5 ${isEdited('address') ? FIELD_EDITED : ''}`}
+                  />
+                </label>
+              </FormSection>
+
+              <FormSection id="family" title="Family">
+                <TextField label="Father's name" value={coreForm.father_name} onChange={setField('father_name')} edited={isEdited('father_name')} />
+                <TextField label="Mother's name" value={coreForm.mother_name} onChange={setField('mother_name')} edited={isEdited('mother_name')} />
+                <TextField label="Grandfather's name" value={coreForm.grandfather_name} onChange={setField('grandfather_name')} edited={isEdited('grandfather_name')} />
+                <TextField label="Spouse's name" value={coreForm.spouse_name} onChange={setField('spouse_name')} edited={isEdited('spouse_name')} />
+              </FormSection>
+
+              <FormSection id="emergency" title="Emergency contact" hint="Who to call first. Shown on the profile next to the blood group." tone="danger">
+                <TextField label="Name" value={coreForm.emergency_contact_name} onChange={setField('emergency_contact_name')} edited={isEdited('emergency_contact_name')} />
+                <TextField label="Relationship" value={coreForm.emergency_contact_relationship} onChange={setField('emergency_contact_relationship')} edited={isEdited('emergency_contact_relationship')} />
+                <TextField label="Mobile no." value={coreForm.emergency_contact_phone} onChange={setField('emergency_contact_phone')} edited={isEdited('emergency_contact_phone')} />
+                <TextField label="Address" value={coreForm.emergency_contact_address} onChange={setField('emergency_contact_address')} edited={isEdited('emergency_contact_address')} />
+              </FormSection>
+
+              <FormSection
+                id="payroll"
+                title="Payroll & statutory"
+                hint="Basic salary is set on the Payroll page. PF / SSF / TDS rates are company-wide (Payroll › Salary Structure)."
+              >
+                <TextField label="PAN No." value={coreForm.pan_no} onChange={setField('pan_no')} edited={isEdited('pan_no')} />
+                <TextField label="SSF No." value={coreForm.ssf_no} onChange={setField('ssf_no')} edited={isEdited('ssf_no')} />
+                <TextField label="Allowance" type="number" min="0" step="0.01" value={coreForm.allowance} onChange={setField('allowance')} edited={isEdited('allowance')} />
+              </FormSection>
             </div>
           </div>
 
-          <div className="mb-1 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-ink">Details</h2>
-            <button
-              type="button"
-              onClick={() => {
-                setEditingCore(false);
-                reload();
-              }}
-              className="text-xs font-medium text-slate-500 hover:underline"
-            >
-              Cancel
-            </button>
-          </div>
-
-          <FormSection title="Employment" first>
-            <TextField label="Full name" required value={coreForm.name} onChange={setField('name')} />
-            <TextField label="Username" value={coreForm.username} onChange={setField('username')} />
-            <SelectField label="Employment type" value={coreForm.employment_type} onChange={setField('employment_type')}>
-              <option value="">Not set</option>
-              {EMPLOYMENT_TYPES.map(t => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </SelectField>
-            {employee.status === 'active' ? (
-              <SelectField label="Employment status" value={coreForm.employment_status} onChange={setField('employment_status')}>
-                {WORKING_STATUSES.map(s => (
-                  <option key={s} value={s}>
-                    {EMPLOYMENT_STATUS_LABEL[s]}
-                  </option>
-                ))}
-              </SelectField>
-            ) : (
-              <div>
-                <span className="mb-1 block text-xs font-medium text-slate-600">Employment status</span>
-                <p className="py-2 text-sm text-ink">{EMPLOYMENT_STATUS_LABEL[status]}</p>
-                <p className="text-xs text-slate-400">Restore the employee from the directory to change this.</p>
-              </div>
-            )}
-            {coreForm.employment_type === 'contract' && (
-              <>
-                <DateField label="Contract start date" value={coreForm.contract_start} onChange={setField('contract_start')} />
-                <DateField label="Contract end date" value={coreForm.contract_end} onChange={setField('contract_end')} />
-              </>
-            )}
-            <SelectField label="Reporting to" value={coreForm.reporting_to} onChange={setField('reporting_to')}>
-              <option value="">No one</option>
-              {managerChoices.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.employee_code})
-                </option>
-              ))}
-            </SelectField>
-            <SelectField label="Department" value={coreForm.department} onChange={setField('department')}>
-              <option value="">Unassigned</option>
-              {coreForm.department && !departmentOptions.some(d => d.name === coreForm.department) && (
-                <option value={coreForm.department}>{coreForm.department}</option>
-              )}
-              {departmentOptions.map(d => (
-                <option key={d.id} value={d.name}>
-                  {d.name}
-                </option>
-              ))}
-            </SelectField>
-            <TextField label="Designation" value={coreForm.designation} onChange={setField('designation')} />
-            <SelectField label="Outlet / branch" value={coreForm.branch_id} onChange={setField('branch_id')}>
-              <option value="">Unassigned</option>
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </SelectField>
-            <DateField label="Date of joining" value={coreForm.date_of_joining} onChange={setField('date_of_joining')} />
-          </FormSection>
-
-          <FormSection title="Personal">
-            <SelectField label="Gender" value={coreForm.gender} onChange={setField('gender')}>
-              <option value="">Not set</option>
-              <option value="female">Female</option>
-              <option value="male">Male</option>
-            </SelectField>
-            <DateField label="Date of birth" value={coreForm.date_of_birth} onChange={setField('date_of_birth')} />
-            <TextField label="Nationality" placeholder="Nepali" value={coreForm.nationality} onChange={setField('nationality')} />
-            <SelectField label="Marital status" value={coreForm.marital_status} onChange={setField('marital_status')}>
-              <option value="">Not set</option>
-              {MARITAL_STATUSES.map(m => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </SelectField>
-            <SelectField label="Blood group" value={coreForm.blood_group} onChange={setField('blood_group')}>
-              <option value="">Not set</option>
-              {BLOOD_GROUPS.map(b => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </SelectField>
-            <TextField label="Citizenship no." value={coreForm.citizenship_no} onChange={setField('citizenship_no')} />
-            <TextField
-              label="Citizenship issued district"
-              value={coreForm.citizenship_issued_district}
-              onChange={setField('citizenship_issued_district')}
-            />
-            <DateField label="Citizenship issue date" value={coreForm.citizenship_issue_date} onChange={setField('citizenship_issue_date')} />
-          </FormSection>
-
-          <FormSection title="Contact">
-            <TextField label="Phone (personal)" value={coreForm.phone} onChange={setField('phone')} />
-            <TextField label="Phone (official)" value={coreForm.official_phone} onChange={setField('official_phone')} />
-            <TextField
-              label="Email (official)"
-              type="email"
-              value={coreForm.email}
-              onChange={setField('email')}
-              hint="Also the email this person's login is linked to."
-            />
-            <TextField label="Email (personal)" type="email" value={coreForm.personal_email} onChange={setField('personal_email')} />
-          </FormSection>
-
-          <FormSection title="Permanent address" cols={3}>
-            <AddressFields kind="permanent" form={coreForm} setField={setField} />
-          </FormSection>
-
-          <FormSection
-            title="Temporary address"
-            cols={3}
-            action={
-              <button type="button" onClick={copyPermanentToTemporary} className="text-xs font-medium text-accent hover:underline">
-                Same as permanent
-              </button>
-            }
-          >
-            <AddressFields kind="temporary" form={coreForm} setField={setField} />
-          </FormSection>
-
-          <FormSection title="Other address note" cols={1}>
-            <div>
-              <textarea
-                value={coreForm.address}
-                onChange={e => setField('address')(e.target.value)}
-                rows={2}
-                placeholder="Anything that doesn't fit above (landmark, current rented room…)"
-                className={INPUT_CLASS}
-              />
-            </div>
-          </FormSection>
-
-          <FormSection title="Family">
-            <TextField label="Father's name" value={coreForm.father_name} onChange={setField('father_name')} />
-            <TextField label="Mother's name" value={coreForm.mother_name} onChange={setField('mother_name')} />
-            <TextField label="Grandfather's name" value={coreForm.grandfather_name} onChange={setField('grandfather_name')} />
-            <TextField label="Spouse's name" value={coreForm.spouse_name} onChange={setField('spouse_name')} />
-          </FormSection>
-
-          <FormSection title="Emergency contact">
-            <TextField label="Name" value={coreForm.emergency_contact_name} onChange={setField('emergency_contact_name')} />
-            <TextField
-              label="Relationship"
-              value={coreForm.emergency_contact_relationship}
-              onChange={setField('emergency_contact_relationship')}
-            />
-            <TextField label="Mobile no." value={coreForm.emergency_contact_phone} onChange={setField('emergency_contact_phone')} />
-            <TextField label="Address" value={coreForm.emergency_contact_address} onChange={setField('emergency_contact_address')} />
-          </FormSection>
-
-          <FormSection
-            title="Payroll & statutory"
-            hint="Basic Salary is set on the Payroll page. The PF / SSF / TDS contribution rates are company-wide now — set them on Payroll › Salary Structure."
-            cols={3}
-          >
-            <TextField label="PAN No." value={coreForm.pan_no} onChange={setField('pan_no')} />
-            <TextField label="SSF No." value={coreForm.ssf_no} onChange={setField('ssf_no')} />
-            <TextField label="Allowance" type="number" min="0" step="0.01" value={coreForm.allowance} onChange={setField('allowance')} />
-          </FormSection>
-
-          <button
-            type="submit"
-            disabled={savingCore}
-            className="mt-5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
-          >
-            {savingCore ? 'Saving…' : 'Save changes'}
-          </button>
+          <EditActionBar
+            position="bottom"
+            name={employee.name}
+            photoUrl={employee.profile_photo_url}
+            changed={editedKeys.length}
+            changedLabels={editedLabels}
+            saving={savingCore}
+            onDiscard={handleDiscard}
+          />
         </form>
       ) : (
         <>
@@ -1627,30 +1787,37 @@ function InfoBox({ className = '', children }: { className?: string; children: R
   );
 }
 
+// Input outlines are dark enough to see against white (about 3:1); a field that has been changed
+// gets a green outline, and an "Edited" tag on its label.
+const FIELD_BORDER =
+  'rounded-[10px] border border-[#8795a8] bg-white px-3 text-sm font-semibold text-ink placeholder:font-medium placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-accent/40';
+const FIELD_EDITED = 'border-2 border-accent px-[11px] ring-2 ring-emerald-100';
+const FIELD_LABEL = 'mb-1.5 flex items-center gap-1.5 text-xs font-extrabold text-slate-700';
+
+function EditedTag() {
+  return <span className="rounded-full bg-warning-bg px-[7px] py-px text-[10px] font-extrabold text-warning-text">Edited</span>;
+}
+
 function FormSection({
+  id,
   title,
   hint,
-  action,
-  first,
-  cols = 2,
+  tone = 'default',
   children,
 }: {
+  id: string;
   title: string;
   hint?: string;
-  action?: React.ReactNode;
-  first?: boolean;
-  cols?: 1 | 2 | 3;
+  tone?: 'default' | 'danger';
   children: React.ReactNode;
 }) {
-  const grid = cols === 3 ? 'sm:grid-cols-3' : cols === 1 ? '' : 'sm:grid-cols-2';
   return (
-    <section className={first ? 'mt-3' : 'mt-5 border-t border-slate-100 pt-4'}>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-ink">{title}</h2>
-        {action}
+    <section id={`section-${id}`} className={`scroll-mt-28 rounded-2xl border bg-white p-5 ${tone === 'danger' ? 'border-rose-200' : 'border-slate-200'}`}>
+      <h2 className="text-base font-extrabold text-ink">{title}</h2>
+      {hint && <p className="mt-1 text-[13px] font-semibold text-slate-500">{hint}</p>}
+      <div className="mt-[18px] grid gap-x-5 gap-y-[18px]" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+        {children}
       </div>
-      {hint && <p className="-mt-2 mb-3 text-xs text-slate-400">{hint}</p>}
-      <div className={`grid grid-cols-1 gap-3 ${grid}`}>{children}</div>
     </section>
   );
 }
@@ -1661,35 +1828,43 @@ function TextField({
   onChange,
   type = 'text',
   required,
+  readOnly,
   hint,
   placeholder,
   min,
   step,
+  edited,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   required?: boolean;
+  readOnly?: boolean;
   hint?: string;
   placeholder?: string;
   min?: string;
   step?: string;
+  edited?: boolean;
 }) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
+    <label className="block min-w-0">
+      <span className={FIELD_LABEL}>
+        {label}
+        {edited && <EditedTag />}
+      </span>
       <input
         type={type}
         required={required}
+        readOnly={readOnly}
         min={min}
         step={step}
         placeholder={placeholder}
         value={value}
         onChange={e => onChange(e.target.value)}
-        className={INPUT_CLASS}
+        className={`h-11 w-full ${FIELD_BORDER} ${edited ? FIELD_EDITED : ''} ${readOnly ? 'bg-slate-100' : ''}`}
       />
-      {hint && <span className="mt-1 block text-xs text-slate-400">{hint}</span>}
+      {hint && <span className="mt-1.5 block text-xs font-semibold text-slate-500">{hint}</span>}
     </label>
   );
 }
@@ -1698,28 +1873,99 @@ function SelectField({
   label,
   value,
   onChange,
+  edited,
   children,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  edited?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
-      <select value={value} onChange={e => onChange(e.target.value)} className={INPUT_CLASS}>
+    <label className="block min-w-0">
+      <span className={FIELD_LABEL}>
+        {label}
+        {edited && <EditedTag />}
+      </span>
+      <select value={value} onChange={e => onChange(e.target.value)} className={`h-11 w-full ${FIELD_BORDER} ${edited ? FIELD_EDITED : ''}`}>
         {children}
       </select>
     </label>
   );
 }
 
-function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function DateField({
+  label,
+  value,
+  onChange,
+  edited,
+  hint,
+  hintTone,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  edited?: boolean;
+  hint?: string;
+  hintTone?: 'warn';
+}) {
   return (
-    <div>
-      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
-      <DatePicker value={value} onChange={onChange} />
+    <div className="min-w-0">
+      <span className={FIELD_LABEL}>
+        {label}
+        {edited && <EditedTag />}
+      </span>
+      <div className={edited ? 'rounded-[10px] ring-2 ring-accent' : ''}>
+        <DatePicker value={value} onChange={onChange} />
+      </div>
+      {hint && <span className={`mt-1.5 block text-xs font-semibold ${hintTone === 'warn' ? 'text-warning-text' : 'text-slate-500'}`}>{hint}</span>}
+    </div>
+  );
+}
+
+/** A few choices as buttons instead of a drop-down. Pressing the chosen one again clears it (unless `clearable` is off). */
+function SegmentField({
+  label,
+  value,
+  options,
+  onChange,
+  edited,
+  tone = 'default',
+  clearable = true,
+  wide,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  edited?: boolean;
+  tone?: 'default' | 'danger';
+  clearable?: boolean;
+  wide?: boolean;
+}) {
+  return (
+    <div role="group" aria-label={label} className={wide ? 'col-span-full' : 'min-w-0'}>
+      <span className={FIELD_LABEL}>
+        {label}
+        {edited && <EditedTag />}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(o => {
+          const on = o.value === value;
+          const size = tone === 'danger' ? 'h-11 min-w-[52px] px-3 text-sm' : 'h-10 px-4 text-[13px]';
+          const look = on
+            ? tone === 'danger'
+              ? 'border-2 border-rose-800 bg-critical-bg text-critical-text'
+              : 'border-2 border-accent bg-emerald-50 text-emerald-800'
+            : 'border border-[#8795a8] bg-white text-slate-700 hover:bg-slate-50';
+          return (
+            <button key={o.value} type="button" aria-pressed={on} onClick={() => onChange(on && clearable ? '' : o.value)} className={`rounded-[10px] font-extrabold ${size} ${look}`}>
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1728,15 +1974,17 @@ function AddressFields({
   kind,
   form,
   setField,
+  isEdited,
 }: {
   kind: 'permanent' | 'temporary';
   form: CoreForm;
   setField: (key: CoreKey) => (value: string) => void;
+  isEdited: (key: CoreKey) => boolean;
 }) {
   const province = form[`${kind}_province`];
   return (
     <>
-      <SelectField label="Province" value={province} onChange={setField(`${kind}_province`)}>
+      <SelectField label="Province" value={province} onChange={setField(`${kind}_province`)} edited={isEdited(`${kind}_province`)}>
         <option value="">Not set</option>
         {province && !(NEPAL_PROVINCES as readonly string[]).includes(province) && <option value={province}>{province}</option>}
         {NEPAL_PROVINCES.map(p => (
@@ -1745,10 +1993,10 @@ function AddressFields({
           </option>
         ))}
       </SelectField>
-      <TextField label="District" value={form[`${kind}_district`]} onChange={setField(`${kind}_district`)} />
-      <TextField label="Municipality" value={form[`${kind}_municipality`]} onChange={setField(`${kind}_municipality`)} />
-      <TextField label="Ward no." value={form[`${kind}_ward`]} onChange={setField(`${kind}_ward`)} />
-      <TextField label="Tole" value={form[`${kind}_tole`]} onChange={setField(`${kind}_tole`)} />
+      <TextField label="District" value={form[`${kind}_district`]} onChange={setField(`${kind}_district`)} edited={isEdited(`${kind}_district`)} />
+      <TextField label="Municipality" value={form[`${kind}_municipality`]} onChange={setField(`${kind}_municipality`)} edited={isEdited(`${kind}_municipality`)} />
+      <TextField label="Ward no." value={form[`${kind}_ward`]} onChange={setField(`${kind}_ward`)} edited={isEdited(`${kind}_ward`)} />
+      <TextField label="Tole" value={form[`${kind}_tole`]} onChange={setField(`${kind}_tole`)} edited={isEdited(`${kind}_tole`)} />
     </>
   );
 }

@@ -134,6 +134,16 @@ export function Notice({ tone, children }: { tone: 'warning' | 'error' | 'ok'; c
   );
 }
 
+/** The little label row above an input; a changed field also gets an "Edited" tag. */
+function LabelRow({ label, edited }: { label: string; edited?: boolean }) {
+  return (
+    <View style={styles.labelRow}>
+      <Text style={[styles.label, { marginBottom: 0 }]}>{label}</Text>
+      {edited ? <Text style={styles.editedTag}>Edited</Text> : null}
+    </View>
+  );
+}
+
 export function Field({
   label,
   value,
@@ -142,6 +152,7 @@ export function Field({
   keyboardType,
   multiline,
   hint,
+  edited,
 }: {
   label: string;
   value: string;
@@ -150,12 +161,14 @@ export function Field({
   keyboardType?: KeyboardTypeOptions;
   multiline?: boolean;
   hint?: string;
+  /** The value differs from what is saved. */
+  edited?: boolean;
 }) {
   return (
     <View style={{ marginTop: 10 }}>
-      <Text style={styles.label}>{label}</Text>
+      <LabelRow label={label} edited={edited} />
       <TextInput
-        style={[styles.input, multiline && { height: 72, textAlignVertical: 'top' }]}
+        style={[styles.input, multiline && { height: 72, textAlignVertical: 'top' }, edited && styles.inputEdited]}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -178,6 +191,8 @@ export function Choice<T extends string>({
   allowNone,
   noneLabel = 'Not set',
   accessibilityGroup,
+  edited,
+  tone,
 }: {
   label?: string;
   options: { label: string; value: T }[];
@@ -187,42 +202,62 @@ export function Choice<T extends string>({
   noneLabel?: string;
   /** Names the group for screen readers when there is no visible `label` (the chips would otherwise read as a bare "Pending"). */
   accessibilityGroup?: string;
+  edited?: boolean;
+  /** `danger` colours the chosen chip red (used for blood group). */
+  tone?: 'danger';
 }) {
   const group = label ?? accessibilityGroup;
   return (
     <View style={{ marginTop: 10 }}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? <LabelRow label={label} edited={edited} /> : null}
       <View style={styles.chips}>
-        {allowNone && (
-          <Chip label={noneLabel} active={!value} onPress={() => onChange(null)} group={group} />
-        )}
+        {allowNone && <Chip label={noneLabel} active={!value} onPress={() => onChange(null)} group={group} />}
         {options.map(o => (
-          <Chip key={o.value} label={o.label} active={value === o.value} onPress={() => onChange(o.value)} group={group} />
+          <Chip key={o.value} label={o.label} active={value === o.value} onPress={() => onChange(o.value)} group={group} tone={tone} />
         ))}
       </View>
     </View>
   );
 }
 
-function Chip({ label, active, onPress, group }: { label: string; active: boolean; onPress: () => void; group?: string }) {
+function Chip({ label, active, onPress, group, tone }: { label: string; active: boolean; onPress: () => void; group?: string; tone?: 'danger' }) {
   return (
     <TouchableOpacity
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={group ? `${group}: ${label}` : label}
       accessibilityState={{ selected: active }}
-      style={[styles.chip, active && styles.chipActive]}
+      style={[styles.chip, active && (tone === 'danger' ? styles.chipDanger : styles.chipActive)]}
     >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+      <Text style={[styles.chipText, active && (tone === 'danger' ? styles.chipTextDanger : styles.chipTextActive)]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-export function DateField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+export function DateField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  edited,
+  hint,
+  hintTone,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  edited?: boolean;
+  hint?: string;
+  hintTone?: 'warn';
+}) {
   return (
     <View style={{ marginTop: 10 }}>
-      <Text style={styles.label}>{label}</Text>
-      <DatePicker value={value} onChange={onChange} placeholder={placeholder} />
+      <LabelRow label={label} edited={edited} />
+      <View style={edited ? styles.editedWrap : undefined}>
+        <DatePicker value={value} onChange={onChange} placeholder={placeholder} />
+      </View>
+      {hint ? <Text style={[styles.hint, hintTone === 'warn' && { color: colors.warningText, fontWeight: '600' }]}>{hint}</Text> : null}
     </View>
   );
 }
@@ -306,6 +341,10 @@ const styles = StyleSheet.create({
   noticeText: { fontSize: 12, fontWeight: '600', lineHeight: 17 },
 
   label: { fontSize: 12, fontWeight: '600', color: colors.slate500, marginBottom: 4 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  editedTag: { fontSize: 10, fontWeight: '800', color: colors.warningText, backgroundColor: colors.warningBg, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 1, overflow: 'hidden' },
+  inputEdited: { borderColor: colors.accent, borderWidth: 2 },
+  editedWrap: { borderRadius: 13, borderWidth: 2, borderColor: colors.accent, padding: 1 },
   hint: { fontSize: 11, color: colors.slate400, marginTop: 3 },
   input: { borderWidth: 1, borderColor: colors.slate200, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: colors.ink, backgroundColor: colors.white },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
@@ -313,6 +352,8 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   chipText: { fontSize: 12, fontWeight: '600', color: colors.slate500 },
   chipTextActive: { color: colors.white },
+  chipDanger: { backgroundColor: colors.criticalBg, borderColor: colors.criticalText },
+  chipTextDanger: { color: colors.criticalText },
 
   backdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.45)', justifyContent: 'flex-end' },
   sheet: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 18, paddingBottom: 14, maxHeight: '90%' },
