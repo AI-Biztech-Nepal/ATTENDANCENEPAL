@@ -6,6 +6,9 @@ import { useAuth } from '../lib/AuthContext';
 import { colors } from '../theme';
 import AccountMenuModal from '../components/AccountMenuModal';
 import CalendarSystemSwitch from '../components/CalendarSystemSwitch';
+import { BellIcon } from '../components/icons';
+import NotificationsModal, { useNotificationBadge, type ApprovalSegment } from '../components/NotificationsModal';
+import { useSharedHrAlerts } from '../lib/HrAlertsProvider';
 import HeaderBackButton from './HeaderBackButton';
 
 // Same brand-green band as EmployeeHeader. Owner/HR navigation is the bottom
@@ -15,6 +18,23 @@ export default function AdminHeader({ navigation, options, route }: NativeStackH
   const { profile } = useAuth();
   const insets = useSafeAreaInsets();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
+  const badge = useNotificationBadge();
+  const { refresh: refreshAlerts } = useSharedHrAlerts();
+
+  function openBell() {
+    refreshAlerts();
+    setBellOpen(true);
+  }
+  // The panel lives in this header, but its rows lead to other tabs, so go through the tab navigator.
+  function openApprovals(segment: ApprovalSegment) {
+    setBellOpen(false);
+    navigation.getParent()?.navigate('ApprovalsTab', { screen: 'Approvals', params: { segment } });
+  }
+  function openEmployee(employeeId: string) {
+    setBellOpen(false);
+    navigation.getParent()?.navigate('EmployeesTab', { screen: 'EmployeeDetail', initial: false, params: { employeeId } });
+  }
 
   const adminName = profile?.full_name || 'Admin';
   const initials =
@@ -50,6 +70,20 @@ export default function AdminHeader({ navigation, options, route }: NativeStackH
 
         <CalendarSystemSwitch onDark />
 
+        <TouchableOpacity
+          style={styles.bell}
+          onPress={openBell}
+          accessibilityRole="button"
+          accessibilityLabel={badge > 0 ? `Notifications, ${badge} waiting` : 'Notifications'}
+        >
+          <BellIcon size={18} color={colors.white} />
+          {badge > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.avatar} onPress={() => setMenuOpen(true)} accessibilityRole="button" accessibilityLabel="Account menu">
           {profile?.photo_url ? (
             <Image source={{ uri: profile.photo_url }} style={styles.avatarImg} />
@@ -60,6 +94,7 @@ export default function AdminHeader({ navigation, options, route }: NativeStackH
       </View>
 
       <AccountMenuModal visible={menuOpen} onClose={() => setMenuOpen(false)} />
+      <NotificationsModal visible={bellOpen} onClose={() => setBellOpen(false)} onOpenApprovals={openApprovals} onOpenEmployee={openEmployee} />
     </View>
   );
 }
@@ -76,6 +111,29 @@ const styles = StyleSheet.create({
   brandMark: { height: 38, width: 38, borderRadius: 11, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
   brandLogo: { height: 34, width: 34 },
   brandText: { flexShrink: 1, fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
+  bell: {
+    height: 36,
+    width: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: colors.critical,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: colors.white, fontSize: 10, fontWeight: '800' },
   avatar: {
     height: 36,
     width: 36,

@@ -40,6 +40,7 @@ import EmployeeHeader from './src/navigation/EmployeeHeader';
 import UpdateBanner from './src/components/UpdateBanner';
 import { useUpdateCheck } from './src/lib/useUpdateCheck';
 import { PendingApprovalsProvider, usePendingApprovals } from './src/lib/PendingApprovals';
+import { HrAlertsProvider } from './src/lib/HrAlertsProvider';
 import { colors } from './src/theme';
 import {
   CalendarIcon,
@@ -170,7 +171,7 @@ function EmployeesStackScreen() {
   return (
     <EmployeesAdminStack.Navigator screenOptions={adminStackOptions}>
       <EmployeesAdminStack.Screen name="EmployeesList" component={EmployeesScreen} options={{ title: 'Employees' }} />
-      <EmployeesAdminStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee Details' }} />
+      <EmployeesAdminStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee' }} />
     </EmployeesAdminStack.Navigator>
   );
 }
@@ -199,7 +200,7 @@ function MoreStackScreen() {
           <MoreStack.Screen name="Branches" component={BranchesScreen} options={{ title: 'Branch / Department' }} />
           <MoreStack.Screen name="Devices" component={DevicesScreen} options={{ title: 'Biometric Sync Devices' }} />
           <MoreStack.Screen name="Resigned" component={EmployeesScreen} initialParams={{ filter: 'Resigned' }} options={{ title: 'Resigned' }} />
-          <MoreStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee Details' }} />
+          <MoreStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee' }} />
         </>
       )}
     </MoreStack.Navigator>
@@ -366,7 +367,9 @@ function AppInner() {
             <SuperadminScreen />
           ) : profile?.role === 'admin' || profile?.role === 'hr' ? (
             <PendingApprovalsProvider>
-              <AdminTabNavigator />
+              <HrAlertsProvider>
+                <AdminTabNavigator />
+              </HrAlertsProvider>
             </PendingApprovalsProvider>
           ) : (
             <EmployeeStack.Navigator

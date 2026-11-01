@@ -11,8 +11,32 @@ import Badge from '../components/Badge';
 import DatePicker from '../components/DatePicker';
 import { ChevronIcon, EditIcon, KeyIcon } from '../components/icons';
 import { createLogin, fetchAccounts, resetPassword, updateLoginEmail } from '../lib/accountsApi';
+import { useCalendarSystem } from '../lib/CalendarSystemContext';
+import { fetchCompanyName } from '../lib/payrollFormat';
+import { EMPLOYMENT_STATUS_LABEL, EMPLOYMENT_TYPES, STATUS_TONE, effectiveStatus, employmentTypeLabel, withKnownColumns, type EmploymentStatus } from '../lib/employeeProfile';
+import { DOCUMENTS_BUCKET } from '../lib/employeeDocuments';
+import type { SettlementStatus } from '../lib/employeeSeparation';
+import { directoryCsv, directoryHtml, directoryRows, shareTextFile, sharePdf } from '../lib/directoryExport';
+import { Button, Choice, Sheet, confirmAsync, notify } from '../components/hr/HrKit';
 
-const EMPTY_ADD_FORM = { employee_code: '', name: '', phone: '', email: '', address: '', designation: '', fingerprint_id: '', date_of_joining: '' };
+const EMPTY_ADD_FORM = {
+  employee_code: '',
+  name: '',
+  phone: '',
+  email: '',
+  address: '',
+  designation: '',
+  fingerprint_id: '',
+  date_of_joining: '',
+  employment_type: '',
+  contract_start: '',
+  contract_end: '',
+  official_phone: '',
+  personal_email: '',
+};
+
+/** The extra directory filters, besides the department / view list. */
+const NO_FILTERS = { branch: 'All', designation: 'All', type: 'All', status: 'All' };
 const GENDER_OPTIONS: { value: Gender; label: string }[] = [
   { value: 'female', label: 'Female' },
   { value: 'male', label: 'Male' },
@@ -70,10 +94,19 @@ export default function EmployeesScreen({ route, navigation }: any) {
 
   const [resignEmployee, setResignEmployee] = useState<Employee | null>(null);
   const [resignDate, setResignDate] = useState('');
+  const [resignReason, setResignReason] = useState<'resigned' | 'terminated'>('resigned');
   const [resigning, setResigning] = useState(false);
   const [resignError, setResignError] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState<Set<string>>(new Set());
   const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
+
+  const { system } = useCalendarSystem();
+  const [moreFilters, setMoreFilters] = useState(NO_FILTERS);
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  // Where each leaver (or person serving notice) stands on their final settlement.
+  const [separations, setSeparations] = useState<Record<string, SettlementStatus>>({});
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   function reload() {
     supabase
@@ -84,6 +117,11 @@ export default function EmployeesScreen({ route, navigation }: any) {
         setEmployees((data as Employee[]) ?? []);
         setLoading(false);
       });
+    // Empty (not an error) until the separation migration has been run.
+    supabase
+      .from('employee_separations')
+      .select('employee_id, settlement_status')
+      .then(({ data }) => setSeparations(Object.fromEntries((data ?? []).map(r => [r.employee_id as string, r.settlement_status as SettlementStatus]))));
     supabase.from('shifts').select('*').then(({ data }) => setShifts((data as Shift[]) ?? []));
     // Whole table, no date filter — a company with enough roster history
     // passes PostgREST's default 1000-row cap on a plain select(), which
@@ -104,7 +142,10 @@ export default function EmployeesScreen({ route, navigation }: any) {
 
   useEffect(reload, []);
   useEffect(() => {
-    if (route?.params?.filter) setFilter(route.params.filter);
+    if (route?.params?.filter) {
+      setFilter(route.params.filter);
+      setMoreFilters(m => ({ ...m, status: 'All' }));
+    }
   }, [route?.params?.filter]);
 
   const linkedEmployeeIds = useMemo(
@@ -113,6 +154,8 @@ export default function EmployeesScreen({ route, navigation }: any) {
   );
   const departments = useMemo(() => Array.from(new Set(employees.map(e => e.department).filter(Boolean))) as string[], [employees]);
   const filterOptions = ['All', ...departments, 'Unenrolled', 'Resigned'];
+  const designations = useMemo(() => Array.from(new Set(employees.map(e => (e.designation ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [employees]);
+  const moreFilterCount = (Object.values(moreFilters) as string[]).filter(v => v !== 'All').length;
 
   const filtered = useMemo(() => {
     let list = employees;
@@ -123,27 +166,81 @@ export default function EmployeesScreen({ route, navigation }: any) {
       if (filter === 'Unenrolled') list = list.filter(e => !e.fingerprint_id);
       else if (filter !== 'All') list = list.filter(e => e.department === filter);
     }
+    // Status offers Active / Probation / Suspended among current staff and
+    // Resigned / Terminated among former staff (plus "settlement not completed").
+    if (moreFilters.status === 'settlement_pending') {
+      // Someone with no separation record isn't tracked, so isn't "pending".
+      list = list.filter(e => !!separations[e.id] && separations[e.id] !== 'completed');
+    } else if (moreFilters.status !== 'All') {
+      list = list.filter(e => effectiveStatus(e) === moreFilters.status);
+    }
+    if (moreFilters.branch !== 'All') list = list.filter(e => (moreFilters.branch === 'none' ? !e.branch_id : e.branch_id === moreFilters.branch));
+    if (moreFilters.designation !== 'All') list = list.filter(e => (e.designation ?? '').trim() === moreFilters.designation);
+    if (moreFilters.type !== 'All') list = list.filter(e => (moreFilters.type === 'none' ? !e.employment_type : e.employment_type === moreFilters.type));
     const term = search.trim().toLowerCase();
     if (term) {
       list = list.filter(e =>
-        [e.name, e.employee_code, e.phone, e.email, e.department, e.designation, e.fingerprint_id]
+        [e.name, e.employee_code, e.phone, e.official_phone, e.email, e.personal_email, e.department, e.designation, e.fingerprint_id]
           .filter(Boolean)
           .some(v => (v as string).toLowerCase().includes(term))
       );
     }
     return [...list].sort((a, b) => (b as any).created_at?.localeCompare((a as any).created_at ?? '') ?? 0);
-  }, [employees, filter, search]);
+  }, [employees, filter, search, moreFilters, separations]);
+
+  /** Switching between current and former staff changes which statuses make sense, so that filter starts over. */
+  function chooseFilter(next: string) {
+    if ((next === 'Resigned') !== (filter === 'Resigned')) setMoreFilters(m => ({ ...m, status: 'All' }));
+    setFilter(next);
+  }
+
+  // Quiet by default: nothing is shown for an ordinary active permanent employee, so these
+  // badges only appear when there is something to flag.
+  function renderEmploymentBadges(emp: Employee) {
+    const status = effectiveStatus(emp);
+    const settlement = separations[emp.id];
+    return (
+      <>
+        {status !== 'active' && <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>}
+        {/* Someone still working who has a separation record is serving notice. */}
+        {emp.status === 'active' && !!settlement && <Badge tone="warning">Notice period</Badge>}
+        {emp.status !== 'active' && settlement === 'pending' && <Badge tone="warning">Settlement pending</Badge>}
+        {emp.status !== 'active' && settlement === 'processed' && <Badge tone="info">Settlement processed</Badge>}
+        {!!emp.employment_type && emp.employment_type !== 'permanent' && <Badge tone="neutral">{employmentTypeLabel(emp.employment_type)}</Badge>}
+      </>
+    );
+  }
+
+  async function runExport(kind: 'csv' | 'pdf') {
+    setExporting(true);
+    try {
+      const company = await fetchCompanyName();
+      const rows = directoryRows(filtered, employees, branches, system);
+      if (kind === 'csv') await shareTextFile('employee-directory.csv', 'text/csv', directoryCsv(rows, company));
+      else await sharePdf(directoryHtml(rows, company), 'Employee directory');
+      setExportOpen(false);
+    } catch (e) {
+      notify('Could not export', e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function handleAddEmployee() {
     if (!addForm.employee_code.trim() || !addForm.name.trim()) {
       setAddError('Employee code and name are required.');
       return;
     }
+    const isContract = addForm.employment_type === 'contract';
+    if (isContract && addForm.contract_start && addForm.contract_end && addForm.contract_end < addForm.contract_start) {
+      setAddError('The contract end date is before the contract start date.');
+      return;
+    }
     setSaving(true);
     setAddError(null);
     const { error } = await supabase.from('employees').insert({
-      employee_code: addForm.employee_code,
-      name: addForm.name,
+      employee_code: addForm.employee_code.trim(),
+      name: addForm.name.trim(),
       phone: addForm.phone || null,
       email: addForm.email || null,
       address: addForm.address || null,
@@ -153,11 +250,26 @@ export default function EmployeesScreen({ route, navigation }: any) {
       branch_id: addBranchId,
       gender: addGender,
       date_of_joining: addForm.date_of_joining || null,
+      // Only the HR-profile fields that were filled in are sent, so adding an
+      // employee keeps working before the HR-profile migration has been run.
+      ...withKnownColumns(null, {
+        employment_type: addForm.employment_type || null,
+        contract_start: isContract ? addForm.contract_start || null : null,
+        contract_end: isContract ? addForm.contract_end || null : null,
+        official_phone: addForm.official_phone || null,
+        personal_email: addForm.personal_email || null,
+      }),
       status: 'active',
     });
     setSaving(false);
     if (error) {
-      setAddError(error.code === '23505' ? 'That Employee ID is already in use.' : error.message);
+      setAddError(
+        error.code === '23505'
+          ? error.message.includes('email')
+            ? 'That email is already used by another employee.'
+            : 'That Employee ID is already in use.'
+          : error.message
+      );
       return;
     }
     setAddForm(EMPTY_ADD_FORM);
@@ -171,6 +283,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
   function openResignModal(emp: Employee) {
     setResignEmployee(emp);
     setResignDate(emp.resigned_at ?? new Date().toISOString().slice(0, 10));
+    setResignReason(effectiveStatus(emp) === 'terminated' ? 'terminated' : 'resigned');
     setResignError(null);
   }
 
@@ -180,50 +293,75 @@ export default function EmployeesScreen({ route, navigation }: any) {
     setResignError(null);
     const { error } = await supabase
       .from('employees')
-      .update({ status: 'inactive', resigned_at: resignDate })
+      .update({
+        status: 'inactive',
+        resigned_at: resignDate,
+        // The HR label ("Resigned" or "Terminated"). Left out before the HR-profile
+        // migration has been run, when there's no such column to write — "Terminated"
+        // can't be recorded until then.
+        ...('employment_status' in resignEmployee || resignReason === 'terminated' ? { employment_status: resignReason } : {}),
+      })
       .eq('id', resignEmployee.id);
     setResigning(false);
     if (error) {
       setResignError(error.message);
       return;
     }
+    // Start the exit checklist for them (or, if one is already under way, keep its last
+    // working date in step with this one). Errors are ignored: until the separation
+    // migration has been run there is no table, and the profile offers "Start checklist".
+    await supabase
+      .from('employee_separations')
+      .upsert(
+        { employee_id: resignEmployee.id, separation_type: resignReason === 'terminated' ? 'termination' : 'resignation', last_working_on: resignDate },
+        { onConflict: 'employee_id', ignoreDuplicates: true }
+      );
+    await supabase.from('employee_separations').update({ last_working_on: resignDate }).eq('employee_id', resignEmployee.id);
     setResignEmployee(null);
     reload();
   }
   async function handleRestore(emp: Employee) {
-    Alert.alert('Restore', `Restore ${emp.name} to active? They'll show up in active views again.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Restore',
-        onPress: async () => {
-          const { error } = await supabase.from('employees').update({ status: 'active', resigned_at: null }).eq('id', emp.id);
-          if (error) Alert.alert('Could not update', error.message);
-          reload();
-        },
-      },
-    ]);
+    if (!(await confirmAsync('Restore', `Restore ${emp.name} to active? They'll show up in active views again.`, 'Restore'))) return;
+    const { error } = await supabase
+      .from('employees')
+      .update({ status: 'active', resigned_at: null, ...('employment_status' in emp ? { employment_status: 'active' } : {}) })
+      .eq('id', emp.id);
+    if (error) notify('Could not update', error.message);
+    reload();
   }
+
+  // The stored files an employee's documents point to. They sit in private storage, which
+  // deleting database rows can't reach, so whoever deletes the employee has to remove the
+  // files too. Empty (not an error) until the documents migration has been run.
+  async function documentPaths(employeeId: string): Promise<string[]> {
+    const { data } = await supabase.from('employee_documents').select('file_path').eq('employee_id', employeeId);
+    return (data ?? []).map(d => d.file_path as string);
+  }
+  async function removeDocumentFiles(paths: string[]) {
+    if (paths.length === 0) return;
+    const { error } = await supabase.storage.from(DOCUMENTS_BUCKET).remove(paths);
+    if (error) notify('Some files were left behind', `The employee was deleted, but ${paths.length} stored document file(s) could not be removed: ${error.message}`);
+  }
+
   async function handleRemove(emp: Employee) {
-    Alert.alert('Remove employee', `Remove ${emp.name}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase.from('employees').delete().eq('id', emp.id);
-          if (error) {
-            Alert.alert(
-              'Could not remove',
-              error.code === '23503'
-                ? 'This employee already has attendance, tasks, or other records tied to them. Use "Mark Resigned" instead.'
-                : error.message
-            );
-            return;
-          }
-          reload();
-        },
-      },
-    ]);
+    const paths = await documentPaths(emp.id);
+    const message =
+      paths.length > 0
+        ? `Remove ${emp.name}? Their ${paths.length} uploaded document${paths.length === 1 ? '' : 's'} will be permanently deleted too.`
+        : `Remove ${emp.name}?`;
+    if (!(await confirmAsync('Remove employee', message, 'Remove', true))) return;
+    const { error } = await supabase.from('employees').delete().eq('id', emp.id);
+    if (error) {
+      notify(
+        'Could not remove',
+        error.code === '23503'
+          ? 'This employee already has attendance, tasks, or other records tied to them. Use "Mark Resigned" instead.'
+          : error.message
+      );
+      return;
+    }
+    await removeDocumentFiles(paths);
+    reload();
   }
 
   async function applyBranchChange(employeeId: string, branchId: string | null) {
@@ -354,12 +492,16 @@ export default function EmployeesScreen({ route, navigation }: any) {
     if (!forceDeleteEmployee) return;
     setForceDeleting(true);
     setForceDeleteError(null);
+    // Looked up first: once the employee is gone there is nothing left to find them by.
+    const paths = await documentPaths(forceDeleteEmployee.id);
     const { error } = await supabase.rpc('admin_force_delete_employee', { p_employee_id: forceDeleteEmployee.id });
-    setForceDeleting(false);
     if (error) {
+      setForceDeleting(false);
       setForceDeleteError(error.message);
       return;
     }
+    await removeDocumentFiles(paths);
+    setForceDeleting(false);
     setForceDeleteEmployee(null);
     reload();
   }
@@ -388,6 +530,27 @@ export default function EmployeesScreen({ route, navigation }: any) {
         )}
       </View>
       <TextInput style={styles.search} placeholder="Search employees…" placeholderTextColor={colors.slate400} value={search} onChangeText={setSearch} />
+      <View style={styles.toolsRow}>
+        <TouchableOpacity
+          style={[styles.toolBtn, moreFilterCount > 0 && styles.toolBtnActive]}
+          onPress={() => setMoreFiltersOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={moreFilterCount > 0 ? `Filters, ${moreFilterCount} applied` : 'Filters'}
+        >
+          <Text style={[styles.toolBtnText, moreFilterCount > 0 && { color: colors.accent }]}>{moreFilterCount > 0 ? `Filters (${moreFilterCount})` : 'Filters'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.toolBtn} onPress={() => setExportOpen(true)} accessibilityRole="button" accessibilityLabel="Export">
+          <Text style={styles.toolBtnText}>Export</Text>
+        </TouchableOpacity>
+        <Text style={styles.countText}>
+          {filtered.length} {filtered.length === 1 ? 'person' : 'people'}
+        </Text>
+        {moreFilterCount > 0 && (
+          <TouchableOpacity onPress={() => setMoreFilters(NO_FILTERS)} accessibilityRole="button" accessibilityLabel="Clear filters">
+            <Text style={styles.clearLink}>Clear filters</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
       <FlatList
         data={filtered}
@@ -431,6 +594,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
               <View style={styles.badgeRow}>
                 <Badge tone={item.fingerprint_id ? 'good' : 'neutral'}>{item.fingerprint_id ? 'Biometric Enrolled' : 'Not Enrolled'}</Badge>
                 {hasLogin && <Badge tone="good">Login Active</Badge>}
+                {renderEmploymentBadges(item)}
               </View>
 
               <View style={styles.cardGrid}>
@@ -544,21 +708,46 @@ export default function EmployeesScreen({ route, navigation }: any) {
               <View>
                 <Text style={styles.formTitle}>Add Employee</Text>
                 <Text style={styles.label}>Employee code</Text>
-                <TextInput style={styles.input} value={addForm.employee_code} onChangeText={v => setAddForm(f => ({ ...f, employee_code: v }))} />
+                <TextInput style={styles.input} accessibilityLabel="Employee code" value={addForm.employee_code} onChangeText={v => setAddForm(f => ({ ...f, employee_code: v }))} />
                 <Text style={styles.label}>Full name</Text>
-                <TextInput style={styles.input} value={addForm.name} onChangeText={v => setAddForm(f => ({ ...f, name: v }))} />
+                <TextInput style={styles.input} accessibilityLabel="Full name" value={addForm.name} onChangeText={v => setAddForm(f => ({ ...f, name: v }))} />
                 <Text style={styles.label}>Phone</Text>
-                <TextInput style={styles.input} value={addForm.phone} onChangeText={v => setAddForm(f => ({ ...f, phone: v }))} keyboardType="phone-pad" />
+                <TextInput style={styles.input} accessibilityLabel="Phone" value={addForm.phone} onChangeText={v => setAddForm(f => ({ ...f, phone: v }))} keyboardType="phone-pad" />
                 <Text style={styles.label}>Email</Text>
-                <TextInput style={styles.input} value={addForm.email} onChangeText={v => setAddForm(f => ({ ...f, email: v }))} keyboardType="email-address" />
+                <TextInput style={styles.input} accessibilityLabel="Email" value={addForm.email} onChangeText={v => setAddForm(f => ({ ...f, email: v }))} keyboardType="email-address" />
                 <Text style={styles.label}>Address</Text>
-                <TextInput style={styles.input} value={addForm.address} onChangeText={v => setAddForm(f => ({ ...f, address: v }))} />
+                <TextInput style={styles.input} accessibilityLabel="Address" value={addForm.address} onChangeText={v => setAddForm(f => ({ ...f, address: v }))} />
                 <Text style={styles.label}>Designation</Text>
-                <TextInput style={styles.input} value={addForm.designation} onChangeText={v => setAddForm(f => ({ ...f, designation: v }))} />
+                <TextInput style={styles.input} accessibilityLabel="Designation" value={addForm.designation} onChangeText={v => setAddForm(f => ({ ...f, designation: v }))} />
                 <Text style={styles.label}>Fingerprint / Biometric ID</Text>
-                <TextInput style={styles.input} value={addForm.fingerprint_id} onChangeText={v => setAddForm(f => ({ ...f, fingerprint_id: v }))} />
-                <Text style={styles.label}>Date of joining (YYYY-MM-DD)</Text>
-                <TextInput style={styles.input} value={addForm.date_of_joining} onChangeText={v => setAddForm(f => ({ ...f, date_of_joining: v }))} placeholder="2026-01-15" placeholderTextColor={colors.slate400} />
+                <TextInput style={styles.input} accessibilityLabel="Fingerprint / Biometric ID" value={addForm.fingerprint_id} onChangeText={v => setAddForm(f => ({ ...f, fingerprint_id: v }))} />
+                <Text style={styles.label}>Date of joining</Text>
+                <DatePicker value={addForm.date_of_joining} onChange={v => setAddForm(f => ({ ...f, date_of_joining: v }))} />
+
+                <Text style={styles.label}>Phone (official)</Text>
+                <TextInput style={styles.input} accessibilityLabel="Phone (official)" value={addForm.official_phone} onChangeText={v => setAddForm(f => ({ ...f, official_phone: v }))} keyboardType="phone-pad" />
+                <Text style={styles.label}>Email (personal)</Text>
+                <TextInput style={styles.input} accessibilityLabel="Email (personal)" value={addForm.personal_email} onChangeText={v => setAddForm(f => ({ ...f, personal_email: v }))} keyboardType="email-address" autoCapitalize="none" />
+
+                <Text style={styles.label}>Employment type</Text>
+                <View style={styles.chipsRow}>
+                  <TouchableOpacity style={[styles.pickChip, !addForm.employment_type && styles.pickChipActive]} onPress={() => setAddForm(f => ({ ...f, employment_type: '' }))}>
+                    <Text style={[styles.pickChipText, !addForm.employment_type && styles.pickChipTextActive]}>Not set</Text>
+                  </TouchableOpacity>
+                  {EMPLOYMENT_TYPES.map(t => (
+                    <TouchableOpacity key={t.value} style={[styles.pickChip, addForm.employment_type === t.value && styles.pickChipActive]} onPress={() => setAddForm(f => ({ ...f, employment_type: t.value }))}>
+                      <Text style={[styles.pickChipText, addForm.employment_type === t.value && styles.pickChipTextActive]}>{t.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {addForm.employment_type === 'contract' && (
+                  <>
+                    <Text style={styles.label}>Contract start date</Text>
+                    <DatePicker value={addForm.contract_start} onChange={v => setAddForm(f => ({ ...f, contract_start: v }))} />
+                    <Text style={styles.label}>Contract end date</Text>
+                    <DatePicker value={addForm.contract_end} onChange={v => setAddForm(f => ({ ...f, contract_end: v }))} />
+                  </>
+                )}
 
                 <Text style={styles.label}>Gender</Text>
                 <View style={styles.chipsRow}>
@@ -622,7 +811,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
                 key={f}
                 style={styles.modalOption}
                 onPress={() => {
-                  setFilter(f);
+                  chooseFilter(f);
                   setFilterOpen(false);
                 }}
               >
@@ -776,6 +965,52 @@ export default function EmployeesScreen({ route, navigation }: any) {
         </TouchableOpacity>
       </Modal>
 
+      {/* More filters: outlet, designation, employment type, status */}
+      <Sheet visible={moreFiltersOpen} title="Filters" subtitle="Applied on top of the department / view you picked." onClose={() => setMoreFiltersOpen(false)} closeLabel="Close" onSubmit={() => setMoreFilters(NO_FILTERS)} submitLabel="Clear all">
+        <Choice
+          label="Outlet / branch"
+          options={[...branches.map(b => ({ label: b.name, value: b.id })), { label: 'Unassigned', value: 'none' }]}
+          value={moreFilters.branch === 'All' ? null : moreFilters.branch}
+          onChange={v => setMoreFilters(m => ({ ...m, branch: v ?? 'All' }))}
+          allowNone
+          noneLabel="All outlets"
+        />
+        <Choice
+          label="Designation"
+          options={designations.map(d => ({ label: d, value: d }))}
+          value={moreFilters.designation === 'All' ? null : moreFilters.designation}
+          onChange={v => setMoreFilters(m => ({ ...m, designation: v ?? 'All' }))}
+          allowNone
+          noneLabel="All designations"
+        />
+        <Choice
+          label="Employment type"
+          options={[...EMPLOYMENT_TYPES.map(t => ({ label: t.label, value: t.value as string })), { label: 'Not set', value: 'none' }]}
+          value={moreFilters.type === 'All' ? null : moreFilters.type}
+          onChange={v => setMoreFilters(m => ({ ...m, type: v ?? 'All' }))}
+          allowNone
+          noneLabel="All types"
+        />
+        <Choice
+          label="Status"
+          options={[
+            ...((filter === 'Resigned' ? ['resigned', 'terminated'] : ['active', 'probation', 'suspended']) as EmploymentStatus[]).map(s => ({ label: EMPLOYMENT_STATUS_LABEL[s], value: s as string })),
+            ...(filter === 'Resigned' ? [{ label: 'Settlement not completed', value: 'settlement_pending' }] : []),
+          ]}
+          value={moreFilters.status === 'All' ? null : moreFilters.status}
+          onChange={v => setMoreFilters(m => ({ ...m, status: v ?? 'All' }))}
+          allowNone
+          noneLabel={filter === 'Resigned' ? 'Resigned & terminated' : 'Active, probation & suspended'}
+        />
+      </Sheet>
+
+      <Sheet visible={exportOpen} title="Export directory" subtitle={`${filtered.length} ${filtered.length === 1 ? 'person' : 'people'} matching the current view and filters.`} onClose={() => setExportOpen(false)} saving={exporting} closeLabel="Close">
+        <View style={{ gap: 10, marginTop: 12 }}>
+          <Button label={exporting ? 'Preparing…' : 'Download Excel (CSV)'} onPress={() => runExport('csv')} disabled={exporting || filtered.length === 0} />
+          <Button label="Download PDF" tone="ghost" onPress={() => runExport('pdf')} disabled={exporting || filtered.length === 0} />
+        </View>
+      </Sheet>
+
       <Modal visible={!!resignEmployee} transparent animationType="fade" onRequestClose={() => setResignEmployee(null)}>
         <TouchableOpacity style={styles.modalBackdropCenter} activeOpacity={1} onPress={() => setResignEmployee(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.formSheet}>
@@ -787,7 +1022,15 @@ export default function EmployeesScreen({ route, navigation }: any) {
                 ? "They'll be removed from active views but their history is kept."
                 : 'Update the date their resignation takes effect.'}
             </Text>
-            <Text style={styles.label}>Resignation date</Text>
+            <Text style={styles.label}>Reason</Text>
+            <View style={styles.chipsRow}>
+              {(['resigned', 'terminated'] as const).map(r => (
+                <TouchableOpacity key={r} style={[styles.pickChip, resignReason === r && styles.pickChipActive]} onPress={() => setResignReason(r)} accessibilityRole="button" accessibilityLabel={`Reason: ${EMPLOYMENT_STATUS_LABEL[r]}`}>
+                  <Text style={[styles.pickChipText, resignReason === r && styles.pickChipTextActive]}>{EMPLOYMENT_STATUS_LABEL[r]}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.label}>{resignReason === 'terminated' ? 'Last working date' : 'Resignation date'}</Text>
             <DatePicker value={resignDate} onChange={setResignDate} />
             {resignError && <Text style={styles.errorText}>{resignError}</Text>}
             <View style={styles.formActions}>
@@ -826,7 +1069,13 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 15, fontWeight: '700', color: colors.ink },
   cardSub: { fontSize: 11, color: colors.slate400, marginTop: 1 },
   cardId: { fontSize: 12, fontWeight: '700', color: colors.slate400 },
-  badgeRow: { flexDirection: 'row', gap: 6, marginTop: 10 },
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  toolsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 6 },
+  toolBtn: { borderWidth: 1, borderColor: colors.slate200, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.white },
+  toolBtnActive: { borderColor: colors.accent, backgroundColor: colors.accentLight },
+  toolBtnText: { fontSize: 12, fontWeight: '700', color: colors.slate500 },
+  countText: { fontSize: 12, color: colors.slate400, flex: 1, textAlign: 'right' },
+  clearLink: { fontSize: 12, fontWeight: '700', color: colors.accent },
   cardGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, borderTopWidth: 1, borderTopColor: colors.slate100, paddingTop: 12 },
   gridItem: { width: '50%', paddingRight: 10, marginBottom: 10 },
   gridLabel: { fontSize: 10, fontWeight: '700', color: colors.slate400, textTransform: 'uppercase', marginBottom: 3 },
