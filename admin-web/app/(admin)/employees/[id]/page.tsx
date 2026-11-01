@@ -1058,6 +1058,7 @@ export default function EmployeeCvPage() {
                   ))}
                 </SelectField>
                 <DateField label="Date of joining" value={coreForm.date_of_joining} onChange={setField('date_of_joining')} edited={isEdited('date_of_joining')} />
+                <TextField label="Employee code" value={employee.employee_code} onChange={() => {}} readOnly />
                 <TextField label="Biometric ID" value={employee.fingerprint_id ?? ''} onChange={() => {}} readOnly hint="Set by the fingerprint device" />
               </FormSection>
 
