@@ -8,6 +8,7 @@ import { usePageTitle } from '@/lib/pageTitle';
 import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
+import PhotoViewer from '@/components/PhotoViewer';
 import EmployeeDocuments from '@/components/EmployeeDocuments';
 import EmployeeHistory from '@/components/EmployeeHistory';
 import EmployeeSeparation from '@/components/EmployeeSeparation';
@@ -180,6 +181,7 @@ export default function EmployeeCvPage() {
   const [historyVersion, setHistoryVersion] = useState(0);
   // Which section of the profile is showing, plus the small facts the side cards need.
   const [tab, setTab] = useState<'overview' | 'records' | 'documents' | 'exit'>('overview');
+  const [viewingPhoto, setViewingPhoto] = useState(false);
   const [docTypes, setDocTypes] = useState<string[] | null>(null);
   const [openConduct, setOpenConduct] = useState<number | null>(null);
   const [exitStatus, setExitStatus] = useState<string | null>(null);
@@ -775,6 +777,18 @@ export default function EmployeeCvPage() {
     <>
       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelected} className="hidden" />
 
+      {viewingPhoto && employee.profile_photo_url && (
+        <PhotoViewer
+          src={employee.profile_photo_url}
+          name={employee.name}
+          onClose={() => setViewingPhoto(false)}
+          onChange={() => {
+            setViewingPhoto(false);
+            openPhotoPicker();
+          }}
+        />
+      )}
+
       <Link href="/employees" className="mb-4 inline-block text-sm font-medium text-accent hover:underline">
         {'←'} Employee Directory
       </Link>
@@ -783,8 +797,9 @@ export default function EmployeeCvPage() {
         <div className="flex flex-wrap items-center gap-5">
           <button
             type="button"
-            onClick={openPhotoPicker}
-            title={employee.profile_photo_url ? 'Change photo' : 'Add photo'}
+            onClick={employee.profile_photo_url ? () => setViewingPhoto(true) : openPhotoPicker}
+            title={employee.profile_photo_url ? 'View photo' : 'Add photo'}
+            aria-label={employee.profile_photo_url ? `View ${employee.name}'s photo` : 'Add photo'}
             className={`relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full text-2xl font-semibold text-accent ${
               employee.profile_photo_url ? 'bg-accent/10' : 'border-2 border-dashed border-accent/40 bg-accent/5 hover:bg-accent/10'
             }`}

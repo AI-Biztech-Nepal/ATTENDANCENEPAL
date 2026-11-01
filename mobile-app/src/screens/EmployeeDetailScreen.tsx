@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Image, Linking } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Image, Linking, Modal } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { formatAdDate } from '../lib/calendar';
@@ -104,6 +104,7 @@ export default function EmployeeDetailScreen({ route }: any) {
   const [openConduct, setOpenConduct] = useState<number | null>(null);
   const [exitStatus, setExitStatus] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const yRef = useRef({ overview: 0, employment: 0 });
 
@@ -310,7 +311,9 @@ export default function EmployeeDetailScreen({ route }: any) {
       <View style={styles.headerCard}>
         <View style={styles.headerTop}>
           {employee.profile_photo_url && !photoFailed ? (
-            <Image source={{ uri: employee.profile_photo_url }} style={styles.avatar} onError={() => setPhotoFailed(true)} accessibilityLabel={employee.name} />
+            <TouchableOpacity onPress={() => setPhotoOpen(true)} accessibilityRole="button" accessibilityLabel={`View photo of ${employee.name}`}>
+              <Image source={{ uri: employee.profile_photo_url }} style={styles.avatar} onError={() => setPhotoFailed(true)} />
+            </TouchableOpacity>
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}>
               <Text style={styles.avatarText}>{initials}</Text>
@@ -539,6 +542,16 @@ export default function EmployeeDetailScreen({ route }: any) {
         <SeparationCard employee={employee} onEmployeeChanged={() => reload(false)} defaultOpen />
       </View>
 
+      <Modal visible={photoOpen && !!employee.profile_photo_url} transparent animationType="fade" onRequestClose={() => setPhotoOpen(false)}>
+        <TouchableOpacity activeOpacity={1} style={styles.photoBackdrop} onPress={() => setPhotoOpen(false)} accessibilityLabel="Close photo">
+          {!!employee.profile_photo_url && <Image source={{ uri: employee.profile_photo_url }} style={styles.photoLarge} resizeMode="contain" accessibilityLabel={`Photo of ${employee.name}`} />}
+          <Text style={styles.photoName}>{employee.name}</Text>
+          <View style={styles.photoClose} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <Text style={styles.photoCloseText}>Close</Text>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <Sheet visible={pickingManager} title="Reporting to" onClose={() => setPickingManager(false)}>
         <TextInput
           style={styles.search}
@@ -610,6 +623,11 @@ const styles = StyleSheet.create({
   warn: { color: colors.warningText, fontSize: 13, textAlign: 'center', padding: 24 },
   headerCard: { backgroundColor: colors.white, borderRadius: 12, borderWidth: 1, borderColor: colors.slate200, padding: 14, marginBottom: 12 },
   hidden: { display: 'none' },
+  photoBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  photoLarge: { width: '100%', aspectRatio: 1, maxHeight: '70%', borderRadius: 16, backgroundColor: colors.white },
+  photoName: { color: colors.white, fontSize: 16, fontWeight: '800', marginTop: 16 },
+  photoClose: { marginTop: 18, minHeight: 44, paddingHorizontal: 24, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  photoCloseText: { color: colors.white, fontSize: 14, fontWeight: '800' },
   headerTop: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatar: { height: 64, width: 64, borderRadius: 32 },
   avatarFallback: { backgroundColor: colors.accentLight, alignItems: 'center', justifyContent: 'center' },
