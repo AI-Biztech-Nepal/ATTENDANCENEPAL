@@ -230,6 +230,7 @@ export default function EmployeeDetailScreen({ route }: any) {
         <View style={styles.headerBadges}>
           <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>
           {!!employee.employment_type && <Badge tone="neutral">{employmentTypeLabel(employee.employment_type)}</Badge>}
+          {!!employee.blood_group && <Badge tone="critical">Blood group {employee.blood_group}</Badge>}
           {employee.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
         </View>
         <Text style={styles.subtitle}>

@@ -500,7 +500,7 @@ export default function EmployeeCvPage() {
       doc.text([emp.designation, emp.department].filter(Boolean).join(' · ') || '—', textStartX, y + 15);
       doc.setFontSize(9);
       doc.setTextColor(100);
-      const contactLine = [emp.phone, emp.email, branch?.name].filter(Boolean).join('   ·   ');
+      const contactLine = [emp.phone, emp.email, branch?.name, emp.blood_group ? `Blood group ${emp.blood_group}` : null].filter(Boolean).join('   ·   ');
       doc.text(contactLine || '—', textStartX, y + 21);
       doc.setTextColor(0);
       y += 34;
@@ -716,6 +716,7 @@ export default function EmployeeCvPage() {
                 {employee.name}
                 <Badge tone={STATUS_TONE[status]}>{EMPLOYMENT_STATUS_LABEL[status]}</Badge>
                 {employee.employment_type && <Badge tone="neutral">{employmentTypeLabel(employee.employment_type)}</Badge>}
+                {employee.blood_group && <Badge tone="critical">Blood group {employee.blood_group}</Badge>}
                 {employee.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
               </h1>
               <p className="text-sm text-slate-500">
