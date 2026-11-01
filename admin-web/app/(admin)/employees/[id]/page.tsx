@@ -997,15 +997,6 @@ export default function EmployeeCvPage() {
 
       {editingCore ? (
         <form onSubmit={handleSaveCore} className="mb-5">
-          <EditActionBar
-            name={employee.name}
-            photoUrl={employee.profile_photo_url}
-            changed={editedKeys.length}
-            changedLabels={editedLabels}
-            saving={savingCore}
-            onDiscard={handleDiscard}
-          />
-
           <div className="flex flex-wrap items-start gap-5">
             <div className="flex min-w-0 flex-[1_1_640px] flex-col gap-5">
               <FormSection id="employment" title="Employment" hint="Where they work and under what terms.">
@@ -1169,6 +1160,7 @@ export default function EmployeeCvPage() {
             </div>
           </div>
 
+          <EditActionBar changed={editedKeys.length} changedLabels={editedLabels} saving={savingCore} onDiscard={handleDiscard} />
         </form>
       ) : (
         <>
