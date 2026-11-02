@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { manrope } from '@/lib/fonts';
+import { PageTitleProvider, usePageTitle } from '@/lib/pageTitle';
 import ConfigWarning from './ConfigWarning';
 import CalendarSystemSwitch from './CalendarSystemSwitch';
 import BodyFontClass from './BodyFontClass';
@@ -18,29 +19,30 @@ const TABS = [
 ];
 
 /**
- * The employee pages' frame. From `lg` up it wears the owner console's shell —
- * the dark sidebar (logo + the five pages) and a white top header (page name,
- * AD/BS switch, account menu). Below `lg` it is the mobile app's look: a green
- * header and a bottom tab bar with a dot under the open tab.
+ * The employee pages' frame, mounted ONCE by app/(employee)/layout.tsx and kept
+ * across page changes — like the owner console's AppShellLayout, so the sidebar
+ * (and whether it is open) and the header survive a navigation instead of being
+ * rebuilt by every page. Pages call `usePageTitle('Payroll')` to set the header's
+ * title, and `usePageTitle(title, 'Check In/Out')` for the small label above it.
  *
- * `eyebrow` is the small label above the page name in the header.
- *
- * `flush` is for pages that draw their own green panel edge to edge on a phone
- * and manage their own padding. Without it the page gets a padded column.
+ * From `lg` up it wears the owner console's shell — the dark sidebar and a white
+ * top header (page name, AD/BS switch, account menu). Below `lg` it is the mobile
+ * app's look: a green header and a bottom tab bar with a dot under the open tab.
+ * Pages draw their own green panel edge to edge on a phone and manage their own
+ * padding.
  */
-export default function EmployeeShell({
-  title,
-  eyebrow = 'Employee portal',
-  children,
-  flush = false,
-}: {
-  title: string;
-  eyebrow?: string;
-  children: React.ReactNode;
-  flush?: boolean;
-}) {
+export default function EmployeeShell({ children }: { children: React.ReactNode }) {
+  return (
+    <PageTitleProvider>
+      <EmployeeShellInner>{children}</EmployeeShellInner>
+    </PageTitleProvider>
+  );
+}
+
+function EmployeeShellInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { title, eyebrow } = usePageTitle();
   const [status, setStatus] = useState<'loading' | 'ready' | 'redirecting'>('loading');
   const [name, setName] = useState('Employee');
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -118,7 +120,7 @@ export default function EmployeeShell({
     <div className={`${manrope.className} flex min-h-screen flex-col bg-slate-100 text-ink lg:flex-row`}>
       <BodyFontClass className={manrope.className} />
 
-      {/* Computer: the sidebar, the owner console's look */}
+      {/* Computer: the sidebar, the owner console's look and behaviour */}
       <DesktopSidebar pathname={pathname} />
 
       {/* Phone: the green header (the page's own hero continues the band) */}
@@ -145,7 +147,7 @@ export default function EmployeeShell({
         {/* Computer: the owner console's white top header */}
         <header className="hidden border-b border-slate-200 bg-white lg:sticky lg:top-0 lg:z-20 lg:flex lg:items-center lg:justify-between lg:gap-4 lg:px-7 lg:py-4">
           <div className="min-w-0">
-            <div className="text-xs font-extrabold uppercase leading-4 tracking-[0.06em] text-[#586474]">{eyebrow}</div>
+            <div className="text-xs font-extrabold uppercase leading-4 tracking-[0.06em] text-[#586474]">{eyebrow || 'Employee portal'}</div>
             <h1 className="truncate text-2xl font-extrabold leading-8 tracking-[-0.01em]">{title}</h1>
           </div>
           <div className="flex shrink-0 items-center gap-3.5">
@@ -162,9 +164,7 @@ export default function EmployeeShell({
           </div>
         )}
 
-        <main className={flush ? 'flex-1 pb-24 lg:pb-0' : 'mx-auto w-full max-w-3xl flex-1 p-4 pb-24 lg:max-w-5xl lg:p-8'}>
-          {children}
-        </main>
+        <main className="flex-1 pb-24 lg:pb-0">{children}</main>
       </div>
 
       {/* Phone: the bottom tab bar */}
@@ -195,125 +195,91 @@ export default function EmployeeShell({
   );
 }
 
-const SIDEBAR_OPEN_KEY = 'employee-sidebar-open';
-
 /**
- * The computer's sidebar, folding like the owner console's: at rest a 64px icon
- * rail; clicking an icon opens it, and it folds back when the pointer leaves (or
- * anything else is clicked or tapped). It opens OVER the page rather than
- * pushing it, so the page doesn't reflow each time.
+ * The computer's sidebar, built the way the owner console's Sidebar is: at rest a
+ * 64px icon rail; clicking an icon opens it to the full width, pushing the page
+ * across, and it folds back when the pointer leaves. The animation is the same:
+ * the width slides over 200ms, the labels fade (out at once, back in once it is
+ * about half open, so they are never drawn clipped), the logo shrinks and its
+ * name closes with it, and each row's left padding moves the icon from the rail's
+ * centre to the open position instead of jumping.
  *
- * Every page mounts its own shell, so a page picked from the open sidebar would
- * arrive folded. Picking one leaves a short-lived note in sessionStorage and the
- * new page opens straight away for the pointer that just clicked it.
+ * Two additions the console doesn't need: a click or tap anywhere else folds it
+ * (a touch screen never sends a mouse-leave), and tabbing into the rail opens it.
  */
 function DesktopSidebar({ pathname }: { pathname: string }) {
   const [expanded, setExpanded] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
   const rail = !expanded;
 
-  function fold() {
-    setExpanded(false);
-    try {
-      sessionStorage.removeItem(SIDEBAR_OPEN_KEY);
-    } catch {
-      // storage can be blocked; the rail still works
-    }
-  }
-
-  function choosePage() {
-    setExpanded(true);
-    try {
-      sessionStorage.setItem(SIDEBAR_OPEN_KEY, String(Date.now()));
-    } catch {
-      // storage can be blocked; the page then simply opens folded
-    }
-  }
-
-  useEffect(() => {
-    let fresh = false;
-    try {
-      fresh = Date.now() - Number(sessionStorage.getItem(SIDEBAR_OPEN_KEY) ?? 0) < 5000;
-    } catch {
-      // see choosePage
-    }
-    if (!fresh) return;
-    setExpanded(true);
-    // If the pointer isn't on the sidebar (keyboard, or it moved away while the page loaded) nothing would fold it.
-    const t = window.setTimeout(() => {
-      if (!asideRef.current?.matches(':hover')) fold();
-    }, 800);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   useEffect(() => {
     if (!expanded) return;
     function handlePointerDown(e: PointerEvent) {
-      if (!asideRef.current?.contains(e.target as Node)) fold();
+      if (!asideRef.current?.contains(e.target as Node)) setExpanded(false);
     }
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [expanded]);
 
-  // Labels fade rather than switch off, so they are never drawn clipped mid-slide.
   const hideWhenRail = `transition-opacity ${rail ? 'pointer-events-none opacity-0 duration-100' : 'delay-100 duration-150'}`;
+  // Rows keep one left-aligned position and only their padding animates, landing
+  // where centring would put the icon in the 64px rail (16 + 20 + 16 = 52px).
+  const rowPadding = rail ? 'pl-4' : 'pl-3';
 
   return (
-    <div className="hidden w-16 shrink-0 lg:block">
-      <aside
-        ref={asideRef}
-        onMouseLeave={fold}
-        onFocus={e => {
-          // Tabbing into the rail opens it; a mouse click is handled by choosePage.
-          if ((e.target as Element).matches(':focus-visible')) setExpanded(true);
-        }}
-        onBlur={e => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) fold();
-        }}
-        className={`fixed inset-y-0 left-0 z-30 flex flex-col overflow-hidden bg-sidebar pb-4 pt-2 text-slate-300 transition-[width] duration-200 ${
-          rail ? 'w-16' : 'w-60 shadow-xl'
+    <aside
+      ref={asideRef}
+      onMouseLeave={() => setExpanded(false)}
+      onFocus={e => {
+        if ((e.target as Element).matches(':focus-visible')) setExpanded(true);
+      }}
+      onBlur={e => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setExpanded(false);
+      }}
+      className={`sticky top-0 hidden h-screen shrink-0 flex-col self-start overflow-hidden bg-sidebar text-slate-300 transition-[width] duration-200 lg:flex ${
+        rail ? 'w-16' : 'w-60'
+      }`}
+    >
+      <Link href="/checkin" onClick={() => setExpanded(true)} className="flex flex-col items-center gap-0.5 overflow-hidden px-3 pb-1 pt-2 text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/logo-mark.png"
+          alt=""
+          className={`shrink-0 object-contain transition-all duration-200 ${rail ? 'h-[30px] w-[30px]' : 'h-28 w-28'}`}
+        />
+        {/* Its height closes with the width so the pages don't jump up when the name goes. */}
+        <span className={`block overflow-hidden transition-[height,margin] duration-200 ${rail ? '-mt-0.5 h-0' : 'h-7'}`}>
+          <span className={`block whitespace-nowrap text-lg font-semibold leading-7 text-white ${hideWhenRail}`}>Attendance Nepal</span>
+        </span>
+      </Link>
+
+      <nav
+        aria-label="Employee pages"
+        className={`sidebar-scroll mt-2 flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pb-4 transition-[padding] duration-200 ${
+          rail ? 'px-1.5' : 'px-3'
         }`}
       >
-        <Link href="/checkin" onClick={choosePage} className="flex flex-col items-center gap-0.5 overflow-hidden px-3 pb-1 text-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/logo-mark.png"
-            alt=""
-            className={`shrink-0 object-contain transition-all duration-200 ${rail ? 'h-[30px] w-[30px]' : 'h-28 w-28'}`}
-          />
-          {/* Its height closes with the width so the pages don't jump up when the name goes. */}
-          <span className={`block overflow-hidden transition-[height,margin] duration-200 ${rail ? '-mt-0.5 h-0' : 'h-7'}`}>
-            <span className={`block whitespace-nowrap text-lg font-semibold leading-7 text-white ${hideWhenRail}`}>Attendance Nepal</span>
-          </span>
-        </Link>
-
-        <nav
-          aria-label="Employee pages"
-          className={`mt-2 flex flex-col gap-1 overflow-x-hidden overflow-y-auto transition-[padding] duration-200 ${rail ? 'px-1.5' : 'px-3'}`}
-        >
-          {TABS.map(tab => {
-            const active = pathname === tab.href;
-            const Icon = tab.icon;
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                onClick={choosePage}
-                title={tab.label}
-                aria-current={active ? 'page' : undefined}
-                className={`flex h-11 min-w-0 items-center gap-3 overflow-hidden rounded-lg pr-3 text-sm transition-[padding,background-color,color] duration-200 ${
-                  rail ? 'pl-4' : 'pl-3'
-                } ${active ? 'bg-sidebar-active font-bold text-[#2dd4bf]' : 'font-medium text-slate-300 hover:bg-sidebar-active/60 hover:text-white'}`}
-              >
-                <Icon className="h-5 w-5 shrink-0" />
-                <span className={`whitespace-nowrap ${hideWhenRail}`}>{tab.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-      </aside>
-    </div>
+        {TABS.map(tab => {
+          const active = pathname === tab.href;
+          const Icon = tab.icon;
+          return (
+            <Link
+              key={tab.href}
+              href={tab.href}
+              onClick={() => setExpanded(true)}
+              title={tab.label}
+              aria-current={active ? 'page' : undefined}
+              className={`flex h-11 min-w-0 items-center gap-3 overflow-hidden rounded-lg pr-3 text-sm transition-[padding,background-color,color] duration-200 ${rowPadding} ${
+                active ? 'bg-sidebar-active font-bold text-[#2dd4bf]' : 'font-medium text-slate-300 hover:bg-sidebar-active/60 hover:text-white'
+              }`}
+            >
+              <Icon className="h-5 w-5 shrink-0" />
+              <span className={`whitespace-nowrap ${hideWhenRail}`}>{tab.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+    </aside>
   );
 }
 

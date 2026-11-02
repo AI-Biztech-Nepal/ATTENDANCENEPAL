@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { supabase } from '@/lib/supabase';
-import EmployeeShell from '@/components/EmployeeShell';
+import { usePageTitle } from '@/lib/pageTitle';
 import { ChevronLeftIcon, ChevronRightIcon, HeroPanel, StatusTag, type TagTone } from '@/components/employee/parts';
 import { buildPeriodOptions, currentSystemYearMonth, formatAdDate, formatDdMmYyyy, systemPeriod, type CalendarPeriod } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -20,6 +20,7 @@ import type { AttendanceLog, CompanyHoliday, Employee, LeaveRequest, PayrollSumm
 import { ATTENDANCE_LOG_COLUMNS, PAYROLL_SUMMARY_COLUMNS } from '@/lib/types';
 
 export default function MyPayrollPage() {
+  usePageTitle('Payroll');
   const { system } = useCalendarSystem();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -446,7 +447,7 @@ export default function MyPayrollPage() {
     : [];
 
   return (
-    <EmployeeShell title="Payroll" flush>
+    <>
       {loading ? (
         <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
       ) : !employeeId ? (
@@ -655,7 +656,7 @@ export default function MyPayrollPage() {
           </div>
         </div>
       )}
-    </EmployeeShell>
+    </>
   );
 }
 

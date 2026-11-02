@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import EmployeeShell from '@/components/EmployeeShell';
+import { usePageTitle } from '@/lib/pageTitle';
 import { EditIcon, HeroPanel, StatusTag } from '@/components/employee/parts';
 import SectionDialog from '@/components/profile/SectionDialog';
 import DatePicker from '@/components/DatePicker';
@@ -39,6 +39,7 @@ function statusTone(status: string) {
 }
 
 export default function MyProfilePage() {
+  usePageTitle('Profile');
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
   const router = useRouter();
@@ -385,17 +386,17 @@ export default function MyProfilePage() {
 
   if (loading) {
     return (
-      <EmployeeShell title="Profile" flush>
+      <>
         <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
-      </EmployeeShell>
+      </>
     );
   }
 
   if (!employee) {
     return (
-      <EmployeeShell title="Profile" flush>
+      <>
         <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
-      </EmployeeShell>
+      </>
     );
   }
 
@@ -483,7 +484,7 @@ export default function MyProfilePage() {
   );
 
   return (
-    <EmployeeShell title="Profile" flush>
+    <>
       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelected} className="hidden" />
 
       <div className="lg:px-8 lg:pb-10 lg:pt-7">
@@ -964,7 +965,7 @@ export default function MyProfilePage() {
           onSave={handlePhotoCropped}
         />
       )}
-    </EmployeeShell>
+    </>
   );
 }
 

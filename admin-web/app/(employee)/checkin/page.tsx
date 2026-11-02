@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import EmployeeShell from '@/components/EmployeeShell';
+import { usePageTitle } from '@/lib/pageTitle';
 import DatePicker from '@/components/DatePicker';
 import {
   CheckCircleIcon,
@@ -140,6 +140,7 @@ export default function CheckInPage() {
   const [myName, setMyName] = useState<string | null>(null);
   const [myGender, setMyGender] = useState<Gender | null>(null);
   const [view, setView] = useState<View>('menu');
+  usePageTitle(view === 'fix' ? 'Fix a Missed Punch' : view === 'leave' ? 'Leave Requests' : 'Check In/Out', view === 'menu' ? undefined : 'Check In/Out');
 
   // Live check-in/out state
   const [busy, setBusy] = useState(false);
@@ -506,11 +507,7 @@ export default function CheckInPage() {
       : null;
 
   return (
-    <EmployeeShell
-      title={view === 'fix' ? 'Fix a Missed Punch' : view === 'leave' ? 'Leave Requests' : 'Check In/Out'}
-      eyebrow={view === 'menu' ? undefined : 'Check In/Out'}
-      flush
-    >
+    <>
       {view === 'menu' && (
         <div className="lg:px-8 lg:pb-10 lg:pt-7">
           <HeroPanel pad="check">
@@ -1086,7 +1083,7 @@ export default function CheckInPage() {
           </div>
         </div>
       )}
-    </EmployeeShell>
+    </>
   );
 }
 

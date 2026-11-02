@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import EmployeeShell from '@/components/EmployeeShell';
+import { usePageTitle } from '@/lib/pageTitle';
 import { ClockIcon, HeroPanel, StatusTag, type TagTone } from '@/components/employee/parts';
 import DatePicker from '@/components/DatePicker';
 import Leaderboard from '@/components/Leaderboard';
@@ -41,6 +41,7 @@ function formatElapsed(startedAt: string, now: number) {
 }
 
 export default function MyTasksPage() {
+  usePageTitle('My Tasks');
   const { system } = useCalendarSystem();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
@@ -271,16 +272,16 @@ export default function MyTasksPage() {
 
   if (loading) {
     return (
-      <EmployeeShell title="My Tasks" flush>
+      <>
         <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
-      </EmployeeShell>
+      </>
     );
   }
 
   const taskCount = tasks.length === 0 ? 'No tasks yet' : `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`;
 
   return (
-    <EmployeeShell title="My Tasks" flush>
+    <>
       {!employeeId ? (
         <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
       ) : (
@@ -429,7 +430,7 @@ export default function MyTasksPage() {
           </form>
         </div>
       )}
-    </EmployeeShell>
+    </>
   );
 }
 

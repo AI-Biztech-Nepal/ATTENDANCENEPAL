@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import EmployeeShell from '@/components/EmployeeShell';
+import { usePageTitle } from '@/lib/pageTitle';
 import EmployeeCalendarView from '@/components/EmployeeCalendarView';
 
 export default function MyCalendarPage() {
+  usePageTitle('Calendar');
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -22,8 +23,7 @@ export default function MyCalendarPage() {
   }, []);
 
   return (
-    // flush: the calendar draws its own green hero panel edge to edge on a phone.
-    <EmployeeShell title="Calendar" flush>
+    <>
       {loading ? (
         <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
       ) : !employeeId ? (
@@ -31,6 +31,6 @@ export default function MyCalendarPage() {
       ) : (
         <EmployeeCalendarView employeeId={employeeId} variant="portal" />
       )}
-    </EmployeeShell>
+    </>
   );
 }
