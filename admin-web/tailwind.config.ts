@@ -18,6 +18,8 @@ const config: Config = {
           DEFAULT: '#047857',
           light: '#e3f4ec',
           bar: '#a7d0c4',
+          // The employee pages' sidebar (components/EmployeeShell.tsx).
+          deep: '#064e3b',
         },
         good: { DEFAULT: '#0d9488', bg: '#ccfbf1', text: '#0f766e' },
         warning: { DEFAULT: '#f97316', bg: '#ffedd5', text: '#c2410c' },

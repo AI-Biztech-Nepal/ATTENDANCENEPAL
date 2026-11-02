@@ -287,6 +287,14 @@ export function formatAdDate(adKey: string | null | undefined, system: CalendarS
   return NepaliDate.fromAD(new Date(Number(y), Number(mo) - 1, Number(d))).format('D MMMM YYYY');
 }
 
+/** "Mon, 2 Nov 2026 · 16 Kartik 2083" — today's date in both calendars, for
+ * the employee pages' greeting (same line the mobile app shows). */
+export function formatTodayLine(adKey: string): string {
+  const [y, mo, d] = adKey.split('-').map(Number);
+  const weekday = new Date(y, mo - 1, d).toLocaleDateString(undefined, { weekday: 'short' });
+  return `${weekday}, ${formatAdDate(adKey, 'AD')} · ${formatAdDate(adKey, 'BS')}`;
+}
+
 /** Formats a full ISO timestamp's clock time — reads the same regardless of
  * calendar system, so this never branches on AD/BS. */
 export function formatTime(value: string | null | undefined): string {

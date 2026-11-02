@@ -4,8 +4,32 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 
 /** The one AD/BS switch for the whole app — lives next to the page title.
  * `pill` is the owner top bar's rounded version. */
-export default function CalendarSystemSwitch({ variant = 'boxed' }: { variant?: 'boxed' | 'pill' }) {
+export default function CalendarSystemSwitch({ variant = 'boxed' }: { variant?: 'boxed' | 'pill' | 'onDark' }) {
   const { system, setSystem } = useCalendarSystem();
+
+  // The employee pages' version, for the green sidebar / header: a translucent
+  // track with a white active segment. The buttons stretch, so in the sidebar
+  // (a full-width parent) it fills the row.
+  if (variant === 'onDark') {
+    return (
+      <div className="flex shrink-0 rounded-full bg-white/15 p-[3px]">
+        {(['AD', 'BS'] as const).map(s => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSystem(s)}
+            aria-pressed={system === s}
+            title={s === 'AD' ? 'Gregorian calendar' : 'Nepali (Bikram Sambat) calendar'}
+            className={`h-[38px] flex-1 rounded-full px-3.5 text-xs transition-colors ${
+              system === s ? 'bg-white font-extrabold text-brand' : 'font-bold text-white hover:bg-white/10'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    );
+  }
 
   if (variant === 'pill') {
     return (
