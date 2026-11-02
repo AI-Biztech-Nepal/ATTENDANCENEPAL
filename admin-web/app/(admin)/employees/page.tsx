@@ -9,6 +9,7 @@ import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import { useConfirm } from '@/components/ConfirmDialog';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
+import AnchoredPopover from '@/components/AnchoredPopover';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, Shift, Profile, Branch, Department } from '@/lib/types';
@@ -179,6 +180,8 @@ function EmployeesView() {
   const [editingFingerprintId, setEditingFingerprintId] = useState<string | null>(null);
   const [fingerprintDraft, setFingerprintDraft] = useState('');
   const [savingFingerprint, setSavingFingerprint] = useState(false);
+  // The chip / pencil the open username or biometric panel hangs from (only one is open at a time).
+  const [popoverAnchor, setPopoverAnchor] = useState<HTMLElement | null>(null);
 
   const [loginModalEmployee, setLoginModalEmployee] = useState<Employee | null>(null);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -265,12 +268,15 @@ function EmployeesView() {
     setLoginEmailByEmployee(map);
   }
 
-  function startEditUsername(emp: Employee) {
+  function startEditUsername(emp: Employee, anchor: HTMLElement) {
+    setEditingFingerprintId(null);
+    setPopoverAnchor(anchor);
     setEditingUsernameId(emp.id);
     setUsernameDraft(loginEmailByEmployee[emp.id] ?? '');
   }
 
   function cancelEditUsername() {
+    setPopoverAnchor(null);
     setEditingUsernameId(null);
     setUsernameDraft('');
   }
@@ -283,6 +289,7 @@ function EmployeesView() {
     }
     if (email === (loginEmailByEmployee[emp.id] ?? '')) {
       // Unchanged — nothing to save, just close the editor.
+      setPopoverAnchor(null);
       setEditingUsernameId(null);
       return;
     }
@@ -310,16 +317,20 @@ function EmployeesView() {
       );
       return;
     }
+    setPopoverAnchor(null);
     setEditingUsernameId(null);
     loadLoginEmails();
   }
 
-  function startEditFingerprint(emp: Employee) {
+  function startEditFingerprint(emp: Employee, anchor: HTMLElement) {
+    setEditingUsernameId(null);
+    setPopoverAnchor(anchor);
     setEditingFingerprintId(emp.id);
     setFingerprintDraft(emp.fingerprint_id ?? '');
   }
 
   function cancelEditFingerprint() {
+    setPopoverAnchor(null);
     setEditingFingerprintId(null);
     setFingerprintDraft('');
   }
@@ -327,6 +338,7 @@ function EmployeesView() {
   async function saveFingerprint(emp: Employee) {
     const value = fingerprintDraft.trim() || null;
     if (value === (emp.fingerprint_id ?? null)) {
+      setPopoverAnchor(null);
       setEditingFingerprintId(null);
       return;
     }
@@ -341,6 +353,7 @@ function EmployeesView() {
       );
       return;
     }
+    setPopoverAnchor(null);
     setEditingFingerprintId(null);
     reload();
   }
@@ -1008,57 +1021,156 @@ function EmployeesView() {
     }
   }
 
-  // Shared by the mobile card and desktop table — the badge is clickable in
-  // both so a bugged device (one that never reported an enrollment back, or
-  // reported a stale one) doesn't leave an admin stuck: clicking it opens a
-  // direct editor for the underlying fingerprint_id, the same field a
-  // device push normally sets.
+  // The biometric ID as a small chip, shared by the mobile card and the desktop table. Clicking it opens
+  // a panel (renderCellPopover) to set or clear the ID — the manual override for a device that never
+  // reported an enrollment back, or reported a stale one. The chip never changes size.
   function renderBioEnrollment(emp: Employee) {
-    if (editingFingerprintId === emp.id) {
-      return (
-        <div className="flex flex-col items-start gap-1.5" onClick={e => e.stopPropagation()}>
-          <input
-            type="text"
-            autoFocus
-            value={fingerprintDraft}
-            onChange={e => setFingerprintDraft(e.target.value)}
-            placeholder="Biometric ID"
-            className="w-28 rounded-md border border-slate-200 px-1.5 py-1 text-xs font-semibold text-ink"
-          />
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            <button
-              type="button"
-              onClick={() => saveFingerprint(emp)}
-              disabled={savingFingerprint}
-              className="text-xs font-medium text-accent hover:underline disabled:opacity-60"
-            >
-              {savingFingerprint ? 'Saving…' : 'Save'}
-            </button>
-            {fingerprintDraft && (
-              <button
-                type="button"
-                onClick={() => setFingerprintDraft('')}
-                className="text-xs font-medium text-warning-text hover:underline"
-              >
-                Clear
-              </button>
-            )}
-            <button type="button" onClick={cancelEditFingerprint} className="text-xs font-medium text-slate-400 hover:underline">
-              Cancel
-            </button>
-          </div>
-        </div>
-      );
-    }
+    const open = editingFingerprintId === emp.id;
+    const enrolled = !!emp.fingerprint_id;
     return (
       <button
         type="button"
-        onClick={() => startEditFingerprint(emp)}
-        title="Click to set or clear this employee's biometric enrollment — use this if a device never reported an enrollment back"
-        className="cursor-pointer rounded-md transition hover:opacity-80"
+        onClick={e => (open ? cancelEditFingerprint() : startEditFingerprint(emp, e.currentTarget))}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={enrolled ? `Biometric ID ${emp.fingerprint_id} for ${emp.name} — edit` : `${emp.name} is not enrolled — set a biometric ID`}
+        title={enrolled ? 'Enrolled on the device. Click to change or clear the ID.' : 'Not enrolled. Click to set an ID — use this if a device never reported an enrollment back.'}
+        className={`inline-flex h-7 max-w-full items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 text-xs font-extrabold tabular-nums transition ${
+          enrolled ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'border-dashed border-slate-400 bg-white text-slate-600 hover:bg-slate-50'
+        } ${open ? 'ring-[3px] ring-accent/30' : ''}`}
       >
-        <Badge tone={emp.fingerprint_id ? 'good' : 'neutral'}>{emp.fingerprint_id ? 'Bio Enrolled' : 'Not Enrolled'}</Badge>
+        {enrolled ? <FingerprintIcon className="h-3.5 w-3.5 shrink-0" /> : <PlusIcon className="h-3.5 w-3.5 shrink-0" />}
+        <span className="truncate">{enrolled ? emp.fingerprint_id : 'Not enrolled'}</span>
       </button>
+    );
+  }
+
+  // The floating panel for whichever of the two editable cells is open (biometric ID, login email).
+  function renderCellPopover() {
+    if (!popoverAnchor) return null;
+    const bioEmp = editingFingerprintId ? employees.find(e => e.id === editingFingerprintId) : undefined;
+    if (bioEmp) {
+      return (
+        <AnchoredPopover
+          anchor={popoverAnchor}
+          title="Biometric ID"
+          hint={`${bioEmp.name}’s number on the fingerprint device. Change it if a device never reported the enrollment back.`}
+          onClose={cancelEditFingerprint}
+        >
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              saveFingerprint(bioEmp);
+            }}
+          >
+            <input
+              type="text"
+              value={fingerprintDraft}
+              onChange={e => setFingerprintDraft(e.target.value)}
+              aria-label="Biometric ID"
+              placeholder="Biometric ID"
+              className="h-10 w-full rounded-xl border-2 border-accent bg-white px-3 text-sm font-bold text-ink outline-none"
+            />
+            <div className="mt-3.5 flex items-center gap-2">
+              {fingerprintDraft && (
+                <button type="button" onClick={() => setFingerprintDraft('')} className="h-8 px-1 text-[13px] font-extrabold text-warning-text hover:underline">
+                  Clear ID
+                </button>
+              )}
+              <span className="flex-1" />
+              <button type="button" onClick={cancelEditFingerprint} className="h-9 rounded-xl px-3 text-[13px] font-extrabold text-slate-600 hover:bg-slate-100">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingFingerprint}
+                className="h-9 rounded-xl bg-accent px-4 text-[13px] font-extrabold text-white hover:bg-accent/90 disabled:opacity-60"
+              >
+                {savingFingerprint ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </form>
+        </AnchoredPopover>
+      );
+    }
+    const userEmp = editingUsernameId ? employees.find(e => e.id === editingUsernameId) : undefined;
+    if (userEmp) {
+      return (
+        <AnchoredPopover
+          anchor={popoverAnchor}
+          title="Login email"
+          hint={`What ${userEmp.name} types to sign in. It has to be different from every other login.`}
+          onClose={cancelEditUsername}
+        >
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              saveUsername(userEmp);
+            }}
+          >
+            <input
+              type="email"
+              value={usernameDraft}
+              onChange={e => setUsernameDraft(e.target.value)}
+              aria-label="Login email"
+              placeholder="name@company.com"
+              className="h-10 w-full rounded-xl border-2 border-accent bg-white px-3 text-sm font-bold text-ink outline-none"
+            />
+            <div className="mt-3.5 flex items-center justify-end gap-2">
+              <button type="button" onClick={cancelEditUsername} className="h-9 rounded-xl px-3 text-[13px] font-extrabold text-slate-600 hover:bg-slate-100">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingUsername}
+                className="h-9 rounded-xl bg-accent px-4 text-[13px] font-extrabold text-white hover:bg-accent/90 disabled:opacity-60"
+              >
+                {savingUsername ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </form>
+        </AnchoredPopover>
+      );
+    }
+    return null;
+  }
+
+  // Every badge someone has, most important first (status, notice / settlement, employment type, Excused).
+  function employmentBadgeItems(emp: Employee): BadgeItem[] {
+    const status = effectiveStatus(emp);
+    const settlement = separations[emp.id];
+    const items: BadgeItem[] = [];
+    if (status !== 'active') items.push({ tone: STATUS_TONE[status], label: EMPLOYMENT_STATUS_LABEL[status] });
+    // Someone still working who has a separation record is serving notice.
+    if (emp.status === 'active' && settlement) items.push({ tone: 'warning', label: 'Notice period' });
+    if (emp.status !== 'active' && settlement === 'pending') items.push({ tone: 'warning', label: 'Settlement pending' });
+    if (emp.status !== 'active' && settlement === 'processed') items.push({ tone: 'info', label: 'Settlement processed' });
+    if (emp.employment_type && emp.employment_type !== 'permanent') items.push({ tone: 'neutral', label: employmentTypeLabel(emp.employment_type) });
+    if (emp.attendance_exempt) items.push({ tone: 'neutral', label: 'Excused' });
+    return items;
+  }
+
+  // Beside the name in the table: the most important badge, and the rest folded into "+N" (hover lists them).
+  function renderNameBadges(emp: Employee) {
+    const items = employmentBadgeItems(emp);
+    const [first, ...rest] = items;
+    if (!first) return null;
+    const all = items.map(b => b.label).join(' · ');
+    return (
+      <>
+        <span
+          title={all}
+          className={`inline-flex h-5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-1.5 text-[10px] font-extrabold uppercase tracking-normal ${COMPACT_TONES[first.tone].pill}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${COMPACT_TONES[first.tone].dot}`} />
+          {first.label}
+        </span>
+        {rest.length > 0 && (
+          <span title={all} className="inline-flex h-5 shrink-0 items-center rounded-full border border-slate-200 bg-slate-100 px-1.5 text-[10px] font-extrabold text-slate-600">
+            +{rest.length}
+          </span>
+        )}
+      </>
     );
   }
 
@@ -1283,6 +1395,8 @@ function EmployeesView() {
 
       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelected} className="hidden" />
 
+      {renderCellPopover()}
+
       {pendingCount > 0 && (
         <div className="mb-3 flex items-center justify-between rounded-xl border border-accent/30 bg-accent/5 px-4 py-2.5">
           <span className="text-sm font-medium text-ink">
@@ -1357,48 +1471,19 @@ function EmployeesView() {
                     <dt className="text-xs text-slate-400">Username</dt>
                     <dd>
                       {linkedEmployeeIds.has(emp.id) ? (
-                        editingUsernameId === emp.id ? (
-                          <div className="flex flex-col items-start gap-1.5">
-                            <input
-                              type="email"
-                              autoFocus
-                              value={usernameDraft}
-                              onChange={e => setUsernameDraft(e.target.value)}
-                              className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm font-semibold text-ink"
-                            />
-                            <div className="flex gap-3">
-                              <button
-                                type="button"
-                                onClick={() => saveUsername(emp)}
-                                disabled={savingUsername}
-                                className="text-xs font-medium text-accent hover:underline disabled:opacity-60"
-                              >
-                                {savingUsername ? 'Saving…' : 'Save'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={cancelEditUsername}
-                                className="text-xs font-medium text-slate-400 hover:underline"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="break-all text-sm font-semibold text-ink">
-                              {loginEmailByEmployee[emp.id] ?? '—'}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => startEditUsername(emp)}
-                              title="Edit username"
-                              className="shrink-0 text-slate-400 hover:text-accent"
-                            >
-                              <PencilIcon className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        )
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="break-all text-sm font-semibold text-ink">{loginEmailByEmployee[emp.id] ?? '—'}</span>
+                          <button
+                            type="button"
+                            onClick={e => (editingUsernameId === emp.id ? cancelEditUsername() : startEditUsername(emp, e.currentTarget))}
+                            aria-haspopup="dialog"
+                            aria-label={`Edit login email of ${emp.name}`}
+                            title="Edit username"
+                            className="shrink-0 text-slate-400 hover:text-accent"
+                          >
+                            <PencilIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-xs text-slate-300">—</span>
                       )}
@@ -1408,16 +1493,12 @@ function EmployeesView() {
                     <dt className="text-xs text-slate-400">Shift</dt>
                     <dd>
                       {rosterEmployeeIds.has(emp.id) ? (
-                        <Link
-                          href="/shifts?tab=roster"
-                          className="inline-block rounded-lg border border-accent/20 bg-accent/5 px-2 py-1.5 text-center text-xs font-semibold text-accent hover:bg-accent/10"
-                        >
-                          Custom — Weekly Roster
+                        <Link href="/shifts?tab=roster" className="text-sm font-bold text-accent hover:underline">
+                          Weekly roster
                         </Link>
                       ) : (
-                        <span className="inline-flex flex-col items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1.5 text-center">
-                          <span className="text-xs font-semibold text-ink">{shift.name}</span>
-                          <span className="text-[10px] text-slate-400">{formatShiftHours(shift)}</span>
+                        <span className="text-sm font-semibold text-ink">
+                          {shift.name} <span className="text-xs font-medium tabular-nums text-slate-500">{formatShiftHours(shift)}</span>
                         </span>
                       )}
                     </dd>
@@ -1521,33 +1602,54 @@ function EmployeesView() {
           )}
         </div>
 
-        {/* Desktop: full table. */}
+        {/* Desktop: full table. Fixed layout — every row is 64px and every column has its own width, so nothing
+            wraps and nothing changes size when a value does; the Employee column takes whatever is left. Below
+            ~1240px the card scrolls sideways and the first two columns stay pinned. Anything editable that
+            used to turn its cell into a form (biometric ID, login email) opens a floating panel instead. */}
         <div ref={tableScrollRef} className="hidden overflow-x-auto overflow-y-visible md:block pb-24 -mb-24">
-          <table className="w-full text-left text-sm">
+          <table className="w-full min-w-[1240px] table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-11" />
+              <col />
+              <col className="w-[180px]" />
+              <col className="w-[108px]" />
+              <col className="w-[132px]" />
+              <col className="w-[126px]" />
+              <col className="w-[136px]" />
+              <col className="w-[120px]" />
+              <col className="w-[144px]" />
+              <col className="w-12" />
+            </colgroup>
             <thead>
               <tr className="sticky top-0 z-10 border-b border-slate-200/80 bg-slate-50/90 backdrop-blur-sm text-[11px] uppercase tracking-wider text-slate-500">
-                <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold text-left rounded-tl-2xl">S.N.</th>
-                <th className="w-px whitespace-nowrap px-4 py-3.5 font-bold text-left">ID</th>
-                <th className="whitespace-nowrap px-4 py-3.5 font-bold text-left">Employee Name</th>
-                <th className="whitespace-nowrap px-4 py-3.5 font-bold text-left">Username</th>
-                <th className="w-32 whitespace-nowrap px-4 py-3.5 font-bold text-left">Date of Joining</th>
-                <th className="w-28 whitespace-nowrap px-4 py-3.5 font-bold text-left">Branch</th>
-                <th className="w-32 whitespace-nowrap px-4 py-3.5 font-bold text-left">Department</th>
-                <th className="w-28 whitespace-nowrap px-4 py-3.5 font-bold text-left">Designation</th>
-                <th className="w-32 whitespace-nowrap px-4 py-3.5 font-bold text-left">Shift</th>
-                <th className="whitespace-nowrap px-4 py-3.5 font-bold text-left">Bio Enrollment</th>
-                <th className="whitespace-nowrap px-4 py-3.5 font-bold text-left rounded-tr-2xl">Actions</th>
+                <th className="sticky left-0 z-20 rounded-tl-2xl bg-slate-50 py-3.5 pl-4 pr-1 text-left font-bold">S.N.</th>
+                <th className="sticky left-11 z-20 bg-slate-50 py-3.5 pl-2 pr-3 text-left font-bold">Employee</th>
+                <th className="px-3 py-3.5 text-left font-bold">Login</th>
+                <th className="px-3 py-3.5 text-left font-bold">Joined</th>
+                <th className="px-3 py-3.5 text-left font-bold">Branch</th>
+                <th className="px-3 py-3.5 text-left font-bold">Department</th>
+                <th className="px-3 py-3.5 text-left font-bold">Designation</th>
+                <th className="px-3 py-3.5 text-left font-bold">Shift</th>
+                <th className="px-3 py-3.5 text-left font-bold">Biometric ID</th>
+                <th className="rounded-tr-2xl px-3 py-3.5 text-left font-bold">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {pageItems.map(emp => {
+              {pageItems.map((emp, index) => {
                 const shift = resolveShift(emp, shifts);
+                const panelOpen = editingFingerprintId === emp.id || editingUsernameId === emp.id;
+                const hasLogin = linkedEmployeeIds.has(emp.id);
+                const loginEmail = loginEmailByEmployee[emp.id];
+                const contact = [emp.phone, emp.email].filter(Boolean).join(' · ');
                 return (
-                  <tr key={emp.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/70 transition-colors">
-                    <td className="w-px whitespace-nowrap px-4 py-3.5 tabular-nums text-slate-500 font-medium">{pageItems.indexOf(emp) + 1 + (page - 1) * PAGE_SIZE}</td>
-                    <td className="w-px whitespace-nowrap px-4 py-3.5 text-sm font-semibold text-ink text-left">{emp.fingerprint_id ?? '—'}</td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2">
+                  <tr key={emp.id} className={`h-16 border-b border-slate-100 transition-colors last:border-0 ${panelOpen ? 'bg-teal-50' : 'bg-white hover:bg-slate-50'}`}>
+                    <td className="sticky left-0 z-[1] bg-inherit py-0 pl-4 pr-1 text-[13px] font-semibold tabular-nums text-slate-500">
+                      {(page - 1) * PAGE_SIZE + index + 1}
+                    </td>
+                    <td className="sticky left-11 z-[1] bg-inherit py-0 pl-2 pr-3">
+                      <div className="flex min-w-0 items-center gap-2.5">
                         <button
                           onClick={() => openPhotoPicker(emp.id)}
                           title="Upload photo"
@@ -1562,76 +1664,62 @@ function EmployeesView() {
                             <span className="flex h-full w-full items-center justify-center">{emp.name.slice(0, 1)}</span>
                           )}
                         </button>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <Link href={`/employees/${emp.id}`} className="block truncate font-medium text-ink hover:text-accent hover:underline">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <Link href={`/employees/${emp.id}`} title={emp.name} className="min-w-0 truncate text-sm font-semibold text-ink hover:text-accent hover:underline">
                               {emp.name}
                             </Link>
-                            {renderEmploymentBadges(emp)}
-                            {emp.attendance_exempt && <Badge tone="neutral">Excused</Badge>}
+                            {renderNameBadges(emp)}
                           </div>
-                          <div className="truncate text-xs text-slate-400">{emp.phone ?? '—'}</div>
-                          {emp.email && <div className="truncate text-xs text-slate-400">{emp.email}</div>}
+                          <div className="mt-0.5 truncate text-xs text-slate-500" title={contact}>
+                            {contact || '—'}
+                          </div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3.5">
-                      {linkedEmployeeIds.has(emp.id) ? (
-                        editingUsernameId === emp.id ? (
-                          <div className="flex flex-col items-start gap-1.5">
-                            <input
-                              type="email"
-                              autoFocus
-                              value={usernameDraft}
-                              onChange={e => setUsernameDraft(e.target.value)}
-                              className="w-full min-w-[12rem] rounded-md border border-slate-200 px-1.5 py-1 text-sm font-semibold text-ink"
-                            />
-                            <div className="flex gap-3">
-                              <button
-                                type="button"
-                                onClick={() => saveUsername(emp)}
-                                disabled={savingUsername}
-                                className="text-xs font-medium text-accent hover:underline disabled:opacity-60"
-                              >
-                                {savingUsername ? 'Saving…' : 'Save'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={cancelEditUsername}
-                                className="text-xs font-medium text-slate-400 hover:underline"
-                              >
-                                Cancel
-                              </button>
+                    <td className="px-3 py-0">
+                      {hasLogin ? (
+                        <div className="flex min-w-0 items-center gap-1">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[13px] font-bold text-slate-700" title={loginEmail ?? ''}>
+                              {loginEmail ?? '—'}
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-1.5 text-xs font-bold text-teal-700">
+                              <span className="h-1.5 w-1.5 rounded-full bg-teal-600" />
+                              Login active
                             </div>
                           </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5">
-                            <span className="whitespace-nowrap text-sm font-semibold text-ink">
-                              {loginEmailByEmployee[emp.id] ?? '—'}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => startEditUsername(emp)}
-                              title="Edit username"
-                              className="shrink-0 text-slate-400 hover:text-accent"
-                            >
-                              <PencilIcon className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        )
+                          <button
+                            type="button"
+                            onClick={e => (editingUsernameId === emp.id ? cancelEditUsername() : startEditUsername(emp, e.currentTarget))}
+                            aria-haspopup="dialog"
+                            aria-expanded={editingUsernameId === emp.id}
+                            aria-label={`Edit login email of ${emp.name}`}
+                            title="Edit username"
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-accent"
+                          >
+                            <PencilIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       ) : (
-                        <span className="text-xs text-slate-300">—</span>
+                        <div>
+                          <div className="text-[13px] font-bold text-slate-500">No login</div>
+                          <button type="button" onClick={() => openLoginModal(emp)} className="mt-0.5 text-xs font-extrabold text-accent hover:underline">
+                            Create login
+                          </button>
+                        </div>
                       )}
                     </td>
-                    <td className="w-32 px-4 py-3.5 text-left text-xs text-slate-500">
+                    <td className="whitespace-nowrap px-3 py-0 text-xs font-semibold text-slate-600">
                       {emp.date_of_joining ? formatAdDate(emp.date_of_joining, system) : <span className="text-slate-300">—</span>}
                     </td>
-                    <td className="w-28 px-4 py-3.5">
+                    <td className="px-3 py-0">
                       <select
                         value={pendingBranch[emp.id] ?? (emp.branch_id ?? '')}
                         onChange={e => setPendingBranch(p => ({ ...p, [emp.id]: e.target.value }))}
-                        className={`w-full max-w-[7rem] rounded-md border px-1.5 py-1 text-xs ${
-                          (pendingBranch[emp.id] ?? emp.branch_id) ? 'border-slate-200 text-slate-600' : 'border-warning text-warning-text'
+                        aria-label={`Branch of ${emp.name}`}
+                        className={`h-8 w-full min-w-0 rounded-lg border bg-white px-2 text-xs font-semibold ${
+                          (pendingBranch[emp.id] ?? emp.branch_id) ? 'border-slate-200 text-slate-700' : 'border-warning text-warning-text'
                         }`}
                       >
                         <option value="">Unassigned</option>
@@ -1642,11 +1730,12 @@ function EmployeesView() {
                         ))}
                       </select>
                     </td>
-                    <td className="w-32 px-4 py-3.5">
+                    <td className="px-3 py-0">
                       <select
                         value={pendingDepartment[emp.id] ?? (emp.department ?? '')}
                         onChange={e => setPendingDepartment(p => ({ ...p, [emp.id]: e.target.value }))}
-                        className="w-full max-w-[8rem] rounded-md border border-slate-200 px-1.5 py-1 text-xs text-slate-600"
+                        aria-label={`Department of ${emp.name}`}
+                        className="h-8 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700"
                       >
                         <option value="">No department</option>
                         {departmentOptions.map(d => (
@@ -1659,37 +1748,35 @@ function EmployeesView() {
                         )}
                       </select>
                     </td>
-                    <td className="w-28 px-4 py-3.5">
+                    <td className="px-3 py-0">
                       <input
                         type="text"
                         placeholder="—"
                         value={pendingDesignation[emp.id] ?? (emp.designation ?? '')}
                         onChange={e => setPendingDesignation(p => ({ ...p, [emp.id]: e.target.value }))}
-                        className="w-full max-w-[7rem] rounded-md border border-slate-200 px-1.5 py-1 text-xs text-slate-600"
+                        aria-label={`Designation of ${emp.name}`}
+                        title={pendingDesignation[emp.id] ?? (emp.designation ?? '')}
+                        className="h-8 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 placeholder:text-slate-400"
                       />
                     </td>
-                    <td className="w-32 px-4 py-3.5 text-left">
+                    <td className="px-3 py-0">
                       {rosterEmployeeIds.has(emp.id) ? (
-                        <Link
-                          href="/shifts?tab=roster"
-                          className="inline-block rounded-lg border border-accent/20 bg-accent/5 px-2 py-1.5 text-center text-xs font-semibold text-accent hover:bg-accent/10"
-                        >
-                          Custom — Weekly Roster
+                        <Link href="/shifts?tab=roster" title="Different shifts on different days — open the weekly roster" className="block text-accent hover:underline">
+                          <span className="flex items-center gap-1 whitespace-nowrap text-[13px] font-extrabold">
+                            <CalendarIcon className="h-3.5 w-3.5 shrink-0" />
+                            Weekly roster
+                          </span>
+                          <span className="mt-0.5 block whitespace-nowrap text-xs font-medium text-slate-500">Differs by day</span>
                         </Link>
                       ) : (
-                        <span className="inline-flex flex-col items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1.5 text-center">
-                          <span className="text-xs font-semibold text-ink">{shift.name}</span>
-                          <span className="text-[10px] text-slate-400">{formatShiftHours(shift)}</span>
-                        </span>
+                        <div title={`${shift.name} · ${formatShiftHours(shift)}`}>
+                          <span className="block truncate text-[13px] font-bold text-ink">{shift.name}</span>
+                          <span className="mt-0.5 block whitespace-nowrap text-xs font-medium tabular-nums text-slate-500">{formatShiftHours(shift)}</span>
+                        </div>
                       )}
                     </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex flex-col items-start gap-1">
-                        {renderBioEnrollment(emp)}
-                        {linkedEmployeeIds.has(emp.id) && <Badge tone="good">Login Active</Badge>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 text-right relative">
+                    <td className="px-3 py-0">{renderBioEnrollment(emp)}</td>
+                    <td className="relative px-3 py-0 text-right">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -1806,7 +1893,7 @@ function EmployeesView() {
               })}
               {pageItems.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-16 text-center text-[13px] text-slate-500 italic">
+                  <td colSpan={10} className="px-4 py-16 text-center text-[13px] text-slate-500 italic">
                     No employees match this filter.
                   </td>
                 </tr>
@@ -2362,6 +2449,48 @@ function SearchIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+function FingerprintIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4" />
+      <path d="M14 13.12c0 2.38 0 6.38-1 8.88" />
+      <path d="M17.29 21.02c.12-.6.43-2.3.5-3.02" />
+      <path d="M2 12a10 10 0 0 1 18-6" />
+      <path d="M21.8 16c.2-2 .131-5.354 0-6" />
+      <path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2" />
+      <path d="M8.65 22c.21-.66.45-1.32.57-2" />
+      <path d="M9 6.8a6 6 0 0 1 9 5.2v2" />
+    </svg>
+  );
+}
+
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" className={className}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function CalendarIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+    </svg>
+  );
+}
+
+// The small badge beside a name in the table — same tones as <Badge>, but compact so it never wraps.
+type BadgeItem = { tone: keyof typeof COMPACT_TONES; label: string };
+const COMPACT_TONES = {
+  good: { pill: 'border-emerald-200/70 bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+  warning: { pill: 'border-amber-200/70 bg-amber-50 text-amber-800', dot: 'bg-amber-500' },
+  critical: { pill: 'border-rose-200/70 bg-rose-50 text-rose-700', dot: 'bg-rose-500' },
+  info: { pill: 'border-sky-200/70 bg-sky-50 text-sky-700', dot: 'bg-sky-500' },
+  neutral: { pill: 'border-slate-200 bg-slate-100 text-slate-700', dot: 'bg-slate-400' },
+} as const;
 
 function KeyIcon({ className }: { className?: string }) {
   return (
