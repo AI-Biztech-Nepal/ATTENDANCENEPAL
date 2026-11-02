@@ -21,6 +21,7 @@ const TAG_TONES = {
   info: 'bg-[#dbeafe] text-[#1d4ed8]',
   neutral: 'bg-slate-200 text-slate-600',
   purple: 'bg-[#f3e8ff] text-[#7e22ce]',
+  brand: 'bg-brand-light text-brand',
 } as const;
 
 export type TagTone = keyof typeof TAG_TONES;

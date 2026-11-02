@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { supabase } from '@/lib/supabase';
 import EmployeeShell from '@/components/EmployeeShell';
-import { buildPeriodOptions, currentSystemYearMonth, formatDdMmYyyy, systemPeriod, type CalendarPeriod } from '@/lib/calendar';
+import { ChevronLeftIcon, ChevronRightIcon, HeroPanel, StatusTag, type TagTone } from '@/components/employee/parts';
+import { buildPeriodOptions, currentSystemYearMonth, formatAdDate, formatDdMmYyyy, systemPeriod, type CalendarPeriod } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes, nepalTodayIso, type DailyShiftByDate, type WeeklyPatternByEmployee } from '@/lib/shift';
 import { buildEmployeeDayRows, dailySalaryEarning, type DayDetail, type SalaryMode } from '@/lib/payrollDetail';
@@ -399,237 +400,409 @@ export default function MyPayrollPage() {
     [dayRows, system, employee, periodWorkingDays, companyOffDates, otHoursPerDay, otMultiplier, salaryMode]
   );
 
+  // The period stepper steps through the same list the dropdown offers.
+  const periodIdx = periodOptions.findIndex(o => o.key === period.key);
+  const prevPeriod = periodIdx > 0 ? periodOptions[periodIdx - 1] : null;
+  const nextPeriod = periodIdx >= 0 && periodIdx < periodOptions.length - 1 ? periodOptions[periodIdx + 1] : null;
+  const rangeText = `${formatDdMmYyyy(start, system)} to ${formatDdMmYyyy(end, system)}`;
+
+  // The best-paid day of the period, for the trend card's caption.
+  const peak = useMemo(() => {
+    let best: { date: string; value: number } | null = null;
+    for (let i = 0; i < dayRows.length; i++) {
+      const v = chartData[i]?.earning ?? 0;
+      if (v > 0 && (best === null || v > best.value)) best = { date: dayRows[i].date, value: v };
+    }
+    return best;
+  }, [dayRows, chartData]);
+
+  const stepper = (onDark: boolean) => (
+    <PeriodStepper
+      onDark={onDark}
+      label={period.label}
+      value={period.key}
+      options={periodOptions}
+      onPick={key => {
+        const found = periodOptions.find(o => o.key === key);
+        if (found) setPeriod(found);
+      }}
+      onPrev={prevPeriod ? () => setPeriod(prevPeriod) : null}
+      onNext={nextPeriod ? () => setPeriod(nextPeriod) : null}
+    />
+  );
+
+  // Phone follows the app's tile order; from `lg` the earnings come first, then the deductions.
+  const tiles = breakdown
+    ? [
+        { label: 'Basic Salary', value: breakdown.basic, tone: 'good', cls: 'order-1 lg:order-1' },
+        { label: 'Allowance', value: breakdown.allowance, tone: 'info', cls: 'order-2 lg:order-2' },
+        { label: 'Total', value: breakdown.total, tone: 'accent', cls: 'order-3 lg:order-3' },
+        { label: 'OT', wideLabel: 'Overtime', value: breakdown.ot, tone: 'info', cls: 'order-6 lg:order-4' },
+        { label: 'PF', value: breakdown.pf, tone: 'critical', negative: true, cls: 'order-4 lg:order-5' },
+        { label: 'SSF', value: breakdown.ssf, tone: 'critical', negative: true, cls: 'order-5 lg:order-6' },
+        { label: 'TDS', value: breakdown.tds, tone: 'critical', negative: true, cls: 'order-7 lg:order-7' },
+        { label: 'Total Salary', value: breakdown.totalSalary, tone: 'warning', bold: true, cls: 'order-8 lg:order-8' },
+      ]
+    : [];
+
   return (
-    <EmployeeShell title="Payroll">
+    <EmployeeShell title="Payroll" flush>
       {loading ? (
-        <p className="text-center text-sm text-slate-400">Loading…</p>
+        <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
       ) : !employeeId ? (
-        <p className="mt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
+        <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
       ) : (
-        <>
-          {employee?.salary != null && breakdown && (
-            <>
-              <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <SalaryTile label="Basic Salary" value={breakdown.basic} tone="good" />
-                <SalaryTile label="Allowance" value={breakdown.allowance} tone="info" />
-                <SalaryTile label="Total" value={breakdown.total} tone="accent" />
-                <SalaryTile label="PF" value={breakdown.pf} tone="critical" negative />
-                <SalaryTile label="SSF" value={breakdown.ssf} tone="critical" negative />
-                <SalaryTile label="OT" value={breakdown.ot} tone="info" />
-                <SalaryTile label="TDS" value={breakdown.tds} tone="critical" negative />
-                <SalaryTile label="Total Salary" value={breakdown.totalSalary} tone="warning" bold />
-              </div>
-              <div className="mb-5 rounded-xl bg-slate-50 p-3 text-center">
-                <div className="text-[10px] font-medium uppercase text-slate-500">Total Earned till date</div>
-                <div className="text-sm font-bold text-ink">{totalEarned != null ? totalEarned.toLocaleString() : '—'}</div>
-              </div>
-            </>
-          )}
-
-          <div className="mb-4 space-y-2">
-            <select
-              value={period.key}
-              onChange={e => {
-                const found = periodOptions.find(o => o.key === e.target.value);
-                if (found) setPeriod(found);
-              }}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-sm font-semibold text-ink"
-            >
-              {periodOptions.map(o => (
-                <option key={o.key} value={o.key}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <div className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600">
-              <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-accent" />
-              {formatDdMmYyyy(start, system)} to {formatDdMmYyyy(end, system)}
-            </div>
-          </div>
-
-          <h2 className="mb-2 mt-4 text-sm font-semibold text-ink">Daily Breakdown of {period.label}</h2>
-          {dayRows.length === 0 ? (
-            <p className="mt-2 text-center text-sm text-slate-400">No attendance records for this month yet.</p>
-          ) : (
-            <div className="rounded-xl border border-slate-200 bg-white">
-              <table className="w-full table-fixed text-center text-[11px]">
-                <colgroup>
-                  <col className="w-[11%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[23%]" />
-                  <col className="w-[24%]" />
-                </colgroup>
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500">
-                    <th className="truncate px-1 py-1 font-medium">Date</th>
-                    <th className="truncate px-0.5 py-1 font-medium">Hrs</th>
-                    <th className="truncate px-0.5 py-1 font-medium">OT</th>
-                    <th className="truncate px-0.5 py-1 font-medium">Status</th>
-                    <th className="truncate px-0.5 py-1 font-medium">My Salary</th>
-                    <th className="truncate px-1 py-1 font-medium">Total(OT)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dayRows.map((row, i) => {
-                    const earning = row.checkIn || row.paidOff ? earnOf(row) : null;
-                    return (
-                      <tr key={row.date} className={`border-b border-slate-100 last:border-0 ${i % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
-                        <td className="truncate px-1 py-0.5 text-ink">{formatDdMmYyyy(row.date, system).slice(0, 5)}</td>
-                        <td className="whitespace-nowrap px-0.5 py-0.5 text-slate-600">{row.checkIn ? fmtHrs(row.hours) : '—'}</td>
-                        <td className="whitespace-nowrap px-0.5 py-0.5 text-info-text">{row.checkIn ? fmtHrs(row.overtime) : '—'}</td>
-                        <td className="truncate px-0.5 py-0.5 font-medium">
-                          {row.checkIn ? (
-                            <span className="text-good-text">Present</span>
-                          ) : row.status === 'Holiday' ? (
-                            <span className="text-accent">Holiday</span>
-                          ) : row.status === 'Week Off' ? (
-                            <span className="text-accent">Week Off</span>
-                          ) : row.status === 'Absent' ? (
-                            <span className="text-critical-text">Absent</span>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
-                        </td>
-                        <td className="truncate px-0.5 py-0.5 text-slate-600">
-                          {earning ? Math.round(earning.base).toLocaleString() : '—'}
-                        </td>
-                        <td className="truncate px-1 py-0.5 font-semibold text-good-text">
-                          {earning ? (
-                            <>
-                              {Math.round(earning.total).toLocaleString()}
-                              {earning.overtime > 0 && (
-                                <span className="text-info-text">({Math.round(earning.overtime).toLocaleString()})</span>
-                              )}
-                            </>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-slate-200 bg-slate-50 text-ink">
-                    <td className="truncate px-1 py-1 font-semibold">Total</td>
-                    <td className="truncate px-0.5 py-1 font-semibold">{fmtHrs(totals.totalHours)}</td>
-                    <td className="truncate px-0.5 py-1 font-semibold text-info-text">{fmtHrs(totals.overtimeHours)}</td>
-                    <td className="px-0.5 py-1" />
-                    <td className="truncate px-0.5 py-1 font-semibold">
-                      {Math.round(totals.totalSalary - totals.overtimeEarning).toLocaleString()}
-                    </td>
-                    <td className="truncate px-1 py-1 font-bold text-good-text">
-                      {Math.round(totals.totalSalary).toLocaleString()}
-                      {totals.overtimeEarning > 0 && (
-                        <span className="text-info-text">({Math.round(totals.overtimeEarning).toLocaleString()})</span>
-                      )}
-                    </td>
-                  </tr>
-                  <tr className="border-t border-slate-200 bg-slate-50 text-ink">
-                    <td className="truncate px-1 py-1 font-semibold" colSpan={4}>
-                      P/W/A
-                    </td>
-                    <td className="truncate px-0.5 py-1 font-semibold text-good-text" colSpan={2}>
-                      {totals.presentDays} / <span className="text-accent">{totals.paidOffDays}</span> /{' '}
-                      <span className="text-critical-text">{totals.absentDays}</span>
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
-
-          <div className="mb-2 mt-4 flex items-baseline justify-between">
-            <h2 className="text-sm font-semibold text-ink">Earning Trend</h2>
-            <span className="text-[10px] text-slate-400">Scroll to see all days →</span>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-3">
-            {chartData.length === 0 ? (
-              <p className="py-8 text-center text-sm text-slate-400">No data to chart yet.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <div style={{ width: Math.max(chartData.length * 30, 320), height: 160 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid vertical={false} stroke="#e2e8f0" />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fontSize: 9, fill: '#64748b' }}
-                        axisLine={{ stroke: '#e2e8f0' }}
-                        tickLine={false}
-                        interval={0}
-                      />
-                      <YAxis
-                        tick={{ fontSize: 9, fill: '#7c3aed' }}
-                        axisLine={false}
-                        tickLine={false}
-                        width={34}
-                      />
-                      <Tooltip
-                        contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
-                        formatter={(v: number) => [v.toLocaleString(), 'Earning']}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="earning"
-                        name="earning"
-                        stroke="#7c3aed"
-                        strokeWidth={2}
-                        dot={{ r: 2, fill: '#7c3aed' }}
-                        activeDot={{ r: 5 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+        <div className="lg:px-8 lg:pb-10 lg:pt-7">
+          {/* Computer: the green panel carries the title and the month stepper. A phone has the header instead. */}
+          <div className="hidden lg:block">
+            <HeroPanel pad="inner">
+              <div className="flex items-end justify-between gap-6">
+                <div className="min-w-0">
+                  <h1 className="text-4xl font-extrabold leading-[44px] tracking-[-0.02em]">Payroll</h1>
+                  <p className="mt-0.5 text-[15px] font-semibold leading-[22px] text-white/90">{rangeText}</p>
                 </div>
+                {stepper(true)}
               </div>
-            )}
+            </HeroPanel>
           </div>
-        </>
+
+          <div className="relative mx-4 mt-4 lg:mx-5 lg:-mt-11">
+            {employee?.salary != null && breakdown && (
+              <>
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 lg:gap-4">
+                  {tiles.map(t => (
+                    <SalaryTile key={t.label} {...t} />
+                  ))}
+                </div>
+                <div className="mt-3 flex h-16 flex-col items-center justify-center rounded-xl bg-slate-200 lg:hidden">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.4px] text-slate-600">Total Earned till date</span>
+                  <span className="mt-0.5 text-base font-extrabold">{totalEarned != null ? totalEarned.toLocaleString() : '—'}</span>
+                </div>
+              </>
+            )}
+
+            <div className="mt-3 lg:hidden">
+              {stepper(false)}
+              <p className="mt-2 text-center text-xs font-semibold text-slate-500">{rangeText}</p>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-4 lg:mt-6 lg:flex-row lg:items-start lg:gap-6">
+              <section className="min-w-0 lg:flex-[2] lg:rounded-[20px] lg:border lg:border-slate-200 lg:bg-white lg:p-6">
+                <h2 className="mb-2 text-base font-extrabold lg:mb-4 lg:text-xl lg:leading-6">Daily Breakdown of {period.label}</h2>
+                {dayRows.length === 0 ? (
+                  <p className="mt-2 text-center text-sm text-slate-500">No attendance records for this month yet.</p>
+                ) : (
+                  <div className="overflow-hidden rounded-[14px] border border-slate-200 bg-white lg:overflow-x-auto lg:rounded-none lg:border-0">
+                    <table className="w-full table-fixed text-center text-xs lg:min-w-[580px] lg:text-left lg:text-sm">
+                      <colgroup>
+                        <col className="w-[15%] lg:w-[24%]" />
+                        <col className="w-[16%] lg:w-[14%]" />
+                        <col className="w-[14%]" />
+                        <col className="w-[17%] lg:w-[16%]" />
+                        <col className="w-[17%] lg:w-[14%]" />
+                        <col className="w-[21%] lg:w-[17%]" />
+                      </colgroup>
+                      <thead>
+                        <tr className="h-8 bg-slate-100 text-[10px] uppercase tracking-[0.4px] text-slate-600 lg:h-10 lg:text-[11px] lg:font-extrabold lg:tracking-[0.06em]">
+                          <th className="font-bold lg:pl-3 lg:font-extrabold">Date</th>
+                          <th className="font-bold lg:font-extrabold">
+                            <span className="lg:hidden">Hrs</span>
+                            <span className="hidden lg:inline">Hours</span>
+                          </th>
+                          <th className="font-bold lg:font-extrabold">
+                            <span className="lg:hidden">OT</span>
+                            <span className="hidden lg:inline">Overtime</span>
+                          </th>
+                          <th className="font-bold lg:font-extrabold">Status</th>
+                          <th className="font-bold lg:font-extrabold">My Salary</th>
+                          <th className="font-bold lg:font-extrabold">
+                            <span className="lg:hidden">Total (OT)</span>
+                            <span className="hidden lg:inline">Total (with OT)</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dayRows.map(row => {
+                          const earning = row.checkIn || row.paidOff ? earnOf(row) : null;
+                          const ddmm = formatDdMmYyyy(row.date, system);
+                          return (
+                            <tr key={row.date} className="h-[34px] border-t border-slate-100 odd:bg-white even:bg-slate-50 lg:h-11 lg:odd:bg-transparent lg:even:bg-transparent">
+                              <td className="lg:pl-3">
+                                <span className="lg:hidden">{ddmm.slice(0, 5)}</span>
+                                <span className="hidden font-bold lg:inline">{ddmm}</span>
+                                <span className="hidden font-semibold text-slate-500 lg:inline"> · {weekdayOf(row.date)}</span>
+                              </td>
+                              <td className="whitespace-nowrap">{row.checkIn ? fmtHrs(row.hours) : <Dash />}</td>
+                              <td className="whitespace-nowrap font-semibold text-[#1d4ed8]">{row.checkIn && row.overtime > 0 ? fmtHrs(row.overtime) : <Dash />}</td>
+                              <td>
+                                <StatusCell row={row} />
+                              </td>
+                              <td>{earning ? Math.round(earning.base).toLocaleString() : <Dash />}</td>
+                              <td className="font-extrabold text-[#14532d]">{earning ? Math.round(earning.total).toLocaleString() : <Dash />}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="h-[38px] border-t border-slate-200 bg-slate-100 font-extrabold lg:h-12">
+                          <td className="lg:pl-3">Total</td>
+                          <td className="whitespace-nowrap">{fmtHrs(totals.totalHours)}</td>
+                          <td className="whitespace-nowrap text-[#1d4ed8]">{fmtHrs(totals.overtimeHours)}</td>
+                          <td className="whitespace-nowrap text-xs">
+                            <span className="hidden lg:inline">
+                              <span className="text-[#14532d]">{totals.presentDays} P</span> · <span className="text-brand">{totals.paidOffDays} W</span> ·{' '}
+                              <span className="text-[#b91c1c]">{totals.absentDays} A</span>
+                            </span>
+                          </td>
+                          <td>{Math.round(totals.totalSalary - totals.overtimeEarning).toLocaleString()}</td>
+                          <td className="text-[#14532d]">{Math.round(totals.totalSalary).toLocaleString()}</td>
+                        </tr>
+                        <tr className="h-8 border-t border-slate-200 bg-slate-100 text-[11px] font-extrabold lg:hidden">
+                          <td colSpan={6}>
+                            <span className="text-[#14532d]">{totals.presentDays} P</span> · <span className="text-brand">{totals.paidOffDays} W</span> ·{' '}
+                            <span className="text-[#b91c1c]">{totals.absentDays} A</span>
+                            <span className="ml-2 font-semibold text-slate-500">present · week off · absent</span>
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-6 lg:w-[360px] lg:shrink-0 lg:gap-6">
+                {employee?.salary != null && breakdown && (
+                  <section className="hidden rounded-[20px] bg-brand p-6 text-white lg:block">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.5px] text-white/85">Total Earned till date</div>
+                    <div className="mt-1.5 text-[44px] font-extrabold leading-[52px] tracking-[-0.02em]">
+                      {totalEarned != null ? totalEarned.toLocaleString() : '—'}
+                    </div>
+                    {employee.date_of_joining && (
+                      <div className="mt-0.5 text-[13px] font-semibold text-white/90">Since {formatAdDate(employee.date_of_joining, system)}</div>
+                    )}
+                  </section>
+                )}
+
+                <section className="rounded-[14px] border border-slate-200 bg-white p-3 lg:rounded-[20px] lg:p-6">
+                  <h2 className="text-base font-extrabold lg:text-xl lg:leading-6">Earning Trend</h2>
+                  {peak && (
+                    <p className="mb-2 mt-0.5 hidden text-[13px] font-semibold text-slate-600 lg:block">
+                      Highest day: {formatDdMmYyyy(peak.date, system).slice(0, 5)} at {peak.value.toLocaleString()}
+                    </p>
+                  )}
+                  <span className="mb-2 block text-[10px] font-semibold text-slate-500 lg:hidden">Scroll to see all days →</span>
+                  {chartData.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-slate-500">No data to chart yet.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <div
+                        className="h-40 w-[var(--chart-w)] lg:h-[220px] lg:w-full"
+                        style={{ ['--chart-w' as string]: `${Math.max(chartData.length * 30, 320)}px` }}
+                      >
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
+                            <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                            <XAxis
+                              dataKey="label"
+                              tick={{ fontSize: 10, fill: '#586474' }}
+                              axisLine={{ stroke: '#e2e8f0' }}
+                              tickLine={false}
+                              interval="preserveStartEnd"
+                              minTickGap={6}
+                            />
+                            <YAxis tick={{ fontSize: 10, fill: '#7c3aed' }} axisLine={false} tickLine={false} width={36} />
+                            <Tooltip
+                              contentStyle={{ borderRadius: 10, border: '1px solid #e2e8f0', fontSize: 12 }}
+                              formatter={(v: number) => [v.toLocaleString(), 'Earning']}
+                            />
+                            <Line type="monotone" dataKey="earning" name="earning" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 2.5, fill: '#7c3aed' }} activeDot={{ r: 5 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+                </section>
+
+                {dayRows.length > 0 && (
+                  <section className="hidden rounded-[20px] border border-slate-200 bg-white p-6 lg:block">
+                    <h2 className="mb-4 text-xl font-extrabold leading-6">This period</h2>
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div className="rounded-[14px] bg-[#e2f3e8] px-3.5 py-3">
+                        <div className="text-[11px] font-extrabold uppercase tracking-[0.5px] text-[#14532d]">Present</div>
+                        <div className="mt-0.5 text-[26px] font-extrabold leading-8">{totals.presentDays}</div>
+                      </div>
+                      <div className="rounded-[14px] bg-brand-light px-3.5 py-3">
+                        <div className="text-[11px] font-extrabold uppercase tracking-[0.5px] text-brand">Week off</div>
+                        <div className="mt-0.5 text-[26px] font-extrabold leading-8">{totals.paidOffDays}</div>
+                      </div>
+                      <div className="rounded-[14px] bg-slate-100 px-3.5 py-3">
+                        <div className="text-[11px] font-extrabold uppercase tracking-[0.5px] text-slate-600">Absent</div>
+                        <div className="mt-0.5 text-[26px] font-extrabold leading-8">{totals.absentDays}</div>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex justify-between border-t border-slate-100 pt-3.5 text-sm">
+                      <span className="text-slate-600">Hours worked</span>
+                      <span className="font-extrabold">{fmtHrs(totals.totalHours)}</span>
+                    </div>
+                    <div className="mt-2.5 flex justify-between text-sm">
+                      <span className="text-slate-600">Overtime</span>
+                      <span className="font-extrabold text-[#1d4ed8]">{fmtHrs(totals.overtimeHours)}</span>
+                    </div>
+                  </section>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </EmployeeShell>
   );
 }
 
-function CalendarIcon({ className }: { className?: string }) {
+/** Weekday from an AD date key — the same in either calendar. */
+function weekdayOf(key: string) {
+  return new Date(key + 'T00:00:00Z').toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+}
+
+function Dash() {
+  return <span className="text-slate-400">—</span>;
+}
+
+/** Present / Week off / Holiday / Absent: plain coloured text on a phone, a tag on a computer. */
+function StatusCell({ row }: { row: DayDetail }) {
+  let text: string | null = null;
+  let tone: TagTone = 'neutral';
+  let color = '';
+  if (row.checkIn) {
+    text = 'Present';
+    tone = 'good';
+    color = 'text-[#14532d]';
+  } else if (row.status === 'Holiday' || row.status === 'Week Off') {
+    text = row.status;
+    tone = 'brand';
+    color = 'text-brand';
+  } else if (row.status === 'Absent') {
+    text = 'Absent';
+    tone = 'critical';
+    color = 'text-[#b91c1c]';
+  }
+  if (!text) return <Dash />;
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <rect x="3" y="5" width="18" height="16" rx="2" />
-      <path strokeLinecap="round" d="M3 10h18M8 3v4M16 3v4" />
-    </svg>
+    <>
+      <span className={`font-bold lg:hidden ${color}`}>{text}</span>
+      <span className="hidden lg:inline">
+        <StatusTag tone={tone}>{text}</StatusTag>
+      </span>
+    </>
+  );
+}
+
+/** ‹ month ▾ ›. The month label is a real <select> laid invisibly over the text, so it opens the
+ * browser's own list on every device. */
+function PeriodStepper({
+  onDark,
+  label,
+  value,
+  options,
+  onPick,
+  onPrev,
+  onNext,
+}: {
+  onDark: boolean;
+  label: string;
+  value: string;
+  options: CalendarPeriod[];
+  onPick: (key: string) => void;
+  onPrev: (() => void) | null;
+  onNext: (() => void) | null;
+}) {
+  const arrow = `flex h-11 w-11 shrink-0 items-center justify-center rounded-xl disabled:opacity-40 ${
+    onDark ? 'text-white hover:bg-white/10' : 'text-brand hover:bg-slate-50'
+  }`;
+  return (
+    <div
+      className={`flex items-center ${
+        onDark ? 'rounded-[14px] bg-white/15 p-1' : 'rounded-[14px] border border-slate-200 bg-white p-2'
+      }`}
+    >
+      <button type="button" onClick={onPrev ?? undefined} disabled={!onPrev} aria-label="Previous month" className={arrow}>
+        <ChevronLeftIcon className="h-[18px] w-[18px]" />
+      </button>
+      <label
+        className={`relative flex h-11 min-w-0 flex-1 items-center justify-center gap-2 text-lg font-extrabold lg:w-48 lg:flex-none ${
+          onDark ? 'text-white' : 'text-ink'
+        }`}
+      >
+        <span className="truncate">{label}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 shrink-0 opacity-80" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+        </svg>
+        <select
+          aria-label="Month"
+          value={value}
+          onChange={e => onPick(e.target.value)}
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        >
+          {options.map(o => (
+            <option key={o.key} value={o.key} className="text-ink">
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" onClick={onNext ?? undefined} disabled={!onNext} aria-label="Next month" className={arrow}>
+        <ChevronRightIcon className="h-[18px] w-[18px]" />
+      </button>
+    </div>
   );
 }
 
 const TILE_TONES = {
-  good: { bg: 'bg-good-bg', text: 'text-good-text' },
-  info: { bg: 'bg-info-bg', text: 'text-info-text' },
-  warning: { bg: 'bg-warning-bg', text: 'text-warning-text' },
-  critical: { bg: 'bg-critical-bg', text: 'text-critical-text' },
-  accent: { bg: 'bg-accent/10', text: 'text-accent' },
+  good: { bg: 'bg-[#e2f3e8]', text: 'text-[#14532d]' },
+  info: { bg: 'bg-[#dbeafe]', text: 'text-[#1d4ed8]' },
+  warning: { bg: 'bg-[#ffedd5]', text: 'text-[#c2410c]' },
+  critical: { bg: 'bg-[#fee2e2]', text: 'text-[#b91c1c]' },
+  accent: { bg: 'bg-brand-light', text: 'text-brand' },
 } as const;
 
 function SalaryTile({
   label,
+  wideLabel,
   value,
   tone,
   negative,
   bold,
+  cls,
 }: {
   label: string;
+  wideLabel?: string;
   value: number;
-  tone: keyof typeof TILE_TONES;
+  tone: string;
   negative?: boolean;
   bold?: boolean;
+  cls: string;
 }) {
-  const { bg, text } = TILE_TONES[tone];
+  const { bg, text } = TILE_TONES[tone as keyof typeof TILE_TONES];
   return (
-    <div className={`rounded-xl ${bg} p-2.5 text-center`}>
-      <div className={`text-[9px] font-medium uppercase ${text}`}>{label}</div>
-      <div className={`text-sm ${bold ? 'font-extrabold' : 'font-bold'} text-ink`}>
+    <div
+      className={`flex h-16 flex-col items-center justify-center rounded-xl px-3 lg:h-[104px] lg:items-start lg:justify-between lg:rounded-[18px] lg:px-5 lg:py-[18px] ${bg} ${cls} ${
+        tone === 'good' || tone === 'info' || tone === 'accent' ? 'lg:shadow-[0_8px_18px_rgba(6,78,59,0.10)]' : ''
+      }`}
+    >
+      <span className={`text-[11px] font-bold uppercase tracking-[0.4px] lg:text-xs lg:font-extrabold lg:tracking-[0.5px] ${text}`}>
+        {wideLabel ? (
+          <>
+            <span className="lg:hidden">{label}</span>
+            <span className="hidden lg:inline">{wideLabel}</span>
+          </>
+        ) : (
+          label
+        )}
+      </span>
+      <span className={`mt-0.5 font-extrabold lg:mt-0 lg:text-[30px] lg:leading-9 ${bold ? 'text-lg' : 'text-base'}`}>
         {negative && value > 0 ? '-' : ''}
         {value.toLocaleString()}
-      </div>
+      </span>
     </div>
   );
 }
