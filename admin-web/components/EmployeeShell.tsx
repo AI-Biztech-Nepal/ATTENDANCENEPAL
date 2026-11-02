@@ -119,33 +119,7 @@ export default function EmployeeShell({
       <BodyFontClass className={manrope.className} />
 
       {/* Computer: the sidebar, the owner console's look */}
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col self-start overflow-y-auto bg-sidebar px-3 pb-4 pt-2 text-slate-300 lg:flex">
-        <Link href="/checkin" className="flex flex-col items-center gap-0.5 px-3 pb-1 text-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-mark.png" alt="" className="h-28 w-28 shrink-0 object-contain" />
-          <span className="text-lg font-semibold leading-7 text-white">Attendance Nepal</span>
-        </Link>
-
-        <nav aria-label="Employee pages" className="mt-2 flex flex-col gap-1">
-          {TABS.map(tab => {
-            const active = pathname === tab.href;
-            const Icon = tab.icon;
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                aria-current={active ? 'page' : undefined}
-                className={`flex h-11 items-center gap-3 rounded-lg px-3 text-sm transition-colors ${
-                  active ? 'bg-sidebar-active font-bold text-[#2dd4bf]' : 'font-medium text-slate-300 hover:bg-sidebar-active/60 hover:text-white'
-                }`}
-              >
-                <Icon className="h-5 w-5 shrink-0" />
-                {tab.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </aside>
+      <DesktopSidebar pathname={pathname} />
 
       {/* Phone: the green header (the page's own hero continues the band) */}
       <header className="bg-brand lg:hidden">
@@ -217,6 +191,128 @@ export default function EmployeeShell({
           );
         })}
       </nav>
+    </div>
+  );
+}
+
+const SIDEBAR_OPEN_KEY = 'employee-sidebar-open';
+
+/**
+ * The computer's sidebar, folding like the owner console's: at rest a 64px icon
+ * rail; clicking an icon opens it, and it folds back when the pointer leaves (or
+ * anything else is clicked or tapped). It opens OVER the page rather than
+ * pushing it, so the page doesn't reflow each time.
+ *
+ * Every page mounts its own shell, so a page picked from the open sidebar would
+ * arrive folded. Picking one leaves a short-lived note in sessionStorage and the
+ * new page opens straight away for the pointer that just clicked it.
+ */
+function DesktopSidebar({ pathname }: { pathname: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const asideRef = useRef<HTMLElement>(null);
+  const rail = !expanded;
+
+  function fold() {
+    setExpanded(false);
+    try {
+      sessionStorage.removeItem(SIDEBAR_OPEN_KEY);
+    } catch {
+      // storage can be blocked; the rail still works
+    }
+  }
+
+  function choosePage() {
+    setExpanded(true);
+    try {
+      sessionStorage.setItem(SIDEBAR_OPEN_KEY, String(Date.now()));
+    } catch {
+      // storage can be blocked; the page then simply opens folded
+    }
+  }
+
+  useEffect(() => {
+    let fresh = false;
+    try {
+      fresh = Date.now() - Number(sessionStorage.getItem(SIDEBAR_OPEN_KEY) ?? 0) < 5000;
+    } catch {
+      // see choosePage
+    }
+    if (!fresh) return;
+    setExpanded(true);
+    // If the pointer isn't on the sidebar (keyboard, or it moved away while the page loaded) nothing would fold it.
+    const t = window.setTimeout(() => {
+      if (!asideRef.current?.matches(':hover')) fold();
+    }, 800);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!expanded) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (!asideRef.current?.contains(e.target as Node)) fold();
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [expanded]);
+
+  // Labels fade rather than switch off, so they are never drawn clipped mid-slide.
+  const hideWhenRail = `transition-opacity ${rail ? 'pointer-events-none opacity-0 duration-100' : 'delay-100 duration-150'}`;
+
+  return (
+    <div className="hidden w-16 shrink-0 lg:block">
+      <aside
+        ref={asideRef}
+        onMouseLeave={fold}
+        onFocus={e => {
+          // Tabbing into the rail opens it; a mouse click is handled by choosePage.
+          if ((e.target as Element).matches(':focus-visible')) setExpanded(true);
+        }}
+        onBlur={e => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) fold();
+        }}
+        className={`fixed inset-y-0 left-0 z-30 flex flex-col overflow-hidden bg-sidebar pb-4 pt-2 text-slate-300 transition-[width] duration-200 ${
+          rail ? 'w-16' : 'w-60 shadow-xl'
+        }`}
+      >
+        <Link href="/checkin" onClick={choosePage} className="flex flex-col items-center gap-0.5 overflow-hidden px-3 pb-1 text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo-mark.png"
+            alt=""
+            className={`shrink-0 object-contain transition-all duration-200 ${rail ? 'h-[30px] w-[30px]' : 'h-28 w-28'}`}
+          />
+          {/* Its height closes with the width so the pages don't jump up when the name goes. */}
+          <span className={`block overflow-hidden transition-[height,margin] duration-200 ${rail ? '-mt-0.5 h-0' : 'h-7'}`}>
+            <span className={`block whitespace-nowrap text-lg font-semibold leading-7 text-white ${hideWhenRail}`}>Attendance Nepal</span>
+          </span>
+        </Link>
+
+        <nav
+          aria-label="Employee pages"
+          className={`mt-2 flex flex-col gap-1 overflow-x-hidden overflow-y-auto transition-[padding] duration-200 ${rail ? 'px-1.5' : 'px-3'}`}
+        >
+          {TABS.map(tab => {
+            const active = pathname === tab.href;
+            const Icon = tab.icon;
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                onClick={choosePage}
+                title={tab.label}
+                aria-current={active ? 'page' : undefined}
+                className={`flex h-11 min-w-0 items-center gap-3 overflow-hidden rounded-lg pr-3 text-sm transition-[padding,background-color,color] duration-200 ${
+                  rail ? 'pl-4' : 'pl-3'
+                } ${active ? 'bg-sidebar-active font-bold text-[#2dd4bf]' : 'font-medium text-slate-300 hover:bg-sidebar-active/60 hover:text-white'}`}
+              >
+                <Icon className="h-5 w-5 shrink-0" />
+                <span className={`whitespace-nowrap ${hideWhenRail}`}>{tab.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      </aside>
     </div>
   );
 }
