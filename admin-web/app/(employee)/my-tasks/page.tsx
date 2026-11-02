@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
-import { ClockIcon, HeroPanel, StatusTag, type TagTone } from '@/components/employee/parts';
+import { ClockIcon, StatusTag, type TagTone } from '@/components/employee/parts';
+import PointsCard from '@/components/employee/PointsCard';
 import DatePicker from '@/components/DatePicker';
-import Leaderboard from '@/components/Leaderboard';
 import TaskHoursChart from '@/components/TaskHoursChart';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -52,6 +52,7 @@ export default function MyTasksPage() {
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [hoursTab, setHoursTab] = useState<'task' | 'time'>('task');
 
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
@@ -179,16 +180,26 @@ export default function MyTasksPage() {
       .join(' · ');
     const actionBtn = 'flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-extrabold disabled:opacity-60 lg:h-11 lg:text-[13px]';
     return (
-      <article key={t.id} className="rounded-2xl border border-slate-200 bg-white p-3.5 lg:p-4">
+      <article
+        key={t.id}
+        className={`rounded-2xl bg-white ${isRunningHere ? 'border-2 border-brand p-3 lg:p-[15px]' : 'border border-slate-200 p-3.5 lg:p-4'}`}
+      >
         <div className="flex items-start justify-between gap-2">
           <h3 className="text-sm font-extrabold leading-5">
             {t.title}
             {t.source === 'self' && <span className="ml-1.5 text-[11px] font-medium text-slate-500 lg:hidden">(self-created)</span>}
           </h3>
-          {/* On the board the column already says the status; only the Done column needs the verdict. */}
-          <span className={colKey === 'done' ? '' : 'lg:hidden'}>
-            <StatusTag tone={STATUS_TONE[t.status]}>{t.status.replace('_', ' ')}</StatusTag>
-          </span>
+          {isRunningHere ? (
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand-light px-2.5 py-1 text-[13px] font-extrabold tabular-nums text-brand">
+              <span aria-hidden="true" className="h-2 w-2 rounded-full bg-brand" />
+              {formatElapsed(runningLog.started_at, now)}
+            </span>
+          ) : (
+            /* On the board the column already says the status; only the Done column needs the verdict. */
+            <span className={colKey === 'done' ? '' : 'lg:hidden'}>
+              <StatusTag tone={STATUS_TONE[t.status]}>{t.status.replace('_', ' ')}</StatusTag>
+            </span>
+          )}
         </div>
         {t.source === 'self' && <p className="mt-0.5 hidden text-[11px] font-semibold text-[#586474] lg:block">Self-created</p>}
         {t.description && <p className="mt-1 text-[13px] font-medium leading-[18px] text-slate-600 lg:mt-1.5">{t.description}</p>}
@@ -213,31 +224,12 @@ export default function MyTasksPage() {
 
         {t.status === 'in_progress' && (
           <div className="mt-2.5 lg:mt-3">
-            {isRunningHere ? (
-              <button
-                disabled={busyId === runningLog.id}
-                onClick={() => stopTimer(runningLog.id)}
-                className={`${actionBtn} bg-[#c2410c] text-white`}
-              >
-                <PauseIcon className="h-3.5 w-3.5" />
-                {formatElapsed(runningLog.started_at, now)} · Hold
-              </button>
-            ) : runningLog ? (
-              <p className="rounded-[10px] bg-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-600">
+            {runningLog && !isRunningHere && (
+              <p className="mb-3 rounded-[10px] bg-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-600">
                 Timer running on another task — hold it first to resume this one.
               </p>
-            ) : (
-              <button
-                disabled={busyId === t.id}
-                onClick={() => startTimer(t.id)}
-                className={`${actionBtn} border-2 border-brand text-brand`}
-              >
-                <PlayIcon className="h-3.5 w-3.5" />
-                Resume
-              </button>
             )}
-
-            <label htmlFor={`note-${t.id}`} className="mb-1.5 mt-3 block text-xs font-semibold text-slate-600">
+            <label htmlFor={`note-${t.id}`} className="mb-1.5 block text-xs font-bold text-slate-600">
               Work notes
             </label>
             <textarea
@@ -248,13 +240,35 @@ export default function MyTasksPage() {
               rows={2}
               className="h-16 w-full resize-none rounded-[10px] border border-slate-300 px-3 py-2.5 text-[13px] font-medium text-ink placeholder:text-slate-400"
             />
-            <button
-              disabled={busyId === t.id}
-              onClick={() => submit(t.id)}
-              className={`${actionBtn} mt-2.5 bg-[#15803d] text-white`}
-            >
-              Complete Task
-            </button>
+            <div className="mt-2.5 flex gap-2">
+              {isRunningHere ? (
+                <button
+                  disabled={busyId === runningLog.id}
+                  onClick={() => stopTimer(runningLog.id)}
+                  className={`${actionBtn} flex-1 border border-slate-300 bg-white text-brand hover:bg-slate-50`}
+                >
+                  <PauseIcon className="h-3.5 w-3.5" />
+                  Hold
+                </button>
+              ) : !runningLog ? (
+                <button
+                  disabled={busyId === t.id}
+                  onClick={() => startTimer(t.id)}
+                  className={`${actionBtn} flex-1 border border-slate-300 bg-white text-brand hover:bg-slate-50`}
+                >
+                  <PlayIcon className="h-3.5 w-3.5" />
+                  Resume
+                </button>
+              ) : null}
+              <button
+                disabled={busyId === t.id}
+                onClick={() => submit(t.id)}
+                className={`${actionBtn} flex-1 bg-brand text-white hover:bg-brand/90`}
+              >
+                <CheckIcon className="h-4 w-4" />
+                Complete
+              </button>
+            </div>
           </div>
         )}
 
@@ -286,25 +300,22 @@ export default function MyTasksPage() {
         <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
       ) : (
         <div className="lg:px-8 lg:pb-10 lg:pt-7">
-          {/* Computer: the green panel carries the title and the New Task button. A phone has the header instead. */}
-          <div className="hidden lg:block">
-            <HeroPanel pad="inner">
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="text-4xl font-extrabold leading-[44px] tracking-[-0.02em]">{taskCount}</h2>
-                  {runningLog && <p className="mt-0.5 text-[15px] font-semibold leading-[22px] text-white/90">1 timer running</p>}
-                </div>
-                <button
-                  onClick={() => setShowTaskForm(true)}
-                  className="h-12 rounded-[14px] bg-white px-6 text-sm font-extrabold text-brand hover:bg-brand-light"
-                >
-                  + New Task
-                </button>
-              </div>
-            </HeroPanel>
+          {/* Computer: how many tasks, and the way to add one. A phone has its own "Tasks" row below. */}
+          <div className="mb-5 hidden items-center justify-between gap-4 lg:flex">
+            <p className="text-base font-bold text-slate-700">
+              {taskCount}
+              {runningLog ? ' · 1 timer running' : ''}
+            </p>
+            <button
+              onClick={() => setShowTaskForm(true)}
+              className="flex h-11 items-center gap-2 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90"
+            >
+              <PlusIcon className="h-[18px] w-[18px]" />
+              New task
+            </button>
           </div>
 
-          <div className="relative mx-4 mt-4 lg:mx-5 lg:-mt-11">
+          <div className="mx-4 mt-4 lg:mx-0 lg:mt-0">
             <div className="mb-2.5 flex items-center justify-between lg:hidden">
               <h2 className="text-base font-extrabold">Tasks</h2>
               <button onClick={() => setShowTaskForm(true)} className="h-11 rounded-xl bg-brand px-4 text-[13px] font-extrabold text-white">
@@ -327,7 +338,7 @@ export default function MyTasksPage() {
                   <section
                     key={col.key}
                     aria-label={col.title}
-                    className="contents lg:block lg:rounded-[20px] lg:bg-[#e6ecf2] lg:p-3 lg:shadow-[0_8px_18px_rgba(6,78,59,0.10)]"
+                    className="contents lg:block lg:rounded-[20px] lg:bg-[#e8edf3] lg:p-3"
                   >
                     <div className="hidden h-10 items-center justify-between px-1.5 lg:flex">
                       <h2 className="text-sm font-extrabold">{col.title}</h2>
@@ -344,32 +355,57 @@ export default function MyTasksPage() {
               })}
             </div>
 
-            {taskTotals.length > 0 && (
-              <section className="mt-3 rounded-2xl border border-slate-200 bg-white p-3.5 lg:mt-6 lg:rounded-[20px] lg:px-7 lg:py-6">
-                <h2 className="mb-3 text-base font-extrabold lg:mb-4 lg:text-xl lg:leading-6">Hours by Task</h2>
-                {taskTotals.map(row => {
-                  const task = tasks.find(t => t.id === row.task_id);
-                  const pct = maxHours > 0 ? (row.hours / maxHours) * 100 : 0;
-                  return (
-                    <div key={row.task_id} className="mb-3 last:mb-0 lg:mb-0 lg:flex lg:h-10 lg:items-center lg:gap-5">
-                      <div className="flex justify-between text-xs font-semibold lg:block lg:w-60 lg:shrink-0 lg:text-sm">
-                        <span className="truncate">{task?.title ?? 'Deleted task'}</span>
-                        <span className="font-extrabold lg:hidden">{row.hours}</span>
-                      </div>
-                      <div className="mt-1 h-2.5 rounded-[5px] bg-slate-100 lg:mt-0 lg:flex-1">
-                        <div className="h-2.5 rounded-[5px] bg-brand" style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className="hidden w-14 shrink-0 text-right text-sm font-extrabold lg:block">{row.hours} h</span>
-                    </div>
-                  );
-                })}
+            <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start lg:gap-6">
+              <section aria-label="Hours" className="rounded-2xl border border-slate-200 bg-white p-3.5 lg:rounded-[20px] lg:p-6">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-base font-extrabold lg:text-lg lg:leading-6">Hours</h2>
+                  <div role="group" aria-label="Hours view" className="flex rounded-xl bg-slate-100 p-[3px]">
+                    {(
+                      [
+                        ['task', 'By task'],
+                        ['time', 'Over time'],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setHoursTab(key)}
+                        aria-pressed={hoursTab === key}
+                        className={`h-9 rounded-[9px] px-3.5 text-[13px] ${
+                          hoursTab === key ? 'bg-white font-extrabold text-brand shadow-[0_1px_2px_rgba(15,23,42,0.12)]' : 'font-bold text-slate-600 hover:text-ink'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {hoursTab === 'task' ? (
+                  taskTotals.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-slate-600">No time logged yet. Accept a task to start the timer.</p>
+                  ) : (
+                    taskTotals.map(row => {
+                      const task = tasks.find(t => t.id === row.task_id);
+                      const pct = maxHours > 0 ? (row.hours / maxHours) * 100 : 0;
+                      return (
+                        <div key={row.task_id} className="mb-3 last:mb-0 lg:mb-0 lg:flex lg:h-[42px] lg:items-center lg:gap-5">
+                          <div className="flex justify-between text-xs font-semibold lg:block lg:w-[210px] lg:shrink-0 lg:text-sm">
+                            <span className="truncate">{task?.title ?? 'Deleted task'}</span>
+                            <span className="font-extrabold tabular-nums lg:hidden">{row.hours}</span>
+                          </div>
+                          <div className="mt-1 h-2.5 rounded-[5px] bg-slate-100 lg:mt-0 lg:flex-1">
+                            <div className="h-2.5 rounded-[5px] bg-brand" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="hidden w-12 shrink-0 text-right text-sm font-extrabold tabular-nums lg:block">{row.hours} h</span>
+                        </div>
+                      );
+                    })
+                  )
+                ) : (
+                  <TaskHoursChart logs={logs} tasks={tasks} bare />
+                )}
               </section>
-            )}
-
-            {/* Not on the canvas: kept as they were, below the board. */}
-            <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
-              <TaskHoursChart logs={logs} tasks={tasks} />
-              <Leaderboard highlightEmployeeId={employeeId} />
+              <PointsCard employeeId={employeeId} />
             </div>
           </div>
         </div>
@@ -438,6 +474,14 @@ function CheckIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} className={className} aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" d="m5 13 4 4L19 7" />
+    </svg>
+  );
+}
+
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} className={className} aria-hidden="true">
+      <path strokeLinecap="round" d="M12 5v14M5 12h14" />
     </svg>
   );
 }

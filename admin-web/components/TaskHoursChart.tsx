@@ -11,7 +11,8 @@ const OPTIONS: { value: Granularity; label: string }[] = [
   { value: 'month', label: 'Monthly' },
 ];
 
-export default function TaskHoursChart({ logs, tasks }: { logs: TaskTimeLog[]; tasks: Task[] }) {
+/** `bare` leaves out the card and its title, for use inside another card (the employee Tasks page). */
+export default function TaskHoursChart({ logs, tasks, bare = false }: { logs: TaskTimeLog[]; tasks: Task[]; bare?: boolean }) {
   const [granularity, setGranularity] = useState<Granularity>('day');
   const [taskId, setTaskId] = useState('');
 
@@ -25,9 +26,9 @@ export default function TaskHoursChart({ logs, tasks }: { logs: TaskTimeLog[]; t
   const target = referenceHours(granularity);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ink">Hours Worked</h2>
+    <div className={bare ? '' : 'rounded-xl border border-slate-200 bg-white p-4'}>
+      <div className={`mb-4 flex flex-wrap items-center gap-2 ${bare ? 'justify-end' : 'justify-between'}`}>
+        {!bare && <h2 className="text-sm font-semibold text-ink">Hours Worked</h2>}
         <div className="flex flex-wrap gap-2">
           <select
             value={taskId}
@@ -73,7 +74,7 @@ export default function TaskHoursChart({ logs, tasks }: { logs: TaskTimeLog[]; t
               strokeDasharray="4 4"
               label={{ value: referenceLabel(granularity), position: 'insideTopRight', fontSize: 11, fill: '#94a3b8' }}
             />
-            <Bar dataKey="hours" name="Hours worked" fill="#0d9488" radius={[4, 4, 0, 0]} maxBarSize={32} />
+            <Bar dataKey="hours" name="Hours worked" fill={bare ? '#047857' : '#0d9488'} radius={[4, 4, 0, 0]} maxBarSize={32} />
           </BarChart>
         </ResponsiveContainer>
       )}

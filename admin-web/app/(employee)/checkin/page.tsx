@@ -46,6 +46,19 @@ const HISTORY_RANGE_DAYS: Record<HistoryRange, number> = { daily: 1, weekly: 7, 
 const WEEK_LENGTH = 7;
 
 type View = 'menu' | 'fix' | 'leave';
+type DayRow = {
+  key: string;
+  isToday: boolean;
+  offLabel: string | null;
+  inText: string | null;
+  outText: string | null;
+  minutes: number | null;
+  via: string;
+  missed: boolean;
+  inNow: boolean;
+  rejected: string[];
+  pending: string[];
+};
 type PunchModal = {
   punchType: '0' | '1' | '2' | '3';
   punchTime: string;
@@ -112,6 +125,12 @@ function monthShort(key: string, system: CalendarSystem) {
   if (system === 'BS') return (formatAdDate(key, 'BS').split(' ')[1] ?? '').slice(0, 3).toUpperCase();
   const [y, m, d] = key.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short' }).toUpperCase();
+}
+/** The month's name in the active calendar ("Kartik", "Nov"). */
+function monthName(key: string, system: CalendarSystem) {
+  if (system === 'BS') return formatAdDate(key, 'BS').split(' ')[1] ?? '';
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short' });
 }
 function weekday(key: string, style: 'short' | 'long') {
   return new Date(key + 'T00:00:00Z').toLocaleDateString(undefined, { weekday: style, timeZone: 'UTC' });
@@ -319,36 +338,48 @@ export default function CheckInPage() {
     return { status, inAt: punches ? formatTime(punches.checkIn.punch_time) : '—', worked: formatHoursMinutes(workedMinutes) };
   }, [history, pendingGpsRequests, today, now]);
 
-  // The last 7 days, newest first, from the accepted punches plus the
-  // company's week-off / holiday dates.
-  const weekDays = useMemo(() => {
-    const keys = Array.from({ length: WEEK_LENGTH }, (_, i) => addDays(today, -i));
-    const off = weekOffDatesInRange(keys[WEEK_LENGTH - 1], today, weeklyOffDay, holidays, myGender);
-    return keys.map(key => {
+  // One row per day for the table, newest first: the punches that count, plus
+  // anything that needs the employee (a rejected or pending request, a missed
+  // check-out) and the company's week-off days. Days with nothing on them are skipped.
+  const dayRows = useMemo(() => {
+    const span = HISTORY_RANGE_DAYS[historyRange];
+    const keys = Array.from({ length: span }, (_, i) => addDays(today, -i));
+    const off = weekOffDatesInRange(keys[keys.length - 1], today, weeklyOffDay, holidays, myGender);
+    const rows: DayRow[] = [];
+    for (const key of keys) {
       const isToday = key === today;
       const dayLogs = history.filter(l => nepalDateKey(l.punch_time) === key && l.punch_type !== '2' && l.punch_type !== '3');
       const punches = dayLogs.length ? selectDayPunches(dayLogs) : null;
-      const inText = punches ? formatTime(punches.checkIn.punch_time) : '';
-      if (punches?.checkOut) {
-        const minutes = Math.round(
-          (new Date(punches.checkOut.punch_time).getTime() - new Date(punches.checkIn.punch_time).getTime()) / 60000
-        );
-        return { key, isToday, range: `${inText} – ${formatTime(punches.checkOut.punch_time)}`, sub: formatHoursMinutes(Math.max(0, minutes)), chip: isToday ? 'Today' : null, missed: false };
-      }
-      if (punches) {
-        if (isToday) {
-          const minutes = Math.max(0, Math.round((now - new Date(punches.checkIn.punch_time).getTime()) / 60000));
-          return { key, isToday, range: `${inText} – now`, sub: `${formatHoursMinutes(minutes)} so far`, chip: 'Today', missed: false };
-        }
-        return { key, isToday, range: `${inText} – no check-out`, sub: 'Missed check-out', chip: null, missed: true };
-      }
-      if (off.has(key)) {
-        const holiday = holidays.find(h => h.holiday_date === key)?.name;
-        return { key, isToday, range: 'No work expected', sub: '', chip: holiday ?? 'Week off', missed: false };
-      }
-      return { key, isToday, range: isToday ? 'Not checked in yet' : 'No punches', sub: '', chip: isToday ? 'Today' : null, missed: false };
-    });
-  }, [history, holidays, weeklyOffDay, myGender, today, now]);
+      const rejected = rejectedGpsRequests.filter(r => nepalDateKey(r.punch_time) === key);
+      const pending = pendingGpsRequests.filter(r => nepalDateKey(r.punch_time) === key);
+      const isOff = off.has(key) && !punches;
+      if (!punches && !rejected.length && !pending.length && !isOff && !isToday) continue;
+      const minutes = punches
+        ? Math.max(
+            0,
+            Math.round(
+              ((punches.checkOut ? new Date(punches.checkOut.punch_time).getTime() : isToday ? now : new Date(punches.checkIn.punch_time).getTime()) -
+                new Date(punches.checkIn.punch_time).getTime()) /
+                60000
+            )
+          )
+        : null;
+      rows.push({
+        key,
+        isToday,
+        offLabel: isOff ? holidays.find(h => h.holiday_date === key)?.name ?? 'Week off' : null,
+        inText: punches ? formatTime(punches.checkIn.punch_time) : null,
+        outText: punches?.checkOut ? formatTime(punches.checkOut.punch_time) : null,
+        minutes: punches && (punches.checkOut || isToday) ? minutes : null,
+        via: punches ? methodLabel(punches.checkIn.method) : '',
+        missed: !!punches && !punches.checkOut && !isToday,
+        inNow: !!punches && !punches.checkOut && isToday,
+        rejected: rejected.map(r => `${formatTime(r.punch_time)} ${methodLabel('gps')} ${punchTypeLabel(r.punch_type).toLowerCase()}`),
+        pending: pending.map(r => `${formatTime(r.punch_time)} ${punchTypeLabel(r.punch_type).toLowerCase()}`),
+      });
+    }
+    return rows;
+  }, [history, historyRange, holidays, weeklyOffDay, myGender, today, now, rejectedGpsRequests, pendingGpsRequests]);
 
   const todayWeekOff = useMemo(() => {
     const off = weekOffDatesInRange(today, today, weeklyOffDay, holidays, myGender);
@@ -516,20 +547,62 @@ export default function CheckInPage() {
                 <h2 className="truncate text-[26px] font-extrabold leading-8 tracking-[-0.4px] lg:text-[40px] lg:leading-[48px] lg:tracking-[-0.02em]">
                   Namaste{firstName ? `, ${firstName}` : ''}
                 </h2>
-                <p className="mt-1 text-[13px] font-semibold text-white/85 lg:text-[15px] lg:leading-[22px]">{todayLine}</p>
+                <p className="mt-1 text-[13px] font-semibold text-white/85 lg:hidden">{todayLine}</p>
+                <p className="mt-2 hidden items-center gap-2 text-sm font-semibold text-emerald-100 lg:flex">
+                  <PinIcon className="h-4 w-4 shrink-0" />
+                  Uses your GPS location · approved by Admin/HR
+                </p>
               </div>
               {/* Computer: the punch buttons live in the green panel. */}
               <div className="hidden lg:block">
                 <PunchButtons onGreen disabled={!employeeId} onIn={() => openPunchModal('0')} onOut={() => openPunchModal('1')} />
-                <p className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-white/90">
-                  <PinIcon className="h-3.5 w-3.5 shrink-0" />
-                  Uses your GPS location · approved by Admin/HR
-                </p>
               </div>
             </div>
           </HeroPanel>
 
-          <section className="relative mx-4 -mt-14 rounded-[18px] bg-white p-[18px] shadow-[0_10px_20px_rgba(6,78,59,0.14)] lg:mx-5 lg:-mt-16 lg:rounded-[20px] lg:px-2 lg:py-6 lg:shadow-[0_10px_24px_rgba(6,78,59,0.14)]">
+          <section className="relative mx-5 -mt-16 hidden flex-wrap items-center gap-x-11 gap-y-5 rounded-[20px] border border-slate-200 bg-white px-7 py-[22px] shadow-[0_12px_28px_rgba(15,23,42,0.10)] lg:flex">
+            <div className="flex items-center gap-3.5">
+              <span
+                aria-hidden="true"
+                className={`h-3 w-3 shrink-0 rounded-full ${
+                  todaySummary.status.tone === 'good' ? 'bg-[#16a34a]' : todaySummary.status.tone === 'warning' ? 'bg-[#f97316]' : 'bg-slate-400'
+                }`}
+              />
+              <div>
+                <div className="text-2xl font-extrabold leading-[30px]">{todaySummary.status.label}</div>
+                <div className="text-sm font-semibold tabular-nums text-slate-600">
+                  {todaySummary.inAt === '—' ? 'Not checked in yet' : `since ${todaySummary.inAt}`}
+                </div>
+              </div>
+            </div>
+            <div className="border-l border-slate-200 pl-11">
+              <div className="text-2xl font-extrabold leading-[30px] tabular-nums">{todaySummary.worked}</div>
+              <div className="text-sm font-semibold text-slate-600">worked today</div>
+            </div>
+            <div className="ml-auto flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setView('fix')}
+                className="flex h-11 items-center gap-2 rounded-xl border border-slate-300 bg-white px-[18px] text-sm font-extrabold text-brand hover:bg-slate-50"
+              >
+                <EditIcon className="h-[18px] w-[18px]" />
+                Fix a missed punch
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('leave')}
+                className="flex h-11 items-center gap-2 rounded-xl border border-slate-300 bg-white px-[18px] text-sm font-extrabold text-brand hover:bg-slate-50"
+              >
+                <UmbrellaIcon className="h-[18px] w-[18px]" />
+                Leave requests
+              </button>
+              {pendingLeave > 0 && (
+                <span className="rounded-md bg-[#ffedd5] px-2 py-[3px] text-[11px] font-bold text-[#9a3412]">{pendingLeave} pending</span>
+              )}
+            </div>
+          </section>
+
+          <section className="relative mx-4 -mt-14 rounded-[18px] bg-white p-[18px] shadow-[0_10px_20px_rgba(6,78,59,0.14)] lg:hidden">
             <div className="flex">
               <StatCell
                 label="Status"
@@ -592,20 +665,20 @@ export default function CheckInPage() {
             </div>
           )}
 
-          <div className="mx-4 mt-4 flex flex-col gap-5 lg:mx-0 lg:mt-6 lg:flex-row lg:items-start lg:gap-6">
+          <div className="mx-4 mt-4 flex flex-col gap-5 lg:mx-5 lg:mt-6 lg:gap-6">
             {/* Recent activity: rows on a phone, a table on a computer */}
-            <section className="order-2 min-w-0 lg:order-1 lg:flex-[2] lg:rounded-[20px] lg:border lg:border-slate-200 lg:bg-white lg:px-7 lg:py-6">
+            <section className="order-2 min-w-0 lg:rounded-[20px] lg:border lg:border-slate-200 lg:bg-white lg:px-7 lg:py-6">
               <div className="mb-2.5 flex items-center justify-between gap-3 lg:mb-4">
-                <h2 className="text-base font-extrabold lg:text-xl">Recent activity</h2>
-                <div role="group" aria-label="Range" className="flex rounded-full bg-slate-200 p-[3px]">
+                <h2 className="text-base font-extrabold lg:text-lg lg:leading-6">Recent activity</h2>
+                <div role="group" aria-label="Range" className="flex rounded-xl bg-slate-100 p-[3px]">
                   {(['daily', 'weekly', 'monthly'] as const).map(r => (
                     <button
                       key={r}
                       type="button"
                       onClick={() => setHistoryRange(r)}
                       aria-pressed={historyRange === r}
-                      className={`h-[38px] rounded-full px-3 text-xs capitalize lg:px-4 ${
-                        historyRange === r ? 'bg-white font-extrabold text-brand' : 'font-bold text-slate-600'
+                      className={`h-9 rounded-[9px] px-3.5 text-[13px] capitalize ${
+                        historyRange === r ? 'bg-white font-extrabold text-brand shadow-[0_1px_2px_rgba(15,23,42,0.12)]' : 'font-bold text-slate-600 hover:text-ink'
                       }`}
                     >
                       {r}
@@ -637,49 +710,84 @@ export default function CheckInPage() {
                   </div>
 
                   <div className="hidden overflow-x-auto lg:block">
-                    <table className="w-full table-fixed text-left">
+                    <table className="w-full min-w-[760px] table-fixed text-left">
                       <colgroup>
-                        <col style={{ width: '28%' }} />
-                        <col style={{ width: '25%' }} />
-                        <col style={{ width: '17%' }} />
-                        <col style={{ width: '16%' }} />
-                        <col style={{ width: '14%' }} />
+                        <col style={{ width: '24%' }} />
+                        <col style={{ width: '11%' }} />
+                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '29%' }} />
                       </colgroup>
                       <thead>
                         <tr className={TABLE_HEAD}>
-                          <th className="pl-4">Date</th>
-                          <th>Activity</th>
-                          <th>Time</th>
-                          <th>Method</th>
-                          <th>Status</th>
+                          <th className="pl-5">Day</th>
+                          <th>In</th>
+                          <th>Out</th>
+                          <th>Worked</th>
+                          <th>Via</th>
+                          <th>Needs attention</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {historyEntries.map(entry => {
-                          const key = localDateKey(entry.punchTime);
-                          const isOut = entry.punchType === '1';
+                        {dayRows.map(row => {
+                          const label = `${weekday(row.key, 'short')} ${dayNumber(row.key, system)} ${monthName(row.key, system)}`;
+                          if (row.offLabel) {
+                            return (
+                              <tr key={row.key} className="h-11 border-t border-slate-100 bg-slate-50">
+                                <td className="pl-5 text-sm font-bold text-slate-600">{label}</td>
+                                <td colSpan={5} className="text-sm font-semibold text-slate-600">
+                                  {row.offLabel}
+                                </td>
+                              </tr>
+                            );
+                          }
                           return (
-                            <tr key={entry.id} className="h-14 border-t border-slate-100">
-                              <td className="pl-4">
-                                <div className="text-sm font-extrabold">{formatAdDate(key, system)}</div>
-                                <div className="text-xs font-semibold text-slate-500">{weekday(key, 'long')}</div>
+                            <tr key={row.key} className="h-14 border-t border-slate-100">
+                              <td className="pl-5 text-sm font-extrabold">
+                                {label}
+                                {row.isToday && <span className="ml-2 rounded-md bg-brand-light px-2 py-[3px] align-middle text-[11px] font-bold text-brand">Today</span>}
                               </td>
-                              <td>
-                                <span className="inline-flex items-center gap-2.5 text-sm font-bold">
-                                  <span
-                                    className={`inline-flex h-8 w-8 items-center justify-center rounded-full ${
-                                      isOut ? 'bg-[#ffedd5] text-[#c2410c]' : 'bg-[#e2f3e8] text-[#15803d]'
-                                    }`}
-                                  >
-                                    {isOut ? <SignOutIcon className="h-4 w-4" /> : <SignInIcon className="h-4 w-4" />}
-                                  </span>
-                                  {punchTypeLabel(entry.punchType)}
-                                </span>
+                              <td className="text-sm font-semibold tabular-nums">{row.inText ?? <span className="text-slate-400">–</span>}</td>
+                              <td className="text-sm tabular-nums">
+                                {row.outText ? (
+                                  <span className="font-semibold">{row.outText}</span>
+                                ) : row.inNow ? (
+                                  <span className="font-semibold text-brand">In now</span>
+                                ) : row.missed ? (
+                                  <span className="font-bold text-[#9a3412]">Missing</span>
+                                ) : (
+                                  <span className="text-slate-400">–</span>
+                                )}
                               </td>
-                              <td className="text-sm font-semibold">{formatTime(entry.punchTime)}</td>
-                              <td className="text-sm font-semibold text-slate-600">{methodLabel(entry.method)}</td>
+                              <td className="text-sm font-extrabold tabular-nums">
+                                {row.minutes != null ? formatHoursMinutes(row.minutes) : <span className="font-normal text-slate-400">–</span>}
+                              </td>
+                              <td className="text-sm font-medium text-slate-600">{row.via}</td>
                               <td>
-                                <StatusTag tone={entry.accepted ? 'good' : 'critical'}>{entry.accepted ? 'Accepted' : 'Rejected'}</StatusTag>
+                                <div className="flex flex-wrap items-center gap-2 py-2">
+                                  {row.missed && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setView('fix')}
+                                      className="h-9 rounded-[10px] border border-[#fdba74] bg-[#fff7ed] px-3 text-[13px] font-extrabold text-[#9a3412] hover:bg-[#ffedd5]"
+                                    >
+                                      Fix it
+                                    </button>
+                                  )}
+                                  {row.rejected.map(t => (
+                                    <span key={t} className="flex items-center gap-2">
+                                      <StatusTag tone="critical">Rejected</StatusTag>
+                                      <span className="text-[13px] text-slate-600">{t}</span>
+                                    </span>
+                                  ))}
+                                  {row.pending.map(t => (
+                                    <span key={t} className="flex items-center gap-2">
+                                      <StatusTag tone="warning">Pending</StatusTag>
+                                      <span className="text-[13px] text-slate-600">{t}</span>
+                                    </span>
+                                  ))}
+                                </div>
                               </td>
                             </tr>
                           );
@@ -691,8 +799,8 @@ export default function CheckInPage() {
               )}
             </section>
 
-            <div className="order-1 flex min-w-0 flex-col gap-4 lg:order-2 lg:w-[400px] lg:shrink-0 lg:gap-6">
-              <div className="rounded-2xl border border-slate-200 bg-white lg:rounded-[20px]">
+            <>
+              <div className="order-1 rounded-2xl border border-slate-200 bg-white lg:hidden">
                 <button
                   type="button"
                   onClick={() => setView('fix')}
@@ -729,7 +837,7 @@ export default function CheckInPage() {
               </div>
 
               {pendingGpsRequests.length > 0 && (
-                <section>
+                <section className="order-1 lg:hidden">
                   <h2 className="mb-2 text-base font-extrabold">Waiting for approval</h2>
                   {pendingGpsRequests.map(r => {
                     const key = localDateKey(r.punch_time);
@@ -748,50 +856,7 @@ export default function CheckInPage() {
                   })}
                 </section>
               )}
-
-              {/* Computer only: the phone already has the recent-activity rows */}
-              <section className="hidden rounded-[20px] border border-slate-200 bg-white p-6 lg:block">
-                <h2 className="text-xl font-extrabold leading-[26px]">Last 7 days</h2>
-                <p className="mb-3 mt-0.5 text-[13px] font-semibold text-slate-600">Hours from your accepted punches</p>
-                {weekDays.map(day => (
-                  <div key={day.key} className="flex h-14 items-center gap-3 border-t border-slate-100">
-                    <span
-                      className={`flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-[10px] ${
-                        day.isToday ? 'bg-brand text-white' : 'bg-slate-100 text-ink'
-                      }`}
-                    >
-                      <span className={`text-[10px] font-extrabold uppercase leading-3 ${day.isToday ? '' : 'text-slate-600'}`}>
-                        {weekday(day.key, 'short')}
-                      </span>
-                      <span className="text-base font-extrabold leading-[18px]">{dayNumber(day.key, system)}</span>
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className={`block truncate text-sm font-extrabold ${day.sub ? '' : 'text-slate-600'}`}>{day.range}</span>
-                      {day.sub && (
-                        <span className={`block text-xs font-semibold ${day.missed ? 'text-[#c2410c]' : 'text-slate-600'}`}>{day.sub}</span>
-                      )}
-                    </span>
-                    {day.missed ? (
-                      <button
-                        type="button"
-                        onClick={() => setView('fix')}
-                        className="rounded-full bg-[#ffedd5] px-2.5 py-1 text-[11px] font-extrabold text-[#c2410c] hover:bg-[#fed7aa]"
-                      >
-                        Fix it
-                      </button>
-                    ) : day.chip ? (
-                      <span
-                        className={`rounded-full px-2.5 py-[3px] text-[11px] font-extrabold ${
-                          day.chip === 'Today' ? 'bg-brand-light text-brand' : 'bg-info-bg text-info-text'
-                        }`}
-                      >
-                        {day.chip}
-                      </span>
-                    ) : null}
-                  </div>
-                ))}
-              </section>
-            </div>
+            </>
           </div>
         </div>
       )}

@@ -176,19 +176,32 @@ export default function PortalCalendar(props: PortalCalendarProps) {
     return row.date === todayKey ? 'Not yet' : 'Missing';
   }
 
+  // The days worth a second look: absent, late, early, a missing check-out, on leave. Newest first.
+  const attention = useMemo(() => {
+    const out: { date: string; text: string }[] = [];
+    for (const row of tableRows) {
+      const kind = kindOf(row);
+      const notes: string[] = [];
+      if (kind === 'absent') notes.push('Absent, no punches recorded');
+      if (kind === 'leave') notes.push('On leave');
+      if (kind === 'present') {
+        if (row.lateMinutes > 0) notes.push(`Checked in ${shortDur(row.lateMinutes)} late`);
+        if (row.earlyMinutes > 0) notes.push(`Checked out ${shortDur(row.earlyMinutes)} early`);
+        if (!row.checkOut && row.date < todayKey && row.checkIn) notes.push(`Checked in ${fmtTime(row.checkIn)}, no check-out`);
+      }
+      if (notes.length) out.push({ date: row.date, text: notes.join(' · ') });
+    }
+    return out.sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [tableRows, todayKey]);
+
   const th = 'h-10 bg-slate-100 text-[11px] font-extrabold uppercase tracking-[0.06em] text-slate-600';
   const dash = <span className="text-slate-300">–</span>;
 
   return (
     <div className="lg:px-8 lg:pb-10 lg:pt-7">
+      <div className="lg:hidden">
       <HeroPanel pad="inner">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
-          <div className="hidden min-w-0 lg:block">
-            <p className="text-xs font-extrabold uppercase leading-4 tracking-[0.06em] text-white/90">Date range</p>
-            <h2 className="mt-0.5 text-[32px] font-extrabold leading-10 tracking-[-0.02em]">
-              {formatDdMmYyyy(range.start, system)} to {formatDdMmYyyy(range.end, system)}
-            </h2>
-          </div>
           <div className="flex items-center rounded-[14px] bg-white/15 p-1">
             <button
               type="button"
@@ -212,20 +225,51 @@ export default function PortalCalendar(props: PortalCalendarProps) {
           </div>
         </div>
       </HeroPanel>
+      </div>
 
-      <div className="relative mx-4 -mt-10 flex flex-col gap-4 lg:mx-5 lg:-mt-11 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-6">
+      {/* Computer: the month stepper and its range, above the cards */}
+      <div className="mb-6 hidden flex-wrap items-center gap-x-4 gap-y-2 lg:flex">
+        <div className="flex items-center rounded-[14px] border border-slate-200 bg-white p-[3px]">
+          <button
+            type="button"
+            onClick={() => go(-1)}
+            aria-label="Previous month"
+            className="flex h-10 w-10 items-center justify-center rounded-[11px] text-brand hover:bg-slate-100"
+          >
+            <ChevronLeftIcon className="h-[18px] w-[18px]" />
+          </button>
+          <div aria-live="polite" className="w-48 text-center text-base font-extrabold">
+            {month.label}
+          </div>
+          <button
+            type="button"
+            onClick={() => go(1)}
+            aria-label="Next month"
+            className="flex h-10 w-10 items-center justify-center rounded-[11px] text-brand hover:bg-slate-100"
+          >
+            <ChevronRightIcon className="h-[18px] w-[18px]" />
+          </button>
+        </div>
+        <span className="text-sm font-semibold tabular-nums text-slate-600">
+          {formatDdMmYyyy(range.start, system)} – {formatDdMmYyyy(range.end, system)}
+        </span>
+      </div>
+
+
+
+      <div className="relative mx-4 -mt-10 flex flex-col gap-4 lg:mx-0 lg:mt-0 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-6">
         {/* On a phone the two columns dissolve so the picked day can sit right under the grid. */}
         <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
         {/* Month grid */}
-        <section className="order-1 min-w-0 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_10px_24px_rgba(6,78,59,0.10)] lg:order-none lg:p-6">
-          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-extrabold uppercase tracking-[0.06em] text-slate-600 lg:gap-2">
+        <section className="order-1 min-w-0 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_10px_24px_rgba(6,78,59,0.10)] lg:order-none lg:p-6 lg:shadow-none">
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-extrabold uppercase tracking-[0.06em] text-slate-600 lg:gap-1.5 lg:text-xs lg:font-bold lg:normal-case lg:tracking-normal">
             {WEEKDAY_LABELS.map(w => (
               <div key={w} className="py-1.5">
                 {w}
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-1 lg:gap-2">
+          <div className="grid grid-cols-7 gap-1 lg:gap-1.5">
             {month.weeks.flat().map((cell, i) => {
               const status = dayStatus.get(cell.adKey);
               const onLeave = leaveDates.has(cell.adKey);
@@ -235,6 +279,24 @@ export default function PortalCalendar(props: PortalCalendarProps) {
                 ? dayFlags(status, onLeave, onWeekOff, cell.adKey <= todayKey)
                 : dayFlags(undefined, false, false, false);
               const look = cell.inMonth ? cellLook(flags) : { bg: '', word: null, wordColor: '', dot: '' };
+              // A computer tints only what needs a look: absent, leave, week off, a missing check-out.
+              const isMissing = !!flags.checkedInOnly && cell.adKey < todayKey;
+              const isFuture = cell.inMonth && !status && cell.adKey > todayKey && !onLeave && !onWeekOff;
+              const deskLook = !cell.inMonth
+                ? 'lg:border-transparent lg:bg-transparent'
+                : flags.leave
+                  ? 'lg:border-transparent lg:bg-[#f3e8ff]'
+                  : flags.weekOff
+                    ? 'lg:border-transparent lg:bg-slate-100'
+                    : flags.absent
+                      ? 'lg:border-transparent lg:bg-[#fee2e2]'
+                      : isMissing
+                        ? 'lg:border-[#fdba74] lg:bg-[#fff7ed]'
+                        : cell.isToday
+                          ? 'lg:border-2 lg:border-brand lg:bg-white'
+                          : isFuture
+                            ? 'lg:border-dashed lg:border-slate-300 lg:bg-transparent'
+                            : 'lg:border-slate-200 lg:bg-white';
               const pills = [
                 flags.late && { text: 'Late', cls: 'bg-[#f97316]' },
                 flags.early && { text: 'Early', cls: 'bg-[#ef4444]' },
@@ -247,13 +309,13 @@ export default function PortalCalendar(props: PortalCalendarProps) {
                   onClick={() => onSelectDate(cell.adKey)}
                   aria-pressed={selected}
                   aria-label={`${formatAdDate(cell.adKey, system)}${look.word ? `, ${look.word}` : ''}${pills.length ? `, ${pills.map(p => p.text).join(' and ')}` : ''}`}
-                  className={`flex min-h-[56px] flex-col items-start justify-between rounded-xl p-1.5 text-left lg:min-h-[88px] lg:rounded-2xl lg:p-2.5 ${look.bg} ${
-                    cell.inMonth ? 'hover:brightness-[0.97]' : 'opacity-60'
+                  className={`flex min-h-[56px] flex-col items-start justify-between rounded-xl p-1.5 text-left lg:min-h-[92px] lg:rounded-xl lg:border lg:p-2.5 ${look.bg} ${deskLook} ${
+                    cell.inMonth ? 'hover:brightness-[0.97]' : 'opacity-60 lg:opacity-100'
                   } ${selected ? 'ring-2 ring-brand ring-offset-1' : ''}`}
                 >
                   <span
                     className={`flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[13px] font-extrabold lg:text-sm ${
-                      cell.isToday ? 'bg-brand text-white' : cell.inMonth ? 'text-ink' : 'text-slate-300'
+                      cell.isToday ? 'bg-brand text-white' : cell.inMonth ? (isFuture ? 'text-ink lg:text-slate-400' : 'text-ink') : 'text-slate-300'
                     }`}
                   >
                     {cell.displayDay}
@@ -262,13 +324,31 @@ export default function PortalCalendar(props: PortalCalendarProps) {
                     <>
                       {/* Phone: just a dot, there is no room for words */}
                       {look.dot && <span className={`ml-1 h-1.5 w-1.5 rounded-full lg:hidden ${look.dot}`} />}
-                      <span className="hidden flex-wrap items-center gap-1 lg:flex">
-                        {look.word && <span className={`text-[11px] font-bold ${look.wordColor}`}>{look.word}</span>}
-                        {pills.map(p => (
-                          <span key={p.text} className={`rounded-full px-1.5 py-px text-[9px] font-extrabold uppercase leading-[14px] text-white ${p.cls}`}>
-                            {p.text}
-                          </span>
-                        ))}
+                      <span className="hidden w-full lg:block">
+                        {flags.leave ? (
+                          <span className="text-xs font-extrabold text-[#581c87]">On leave</span>
+                        ) : flags.weekOff ? (
+                          <span className="text-xs font-bold text-slate-600">Week off</span>
+                        ) : flags.absent ? (
+                          <span className="text-xs font-extrabold text-[#7f1d1d]">Absent</span>
+                        ) : isMissing ? (
+                          <span className="text-xs font-extrabold text-[#7c2d12]">No check-out</span>
+                        ) : status && flags.checkedInOnly ? (
+                          <span className="text-xs font-extrabold tabular-nums text-brand">In {fmtTime(status.checkIn.punch_time)}</span>
+                        ) : status ? (
+                          <>
+                            <span className="block text-sm font-bold tabular-nums">{formatHoursMinutes(status.totalMinutes)}</span>
+                            {status.overtimeMinutes > 0 && (
+                              <span className="block text-[11px] font-bold tabular-nums text-[#1d4ed8]">OT {formatHoursMinutes(status.overtimeMinutes)}</span>
+                            )}
+                            {status.isLate && (
+                              <span className="block text-[11px] font-bold tabular-nums text-[#9a3412]">Late {formatHoursMinutes(status.lateMinutes)}</span>
+                            )}
+                            {status.isEarly && (
+                              <span className="block text-[11px] font-bold tabular-nums text-[#9a3412]">Early {formatHoursMinutes(status.earlyMinutes)}</span>
+                            )}
+                          </>
+                        ) : null}
                       </span>
                     </>
                   )}
@@ -276,7 +356,14 @@ export default function PortalCalendar(props: PortalCalendarProps) {
               );
             })}
           </div>
-          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] font-semibold text-slate-600">
+          <div className="mt-4 hidden flex-wrap gap-x-5 gap-y-1.5 text-xs font-semibold text-slate-600 lg:flex">
+            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-slate-300 bg-white" /> Worked</span>
+            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-slate-100" /> Week off</span>
+            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[#fee2e2]" /> Absent</span>
+            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded bg-[#f3e8ff]" /> On leave</span>
+            <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded border border-[#fdba74] bg-[#fff7ed]" /> Needs a fix</span>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] font-semibold text-slate-600 lg:hidden">
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#e2f3e8]" /> Present</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#dbeafe]" /> Checked in</span>
             <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#f3e8ff]" /> On leave</span>
@@ -289,7 +376,31 @@ export default function PortalCalendar(props: PortalCalendarProps) {
         </section>
 
         {/* Hours trend */}
-        <section className="order-4 min-w-0 rounded-[20px] border border-slate-200 bg-white p-5 lg:order-none lg:p-6">
+        <section aria-label="Needs attention" className="order-4 hidden min-w-0 rounded-[20px] border border-slate-200 bg-white p-6 lg:order-none lg:block">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-extrabold leading-6">Needs attention</h2>
+            <span className="text-sm font-semibold text-slate-600">
+              {attention.length} {attention.length === 1 ? 'day' : 'days'} this month
+            </span>
+          </div>
+          {attention.length === 0 ? (
+            <p className="py-6 text-center text-sm text-slate-600">Nothing needs your attention this month.</p>
+          ) : (
+            <ul>
+              {attention.map(item => (
+                <li key={item.date} className="flex min-h-14 items-center gap-4 border-t border-slate-100">
+                  <span className="w-[130px] shrink-0 text-sm font-extrabold tabular-nums">
+                    {weekday(item.date)} {formatAdDate(item.date, system).split(' ').slice(0, 2).join(' ')}
+                  </span>
+                  <span className="text-sm font-semibold text-slate-700">{item.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Hours trend (phone) */}
+        <section className="order-4 min-w-0 rounded-[20px] border border-slate-200 bg-white p-5 lg:hidden">
           <div className="mb-3 flex items-baseline justify-between gap-2">
             <h2 className="text-xl font-extrabold leading-6">Hours trend</h2>
             <span className="text-[11px] font-semibold text-slate-500 lg:hidden">Scroll to see all days →</span>
@@ -320,7 +431,20 @@ export default function PortalCalendar(props: PortalCalendarProps) {
 
         <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
         {/* This month */}
-        <section className="order-3 rounded-[20px] border border-slate-200 bg-white p-5 lg:order-none lg:p-6">
+        <section aria-label="Month summary" className="hidden rounded-[20px] border border-slate-200 bg-white p-6 lg:block">
+          <h2 className="text-lg font-extrabold leading-6">{month.label}</h2>
+          <dl className="mt-2.5">
+            <SummaryRow label="Hours worked" value={formatHoursMinutes(summary.totalWorkMinutes)} strong />
+            <SummaryRow label="Present" value={`${summary.entries.present.length} ${summary.entries.present.length === 1 ? 'day' : 'days'}`} />
+            <SummaryRow label="Absent" value={`${summary.entries.absent.length} ${summary.entries.absent.length === 1 ? 'day' : 'days'}`} />
+            <SummaryRow label="Late in" value={`${summary.entries.late.length} ${summary.entries.late.length === 1 ? 'day' : 'days'}${totals.late > 0 ? ` · ${formatHoursMinutes(totals.late)}` : ''}`} />
+            <SummaryRow label="Early out" value={`${summary.entries.early.length} ${summary.entries.early.length === 1 ? 'day' : 'days'}${totals.early > 0 ? ` · ${formatHoursMinutes(totals.early)}` : ''}`} />
+            <SummaryRow label="Overtime" value={formatHoursMinutes(summary.overtimeMinutes)} />
+          </dl>
+        </section>
+
+        {/* This month (phone tiles) */}
+        <section className="order-3 rounded-[20px] border border-slate-200 bg-white p-5 lg:hidden">
           <h2 className="mb-3 text-xl font-extrabold leading-6">This month</h2>
           <div className="grid grid-cols-2 gap-2.5">
             {TILE_ORDER.map(key => {
@@ -376,9 +500,37 @@ export default function PortalCalendar(props: PortalCalendarProps) {
           )}
         </section>
 
+        {/* The picked day, as a list (computer) */}
+        {selectedDate && (
+          <section aria-label="Picked day" className="hidden rounded-[20px] border border-slate-200 bg-white p-6 lg:block">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-extrabold leading-6">
+                {weekday(selectedDate)} {formatAdDate(selectedDate, system)}
+              </h2>
+              {selectedDaySummary && selectedDaySummary.overtimeMinutes > 0 && <StatusTag tone="info">Overtime</StatusTag>}
+            </div>
+            {selectedLeave && (
+              <p className="mt-2 rounded-xl bg-[#f3e8ff] px-3.5 py-2.5 text-sm font-extrabold capitalize text-[#581c87]">On leave · {selectedLeave.leave_type}</p>
+            )}
+            {dayLoading ? (
+              <p className="mt-3 text-sm text-slate-600">Loading…</p>
+            ) : !selectedDaySummary ? (
+              !selectedLeave && <p className="mt-3 text-sm text-slate-600">No punches recorded.</p>
+            ) : (
+              <dl className="mt-2.5">
+                <SummaryRow label="In" value={fmtTime(selectedDaySummary.checkIn.punch_time)} />
+                <SummaryRow label="Out" value={selectedDaySummary.checkOut ? fmtTime(selectedDaySummary.checkOut.punch_time) : 'Not yet'} />
+                <SummaryRow label="Worked" value={formatHoursMinutes(selectedDaySummary.totalMinutes)} strong />
+                <SummaryRow label="Overtime" value={formatHoursMinutes(selectedDaySummary.overtimeMinutes)} />
+                <SummaryRow label="Via" value={selectedDaySummary.checkIn.method.charAt(0).toUpperCase() + selectedDaySummary.checkIn.method.slice(1)} />
+              </dl>
+            )}
+          </section>
+        )}
+
         {/* The picked day (right under the grid on a phone) */}
         {selectedDate && (
-          <section className="order-2 rounded-[20px] border border-slate-200 bg-white p-5 lg:order-none lg:p-6">
+          <section className="order-2 rounded-[20px] border border-slate-200 bg-white p-5 lg:hidden">
             <h2 className="text-lg font-extrabold leading-6">{formatAdDate(selectedDate, system)}</h2>
             <p className="mb-3 text-[13px] font-semibold text-slate-600">{weekday(selectedDate, 'long')}</p>
             {selectedLeave && (
@@ -430,8 +582,8 @@ export default function PortalCalendar(props: PortalCalendarProps) {
         </div>
       </div>
 
-      <div className="mx-4 mt-4 lg:mx-5 lg:mt-6">
-        {/* Daily log */}
+      <div className="mx-4 mt-4 lg:hidden">
+        {/* Daily log (phone) */}
         <section className="min-w-0 rounded-[20px] border border-slate-200 bg-white p-5 lg:p-6">
           <h2 className="mb-4 text-xl font-extrabold leading-6">Daily log</h2>
           {tableRows.length === 0 ? (
@@ -582,6 +734,15 @@ export default function PortalCalendar(props: PortalCalendarProps) {
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className="flex justify-between gap-3 border-t border-slate-100 py-[9px] text-sm">
+      <dt className="text-slate-600">{label}</dt>
+      <dd className={`m-0 tabular-nums ${strong ? 'font-extrabold' : 'font-bold'}`}>{value}</dd>
     </div>
   );
 }

@@ -6,6 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { manrope } from '@/lib/fonts';
 import { PageTitleProvider, usePageTitle } from '@/lib/pageTitle';
+import { formatTodayLine } from '@/lib/calendar';
+import { nepalTodayIso } from '@/lib/shift';
 import ConfigWarning from './ConfigWarning';
 import CalendarSystemSwitch from './CalendarSystemSwitch';
 import BodyFontClass from './BodyFontClass';
@@ -23,7 +25,9 @@ const TABS = [
  * across page changes — like the owner console's AppShellLayout, so the sidebar
  * (and whether it is open) and the header survive a navigation instead of being
  * rebuilt by every page. Pages call `usePageTitle('Payroll')` to set the header's
- * title, and `usePageTitle(title, 'Check In/Out')` for the small label above it.
+ * title; a sub-page passes the page it came from as the second argument
+ * (`usePageTitle('Leave Requests', 'Check In/Out')`) and the header shows it as a
+ * breadcrumb before the title.
  *
  * From `lg` up it wears the owner console's shell — the dark sidebar and a white
  * top header (page name, AD/BS switch, account menu). Below `lg` it is the mobile
@@ -146,11 +150,17 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Computer: the owner console's white top header */}
         <header className="hidden border-b border-slate-200 bg-white lg:sticky lg:top-0 lg:z-20 lg:flex lg:items-center lg:justify-between lg:gap-4 lg:px-7 lg:py-4">
-          <div className="min-w-0">
-            <div className="text-xs font-extrabold uppercase leading-4 tracking-[0.06em] text-[#586474]">{eyebrow || 'Employee portal'}</div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            {eyebrow && (
+              <>
+                <span className="shrink-0 text-base font-bold text-slate-600">{eyebrow}</span>
+                <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-400" />
+              </>
+            )}
             <h1 className="truncate text-2xl font-extrabold leading-8 tracking-[-0.01em]">{title}</h1>
           </div>
           <div className="flex shrink-0 items-center gap-3.5">
+            <span className="hidden text-[13px] font-semibold tabular-nums text-slate-600 xl:inline">{formatTodayLine(nepalTodayIso())}</span>
             <CalendarSystemSwitch variant="portal" />
             <span aria-hidden="true" className="h-8 w-px bg-slate-200" />
             <AccountMenu variant="desktop" {...account} />
@@ -270,7 +280,7 @@ function DesktopSidebar({ pathname }: { pathname: string }) {
               title={tab.label}
               aria-current={active ? 'page' : undefined}
               className={`flex h-11 min-w-0 items-center gap-3 overflow-hidden rounded-lg pr-3 text-sm transition-[padding,background-color,color] duration-200 ${rowPadding} ${
-                active ? 'bg-sidebar-active font-bold text-[#2dd4bf]' : 'font-medium text-slate-300 hover:bg-sidebar-active/60 hover:text-white'
+                active ? 'bg-emerald-400/[0.16] font-bold text-emerald-300' : 'font-medium text-slate-300 hover:bg-sidebar-active/60 hover:text-white'
               }`}
             >
               <Icon className="h-5 w-5 shrink-0" />
@@ -434,6 +444,13 @@ function ProfileTabIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true">
       <circle cx="12" cy="8" r="3.5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 20c1.2-3.5 4-5.5 7.5-5.5s6.3 2 7.5 5.5" />
+    </svg>
+  );
+}
+function ChevronRightIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m9 6 6 6-6 6" />
     </svg>
   );
 }

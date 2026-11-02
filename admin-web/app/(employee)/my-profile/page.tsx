@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
-import { EditIcon, HeroPanel, StatusTag } from '@/components/employee/parts';
+import { EditIcon } from '@/components/employee/parts';
+import FormDialog from '@/components/employee/FormDialog';
+import RowMenu from '@/components/employee/RowMenu';
 import SectionDialog from '@/components/profile/SectionDialog';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
@@ -12,7 +14,7 @@ import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { SKILL_CATEGORIES } from '@/lib/skillCategories';
-import type { Branch, Employee, EmployeeEducation, EmployeeWorkExperience, LeaderboardRow, PointRedemption } from '@/lib/types';
+import type { Branch, Employee, EmployeeEducation, EmployeeWorkExperience } from '@/lib/types';
 
 const EMPTY_PROFILE_FORM = { name: '', email: '', phone: '', address: '', department: '', designation: '' };
 const EMPTY_EMERGENCY_FORM = { emergency_contact_name: '', emergency_contact_relationship: '', emergency_contact_phone: '' };
@@ -32,12 +34,6 @@ function tenureDays(dateOfJoining: string | null, resignedAt: string | null) {
   return Math.max(0, Math.floor((end - start) / 86400000));
 }
 
-function statusTone(status: string) {
-  if (status === 'approved') return 'good' as const;
-  if (status === 'rejected') return 'critical' as const;
-  return 'warning' as const;
-}
-
 export default function MyProfilePage() {
   usePageTitle('Profile');
   const { system } = useCalendarSystem();
@@ -46,8 +42,6 @@ export default function MyProfilePage() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
-  const [board, setBoard] = useState<LeaderboardRow | null>(null);
-  const [redemptions, setRedemptions] = useState<PointRedemption[]>([]);
 
   const [profileForm, setProfileForm] = useState(EMPTY_PROFILE_FORM);
   const [showDetails, setShowDetails] = useState(false);
@@ -58,12 +52,6 @@ export default function MyProfilePage() {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [pendingPhotoFile, setPendingPhotoFile] = useState<File | null>(null);
-
-  const [showRedeem, setShowRedeem] = useState(false);
-  const [redeemPoints, setRedeemPoints] = useState(0);
-  const [redeemNote, setRedeemNote] = useState('');
-  const [submittingRedeem, setSubmittingRedeem] = useState(false);
-  const [redeemError, setRedeemError] = useState<string | null>(null);
 
   const [emergencyForm, setEmergencyForm] = useState(EMPTY_EMERGENCY_FORM);
 
@@ -107,16 +95,6 @@ export default function MyProfilePage() {
           });
         }
       });
-    supabase
-      .from('point_redemptions')
-      .select('*')
-      .eq('employee_id', empId)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => setRedemptions(data ?? []));
-    supabase.rpc('get_leaderboard').then(({ data }) => {
-      const rows = (data as LeaderboardRow[]) ?? [];
-      setBoard(rows.find(r => r.employee_id === empId) ?? null);
-    });
     supabase
       .from('employee_education')
       .select('*')
@@ -345,35 +323,6 @@ export default function MyProfilePage() {
     }
   }
 
-  async function handleRedeemSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!employee) return;
-    setRedeemError(null);
-    if (redeemPoints <= 0) {
-      setRedeemError('Enter how many points you want to redeem.');
-      return;
-    }
-    if (board && redeemPoints > board.total_points) {
-      setRedeemError(`You only have ${board.total_points} points available.`);
-      return;
-    }
-    setSubmittingRedeem(true);
-    const { error } = await supabase.from('point_redemptions').insert({
-      employee_id: employee.id,
-      points_requested: redeemPoints,
-      note: redeemNote || null,
-    });
-    setSubmittingRedeem(false);
-    if (error) {
-      setRedeemError(error.message);
-      return;
-    }
-    setShowRedeem(false);
-    setRedeemPoints(0);
-    setRedeemNote('');
-    reload(employee.id);
-  }
-
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.replace('/login');
@@ -406,6 +355,19 @@ export default function MyProfilePage() {
   const daysText = days !== null ? `${days} days` : '—';
   const daysLabel = employee.resigned_at ? 'Days worked' : 'With the company';
   const emergencySet = !!(employee.emergency_contact_name || employee.emergency_contact_phone);
+
+  // Skills are stored as "Category: value"; the ones added from the phone app have no category.
+  const skillGroups = (() => {
+    const groups = new Map<string, { skill: string; value: string }[]>();
+    for (const skill of employee.skills) {
+      const i = skill.indexOf(': ');
+      const category = i > 0 && (SKILL_CATEGORIES as readonly string[]).includes(skill.slice(0, i)) ? skill.slice(0, i) : 'Other';
+      const list = groups.get(category) ?? [];
+      list.push({ skill, value: category === 'Other' ? skill : skill.slice(i + 2) });
+      groups.set(category, list);
+    }
+    return [...SKILL_CATEGORIES, 'Other'].filter(c => groups.has(c)).map(category => ({ category, items: groups.get(category)! }));
+  })();
 
   const personalRows: [string, string][] = [
     ['Name', employee.name || '—'],
@@ -488,52 +450,54 @@ export default function MyProfilePage() {
       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelected} className="hidden" />
 
       <div className="lg:px-8 lg:pb-10 lg:pt-7">
-        {/* Computer: just the green band the identity card sits over; the header says "Profile". */}
-        <div className="hidden lg:block">
-          <HeroPanel pad="inner">
-            <div aria-hidden="true" />
-          </HeroPanel>
-        </div>
-
-        <div className="relative mx-4 mt-4 pb-4 lg:mx-5 lg:-mt-11 lg:pb-0">
+        <div className="mx-4 mt-4 pb-4 lg:mx-0 lg:mt-0 lg:pb-0">
           {/* Who you are: a centred card on a phone, a wide card with three facts on a computer. */}
-          <section aria-label="Profile summary" className="rounded-2xl border border-slate-200 bg-white p-5 text-center lg:flex lg:flex-wrap lg:items-center lg:gap-x-10 lg:gap-y-6 lg:rounded-[20px] lg:p-7 lg:text-left lg:shadow-[0_10px_24px_rgba(6,78,59,0.12)]">
-            <div className="flex flex-col items-center lg:min-w-0 lg:flex-[1_1_400px] lg:flex-row lg:gap-6">
-              <button
-                type="button"
-                onClick={openPhotoPicker}
-                aria-label="Change photo"
-                title="Change photo"
-                className="relative mb-3 h-[72px] w-[72px] shrink-0 rounded-full lg:mb-0 lg:h-[104px] lg:w-[104px]"
-              >
-                <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-brand-light text-3xl font-extrabold text-brand lg:text-[40px]">
-                  {uploadingPhoto ? (
-                    <span className="text-sm">…</span>
-                  ) : employee.profile_photo_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
-                  ) : (
-                    employee.name.slice(0, 1)
-                  )}
-                </span>
-                <span className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-brand text-white">
-                  <CameraIcon className="h-4 w-4" />
-                </span>
-              </button>
-              <div className="min-w-0">
-                <h2 className="text-lg font-extrabold lg:text-[28px] lg:leading-[34px] lg:tracking-[-0.01em]">{employee.name}</h2>
-                <p className="mt-0.5 text-[13px] font-semibold text-slate-600 lg:text-[15px] lg:font-bold">{employee.designation ?? '—'}</p>
-                <p className="text-xs text-slate-500 lg:hidden">{employee.department ?? '—'}</p>
-                <div className="mt-2.5 hidden flex-wrap gap-2 lg:flex">
-                  {employee.department && <span className="rounded-full bg-brand-light px-3 py-1 text-xs font-extrabold text-brand">{employee.department}</span>}
-                  {branchName && <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-600">{branchName} branch</span>}
+          <section aria-label="Profile summary" className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-center lg:rounded-[20px] lg:text-left">
+            <div aria-hidden="true" className="hidden h-[104px] bg-brand lg:block" />
+            <div className="p-5 lg:flex lg:flex-wrap lg:items-start lg:gap-x-10 lg:gap-y-4 lg:px-8 lg:pb-7 lg:pt-0">
+              <div className="flex flex-col items-center lg:min-w-0 lg:flex-[1_1_420px] lg:flex-row lg:items-start lg:gap-6">
+                <button
+                  type="button"
+                  onClick={openPhotoPicker}
+                  aria-label="Change photo"
+                  title="Change photo"
+                  className="relative mb-3 h-[72px] w-[72px] shrink-0 rounded-full lg:-mt-[52px] lg:mb-0 lg:h-[104px] lg:w-[104px]"
+                >
+                  <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-brand-light text-3xl font-extrabold text-brand lg:border-4 lg:border-white lg:text-[38px]">
+                    {uploadingPhoto ? (
+                      <span className="text-sm">…</span>
+                    ) : employee.profile_photo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
+                    ) : (
+                      employee.name.slice(0, 1)
+                    )}
+                  </span>
+                  <span className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border-[3px] border-white bg-ink text-white lg:bottom-0 lg:-right-1 lg:h-9 lg:w-9">
+                    <CameraIcon className="h-4 w-4" />
+                  </span>
+                </button>
+                <div className="min-w-0 lg:mt-2.5">
+                  <h2 className="text-lg font-extrabold lg:text-[28px] lg:leading-[34px] lg:tracking-[-0.01em]">{employee.name}</h2>
+                  <p className="mt-0.5 text-[13px] font-semibold text-slate-600 lg:hidden">{employee.designation ?? '—'}</p>
+                  <p className="text-xs text-slate-600 lg:hidden">{employee.department ?? '—'}</p>
+                  <p className="mt-0.5 hidden text-[15px] font-semibold text-slate-600 lg:block">
+                    {[employee.designation, employee.department, branchName ? `${branchName} branch` : null].filter(Boolean).join(' · ') || '—'}
+                  </p>
                 </div>
               </div>
-            </div>
-            <div className="hidden lg:flex lg:flex-[1_1_380px] lg:flex-wrap lg:gap-y-4">
-              <Stat label="Joined" value={joined} className="flex-[1_1_130px] pr-5" />
-              <Stat label={daysLabel} value={daysText} className="flex-[1_1_130px] border-l border-slate-200 px-5" />
-              <Stat label="Enroll ID" value={employee.fingerprint_id || '—'} className="flex-[1_1_90px] border-l border-slate-200 pl-5" />
+              <dl className="hidden lg:flex lg:flex-wrap lg:gap-x-9 lg:gap-y-3 lg:pt-4">
+                {[
+                  ['Joined', joined],
+                  [daysLabel, daysText],
+                  ['Enroll ID', employee.fingerprint_id || '—'],
+                ].map(([k, v]) => (
+                  <div key={k}>
+                    <dt className="text-[13px] font-semibold text-slate-600">{k}</dt>
+                    <dd className="m-0 mt-0.5 text-lg font-extrabold tabular-nums">{v}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           </section>
 
@@ -593,37 +557,45 @@ export default function MyProfilePage() {
 
             <div className="flex min-w-0 flex-col gap-3 lg:gap-6">
               <section aria-label="Skills" className={CARD}>
-                <h2 className={`${CARD_TITLE} mb-3`}>Skills</h2>
-                <div className="flex flex-wrap gap-2">
-                  {employee.skills.map(skill => (
-                    <span key={skill} className="flex items-center gap-1 rounded-full bg-brand-light py-1.5 pl-3 pr-1 text-[13px] font-bold text-brand">
-                      {skill}
-                      <button
-                        type="button"
-                        onClick={() => removeSkill(skill)}
-                        aria-label={`Remove ${skill}`}
-                        className="flex h-6 w-6 items-center justify-center rounded-full text-base leading-none hover:bg-white/70"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                  {employee.skills.length === 0 && <p className="text-[13px] text-slate-500">No skills added yet.</p>}
-                </div>
-                <form onSubmit={addSkill} className="mt-4 flex flex-col gap-2">
-                  <select
-                    aria-label="Skill category"
-                    value={skillCategory}
-                    onChange={e => setSkillCategory(e.target.value as (typeof SKILL_CATEGORIES)[number])}
-                    className={`${INPUT} bg-white text-slate-600`}
-                  >
+                <h2 className={CARD_TITLE}>Skills</h2>
+                {skillGroups.length === 0 && <p className="mt-2 text-[13px] text-slate-600">No skills added yet.</p>}
+                {skillGroups.map(group => (
+                  <div key={group.category} className="mt-3 border-t border-slate-100 pt-3">
+                    <div className="mb-2 text-[13px] font-bold text-slate-600">{group.category}</div>
+                    <div className="flex flex-wrap gap-2">
+                      {group.items.map(({ skill, value }) => (
+                        <span key={skill} className="flex items-center gap-1 rounded-full bg-brand-light py-1.5 pl-3 pr-1.5 text-[13px] font-bold text-[#065f46]">
+                          {value}
+                          <button
+                            type="button"
+                            onClick={() => removeSkill(skill)}
+                            aria-label={`Remove ${value}`}
+                            className="flex h-6 w-6 items-center justify-center rounded-full text-base leading-none hover:bg-white/70"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <form onSubmit={addSkill} className="mt-3 border-t border-slate-100 pt-4">
+                  <div role="group" aria-label="Skill category" className="inline-flex flex-wrap rounded-xl bg-slate-100 p-[3px]">
                     {SKILL_CATEGORIES.map(c => (
-                      <option key={c} value={c}>
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setSkillCategory(c)}
+                        aria-pressed={skillCategory === c}
+                        className={`h-9 rounded-[9px] px-3 text-[13px] ${
+                          skillCategory === c ? 'bg-white font-extrabold text-brand shadow-[0_1px_2px_rgba(15,23,42,0.12)]' : 'font-bold text-slate-600 hover:text-ink'
+                        }`}
+                      >
                         {c}
-                      </option>
+                      </button>
                     ))}
-                  </select>
-                  <div className="flex gap-2">
+                  </div>
+                  <div className="mt-2.5 flex gap-2">
                     <input
                       aria-label="New skill"
                       required
@@ -637,39 +609,14 @@ export default function MyProfilePage() {
                     </button>
                   </div>
                   {skillError && (
-                    <p role="alert" className="text-[13px] font-semibold text-[#b91c1c]">
+                    <p role="alert" className="mt-2 text-[13px] font-semibold text-[#b91c1c]">
                       {skillError}
                     </p>
                   )}
                 </form>
               </section>
 
-              <section aria-label="Reward points" className={CARD}>
-                <div className="flex items-center justify-between">
-                  <h2 className={CARD_TITLE}>Reward points</h2>
-                  <span className="text-2xl font-extrabold lg:text-[30px]">{board?.total_points ?? 0}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowRedeem(true)}
-                  className="mt-3 h-11 w-full rounded-xl bg-brand text-sm font-extrabold text-white hover:bg-brand/90"
-                >
-                  Redeem points
-                </button>
-                {redemptions.length > 0 && (
-                  <ul className="mt-4 border-t border-slate-100">
-                    {redemptions.map(r => (
-                      <li key={r.id} className="flex items-center gap-3 border-b border-slate-100 py-2.5 last:border-b-0">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-bold">{r.points_requested} pts</div>
-                          {r.note && <div className="text-xs text-slate-500">{r.note}</div>}
-                        </div>
-                        <StatusTag tone={statusTone(r.status)}>{r.status}</StatusTag>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
+
             </div>
           </div>
 
@@ -691,13 +638,7 @@ export default function MyProfilePage() {
                         <div className="text-xs font-medium text-slate-600">{[ed.institution, ed.year ? String(ed.year) : null].filter(Boolean).join(' · ')}</div>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteEducation(ed.id)}
-                      className="shrink-0 px-1 py-1 text-xs font-bold text-[#b91c1c] hover:underline"
-                    >
-                      Remove
-                    </button>
+                    <RowMenu label={ed.degree} items={[{ label: 'Remove', danger: true, onSelect: () => handleDeleteEducation(ed.id) }]} />
                   </li>
                 ))}
               </ul>
@@ -721,13 +662,7 @@ export default function MyProfilePage() {
                           <div className="text-sm font-extrabold">{exp.role || exp.employer}</div>
                           {exp.role && <div className="text-xs font-medium text-slate-600">{exp.employer}</div>}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteExperience(exp.id)}
-                          className="shrink-0 px-1 py-1 text-xs font-bold text-[#b91c1c] hover:underline"
-                        >
-                          Remove
-                        </button>
+                        <RowMenu label={exp.role || exp.employer} items={[{ label: 'Remove', danger: true, onSelect: () => handleDeleteExperience(exp.id) }]} />
                       </div>
                       {exp.description && <p className="mt-1 text-[13px] text-slate-600">{exp.description}</p>}
                       {(exp.start_date || exp.end_date) && (
@@ -836,37 +771,6 @@ export default function MyProfilePage() {
         </SectionDialog>
       )}
 
-      {showRedeem && (
-        <FormDialog
-          title="Redeem Points"
-          note={`You have ${board?.total_points ?? 0} points. HR/Admin will review this request.`}
-          onSubmit={handleRedeemSubmit}
-          onClose={() => setShowRedeem(false)}
-          saving={submittingRedeem}
-          savingLabel="Submitting…"
-          submitLabel="Submit request"
-          error={redeemError}
-        >
-          <label htmlFor="redeem-points" className={LABEL}>
-            Points to redeem
-          </label>
-          <input
-            id="redeem-points"
-            type="number"
-            min={1}
-            max={board?.total_points ?? undefined}
-            required
-            value={redeemPoints || ''}
-            onChange={e => setRedeemPoints(Number(e.target.value))}
-            className={`${INPUT} mb-3`}
-          />
-          <label htmlFor="redeem-note" className={LABEL}>
-            Note (optional)
-          </label>
-          <textarea id="redeem-note" value={redeemNote} onChange={e => setRedeemNote(e.target.value)} rows={2} className={TEXTAREA} />
-        </FormDialog>
-      )}
-
       {showEducationForm && (
         <FormDialog
           title="Add Education"
@@ -969,15 +873,6 @@ export default function MyProfilePage() {
   );
 }
 
-function Stat({ label, value, className }: { label: string; value: string; className: string }) {
-  return (
-    <div className={className}>
-      <div className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#586474]">{label}</div>
-      <div className="mt-1 text-lg font-extrabold leading-6">{value}</div>
-    </div>
-  );
-}
-
 /** A label and its value on one line; the computer's cards. */
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
@@ -994,63 +889,6 @@ function PhoneRow({ label, value }: { label: string; value: string }) {
     <div className="flex min-h-[34px] items-center justify-between gap-4 text-[13px]">
       <span className="shrink-0 text-slate-500">{label}</span>
       <span className="min-w-0 break-words text-right font-semibold">{value}</span>
-    </div>
-  );
-}
-
-/** The small add / request pop-ups (redeem points, education, work experience). */
-function FormDialog({
-  title,
-  note,
-  onSubmit,
-  onClose,
-  saving,
-  savingLabel,
-  submitLabel,
-  error,
-  children,
-}: {
-  title: string;
-  note?: string;
-  onSubmit: (e: React.FormEvent) => void;
-  onClose: () => void;
-  saving: boolean;
-  savingLabel: string;
-  submitLabel: string;
-  error?: string | null;
-  children: React.ReactNode;
-}) {
-  // Kept in a ref so the key listener is attached once, not on every render of the page.
-  const close = useRef(onClose);
-  close.current = onClose;
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close.current();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, []);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:items-center">
-      <form onSubmit={onSubmit} role="dialog" aria-modal="true" aria-label={title} className="my-auto w-full max-w-sm rounded-[20px] bg-white p-6 shadow-xl">
-        <h3 className="text-xl font-extrabold">{title}</h3>
-        {note && <p className="mb-4 mt-1 text-[13px] font-medium text-slate-600">{note}</p>}
-        <div className={note ? '' : 'mt-4'}>{children}</div>
-        {error && (
-          <p role="alert" className="mt-3 text-sm font-semibold text-[#b91c1c]">
-            {error}
-          </p>
-        )}
-        <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-11 rounded-xl px-4 text-sm font-bold text-slate-600 hover:bg-slate-100">
-            Cancel
-          </button>
-          <button type="submit" disabled={saving} className="h-11 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90 disabled:opacity-60">
-            {saving ? savingLabel : submitLabel}
-          </button>
-        </div>
-      </form>
     </div>
   );
 }
