@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import MonthCalendar from '@/components/MonthCalendar';
 import Badge from '@/components/Badge';
 import AttendanceLogTable, { type LogRow } from '@/components/AttendanceLogTable';
+import PortalCalendar from '@/components/employee/PortalCalendar';
 import { formatAdDate, formatDdMmYyyy, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
@@ -45,8 +46,8 @@ function datesBetween(start: string, end: string): string[] {
   return dates;
 }
 
-type CardKey = 'hours' | 'late' | 'early' | 'overtime' | 'present' | 'absent';
-type CardEntry = { date: string; minutes: number };
+export type CardKey = 'hours' | 'late' | 'early' | 'overtime' | 'present' | 'absent';
+export type CardEntry = { date: string; minutes: number };
 
 const CARD_STYLES: Record<CardKey, { label: string; bg: string; text: string }> = {
   hours: { label: 'Total Work Hours', bg: 'bg-good-bg', text: 'text-good-text' },
@@ -57,7 +58,16 @@ const CARD_STYLES: Record<CardKey, { label: string; bg: string; text: string }> 
   absent: { label: 'Absent Days', bg: 'bg-slate-100', text: 'text-slate-600' },
 };
 
-export default function EmployeeCalendarView({ employeeId }: { employeeId: string }) {
+/** `portal` is the employee pages' own layout (components/employee/PortalCalendar.tsx);
+ * the default one is what the owner console's Attendance Calendar shows. Both read
+ * the same figures computed here. */
+export default function EmployeeCalendarView({
+  employeeId,
+  variant = 'default',
+}: {
+  employeeId: string;
+  variant?: 'default' | 'portal';
+}) {
   const { system } = useCalendarSystem();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -407,6 +417,28 @@ export default function EmployeeCalendarView({ employeeId }: { employeeId: strin
     if (key === 'overtime') return formatHoursMinutes(monthSummary.overtimeMinutes);
     const count = monthSummary.entries[key].length;
     return `${count} day${count === 1 ? '' : 's'}`;
+  }
+
+  if (variant === 'portal') {
+    return (
+      <PortalCalendar
+        dayStatus={dayStatus}
+        leaveDates={leaveDates}
+        weekOffDates={mergedWeekOffDates}
+        selectedDate={selectedDate}
+        onSelectDate={d => setSelectedDate(cur => (cur === d ? null : d))}
+        onMonthChange={setVisibleDates}
+        todayKey={todayKey}
+        summary={monthSummary}
+        tableRows={tableRows}
+        chartData={chartData}
+        selectedDaySummary={selectedDaySummary}
+        selectedLeave={selectedLeave}
+        dayLoading={dayLoading}
+        expandedCard={expandedCard}
+        onExpandCard={setExpandedCard}
+      />
+    );
   }
 
   return (

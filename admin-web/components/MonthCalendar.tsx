@@ -22,7 +22,7 @@ type Props = {
   onMonthChange?: (adKeys: string[]) => void;
 };
 
-type DayFlags = {
+export type DayFlags = {
   late: boolean;
   early: boolean;
   leave: boolean;
@@ -45,7 +45,7 @@ type DayFlags = {
  * leave/week off, that's already happened counts as absent — previously
  * such a day rendered identically to a future day with no way to tell them
  * apart. */
-function dayFlags(status: DayStatus | undefined, onLeave: boolean, onWeekOff: boolean, isPastOrToday: boolean): DayFlags {
+export function dayFlags(status: DayStatus | undefined, onLeave: boolean, onWeekOff: boolean, isPastOrToday: boolean): DayFlags {
   if (onLeave || onWeekOff) {
     return {
       late: false,
@@ -81,7 +81,7 @@ function dayFlags(status: DayStatus | undefined, onLeave: boolean, onWeekOff: bo
   };
 }
 
-function captionFor(flags: DayFlags): string | undefined {
+export function captionFor(flags: DayFlags): string | undefined {
   const parts: string[] = [];
   if (flags.leave) parts.push('On leave');
   if (flags.weekOff) parts.push('Week Off');

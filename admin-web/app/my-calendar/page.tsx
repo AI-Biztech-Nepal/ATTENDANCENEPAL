@@ -22,13 +22,14 @@ export default function MyCalendarPage() {
   }, []);
 
   return (
-    <EmployeeShell title="Calendar">
+    // flush: the calendar draws its own green hero panel edge to edge on a phone.
+    <EmployeeShell title="Calendar" flush>
       {loading ? (
-        <p className="text-center text-sm text-slate-400">Loading…</p>
+        <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
       ) : !employeeId ? (
-        <p className="mt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
+        <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
       ) : (
-        <EmployeeCalendarView employeeId={employeeId} />
+        <EmployeeCalendarView employeeId={employeeId} variant="portal" />
       )}
     </EmployeeShell>
   );
