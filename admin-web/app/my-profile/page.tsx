@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import EmployeeShell from '@/components/EmployeeShell';
-import Badge from '@/components/Badge';
+import { EditIcon, HeroPanel, StatusTag } from '@/components/employee/parts';
+import SectionDialog from '@/components/profile/SectionDialog';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import { useConfirm } from '@/components/ConfirmDialog';
@@ -17,6 +18,12 @@ const EMPTY_PROFILE_FORM = { name: '', email: '', phone: '', address: '', depart
 const EMPTY_EMERGENCY_FORM = { emergency_contact_name: '', emergency_contact_relationship: '', emergency_contact_phone: '' };
 const EMPTY_EDUCATION_FORM = { degree: '', institution: '', year: '' };
 const EMPTY_EXPERIENCE_FORM = { employer: '', role: '', description: '', start_date: '', end_date: '' };
+
+const CARD = 'rounded-2xl border border-slate-200 bg-white p-4 lg:rounded-[20px] lg:p-6';
+const CARD_TITLE = 'text-base font-extrabold lg:text-xl lg:leading-6';
+const INPUT = 'h-11 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium';
+const TEXTAREA = 'w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium';
+const LABEL = 'mb-1.5 block text-xs font-bold text-slate-600';
 
 function tenureDays(dateOfJoining: string | null, resignedAt: string | null) {
   if (!dateOfJoining) return null;
@@ -42,7 +49,7 @@ export default function MyProfilePage() {
   const [redemptions, setRedemptions] = useState<PointRedemption[]>([]);
 
   const [profileForm, setProfileForm] = useState(EMPTY_PROFILE_FORM);
-  const [editingDetails, setEditingDetails] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -59,9 +66,9 @@ export default function MyProfilePage() {
 
   const [emergencyForm, setEmergencyForm] = useState(EMPTY_EMERGENCY_FORM);
 
-  const [showSkillForm, setShowSkillForm] = useState(false);
   const [skillCategory, setSkillCategory] = useState<(typeof SKILL_CATEGORIES)[number]>(SKILL_CATEGORIES[0]);
   const [skillInput, setSkillInput] = useState('');
+  const [skillError, setSkillError] = useState<string | null>(null);
 
   const [education, setEducation] = useState<EmployeeEducation[]>([]);
   const [showEducationForm, setShowEducationForm] = useState(false);
@@ -173,7 +180,7 @@ export default function MyProfilePage() {
       return;
     }
     setProfileSaved(true);
-    setEditingDetails(false);
+    setShowDetails(false);
     reload(employee.id);
   }
 
@@ -202,7 +209,7 @@ export default function MyProfilePage() {
     setEmergencyForm(emergencyFromEmployee(employee));
     setProfileError(null);
     setProfileSaved(false);
-    setEditingDetails(true);
+    setShowDetails(true);
   }
 
   function cancelEditDetails() {
@@ -210,34 +217,34 @@ export default function MyProfilePage() {
     setProfileForm(detailsFromEmployee(employee));
     setEmergencyForm(emergencyFromEmployee(employee));
     setProfileError(null);
-    setEditingDetails(false);
+    setShowDetails(false);
   }
 
   async function addSkill(e?: React.FormEvent) {
     e?.preventDefault();
     const value = skillInput.trim();
     if (!value || !employee) return;
+    setSkillError(null);
     const skill = `${skillCategory}: ${value}`;
     if (employee.skills.includes(skill)) {
       setSkillInput('');
-      setShowSkillForm(false);
       return;
     }
     const error = await saveProfile({ skills: [...employee.skills, skill] });
     if (error) {
-      alert(`Could not add skill: ${error.message}`);
+      setSkillError(`Could not add skill: ${error.message}`);
       return;
     }
     setSkillInput('');
-    setShowSkillForm(false);
     reload(employee.id);
   }
 
   async function removeSkill(skill: string) {
     if (!employee) return;
+    setSkillError(null);
     const error = await saveProfile({ skills: employee.skills.filter(s => s !== skill) });
     if (error) {
-      alert(`Could not remove skill: ${error.message}`);
+      setSkillError(`Could not remove skill: ${error.message}`);
       return;
     }
     reload(employee.id);
@@ -378,548 +385,575 @@ export default function MyProfilePage() {
 
   if (loading) {
     return (
-      <EmployeeShell title="Profile">
-        <p className="text-center text-sm text-slate-400">Loading…</p>
+      <EmployeeShell title="Profile" flush>
+        <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
       </EmployeeShell>
     );
   }
 
   if (!employee) {
     return (
-      <EmployeeShell title="Profile">
-        <p className="mt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
+      <EmployeeShell title="Profile" flush>
+        <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
       </EmployeeShell>
     );
   }
 
   const days = tenureDays(employee.date_of_joining, employee.resigned_at);
+  const branchName = branches.find(b => b.id === employee.branch_id)?.name ?? null;
+  const joined = formatAdDate(employee.date_of_joining, system);
+  const daysText = days !== null ? `${days} days` : '—';
+  const daysLabel = employee.resigned_at ? 'Days worked' : 'With the company';
+  const emergencySet = !!(employee.emergency_contact_name || employee.emergency_contact_phone);
+
+  const personalRows: [string, string][] = [
+    ['Name', employee.name || '—'],
+    ['Email', employee.email || '—'],
+    ['Phone', employee.phone || '—'],
+    ['Address', employee.address || '—'],
+  ];
+  const emergencyRows: [string, string][] = [
+    ['Name', employee.emergency_contact_name || '—'],
+    ['Relationship', employee.emergency_contact_relationship || '—'],
+    ['Phone', employee.emergency_contact_phone || '—'],
+  ];
+  const employerRows: [string, string][] = [
+    ['Username', employee.username || '—'],
+    ['Branch', branchName ?? '—'],
+    ['Department', employee.department || '—'],
+    ['Designation', employee.designation || '—'],
+    ['Current salary', employee.salary != null ? employee.salary.toLocaleString() : '—'],
+    ['PAN No.', employee.pan_no || '—'],
+    ['SSF No.', employee.ssf_no || '—'],
+    ...(employee.resigned_at ? ([['Resigned', formatAdDate(employee.resigned_at, system)]] as [string, string][]) : []),
+  ];
+  // On a phone the same facts sit in one "My Details" card, in the app's order.
+  const phoneEmployerRows: [string, string][] = [
+    ['Username', employee.username || '—'],
+    ['Enroll ID', employee.fingerprint_id || '—'],
+    ['Branch', branchName ?? '—'],
+    ['Department', employee.department || '—'],
+    ['Designation', employee.designation || '—'],
+    ['Current Salary', employee.salary != null ? employee.salary.toLocaleString() : '—'],
+    ['PAN No.', employee.pan_no || '—'],
+    ['SSF No.', employee.ssf_no || '—'],
+    ['Date of joining', joined],
+    [employee.resigned_at ? 'Days worked' : 'Days with company', daysText],
+    ...(employee.resigned_at ? ([['Resigned', formatAdDate(employee.resigned_at, system)]] as [string, string][]) : []),
+  ];
+
+  const changedLabels = (
+    [
+      ['Name', profileForm.name !== (employee.name ?? '')],
+      ['Email', profileForm.email !== (employee.email ?? '')],
+      ['Phone', profileForm.phone !== (employee.phone ?? '')],
+      ['Address', profileForm.address !== (employee.address ?? '')],
+      ['Emergency name', emergencyForm.emergency_contact_name !== (employee.emergency_contact_name ?? '')],
+      ['Emergency relationship', emergencyForm.emergency_contact_relationship !== (employee.emergency_contact_relationship ?? '')],
+      ['Emergency phone', emergencyForm.emergency_contact_phone !== (employee.emergency_contact_phone ?? '')],
+    ] as [string, boolean][]
+  )
+    .filter(([, changed]) => changed)
+    .map(([label]) => label);
+
+  async function requestCloseDetails() {
+    if (changedLabels.length > 0 && !(await confirm('Discard your unsaved changes?', { title: 'Discard changes?', confirmLabel: 'Discard', tone: 'danger' }))) return;
+    cancelEditDetails();
+  }
+
+  const editButtons = (
+    <>
+      {profileSaved && (
+        <span role="status" className="mr-3 text-[13px] font-bold text-[#14532d]">
+          Saved
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={startEditDetails}
+        className="hidden h-10 items-center gap-2 rounded-[10px] border border-slate-300 bg-white px-4 text-[13px] font-extrabold text-brand hover:bg-slate-50 lg:flex"
+      >
+        <EditIcon className="h-3.5 w-3.5" />
+        Edit
+      </button>
+      <button type="button" onClick={startEditDetails} className="flex h-11 items-center px-1 text-sm font-extrabold text-brand lg:hidden">
+        Edit
+      </button>
+    </>
+  );
 
   return (
-    <EmployeeShell title="Profile">
+    <EmployeeShell title="Profile" flush>
       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelected} className="hidden" />
 
-      <div className="mb-5 flex flex-col items-center rounded-xl border border-slate-200 bg-white p-6">
-        <button
-          onClick={openPhotoPicker}
-          title="Change photo"
-          className="relative mb-3 h-20 w-20 overflow-hidden rounded-full bg-accent/10 text-2xl font-semibold text-accent"
-        >
-          {uploadingPhoto ? (
-            <span className="flex h-full w-full items-center justify-center text-sm">…</span>
-          ) : employee.profile_photo_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
-          ) : (
-            <span className="flex h-full w-full items-center justify-center">{employee.name.slice(0, 1)}</span>
-          )}
-        </button>
-        <button onClick={openPhotoPicker} className="mb-2 text-xs font-medium text-accent hover:underline">
-          Change photo
-        </button>
-        <h1 className="text-lg font-semibold text-ink">{employee.name}</h1>
-        <p className="text-sm text-slate-500">{employee.designation ?? '—'}</p>
-        <p className="text-xs text-slate-400">{employee.department ?? '—'}</p>
-      </div>
-
-      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm text-slate-500">Reward points</span>
-          <span className="text-2xl font-bold text-ink">{board?.total_points ?? 0}</span>
-        </div>
-        <button
-          onClick={() => setShowRedeem(true)}
-          className="w-full rounded-lg bg-accent py-2 text-sm font-semibold text-white hover:bg-accent/90"
-        >
-          Redeem points
-        </button>
-
-        {redemptions.length > 0 && (
-          <div className="mt-4 divide-y divide-slate-100 border-t border-slate-100 pt-2">
-            {redemptions.map(r => (
-              <div key={r.id} className="flex items-center gap-3 py-2">
-                <div className="flex-1">
-                  <div className="text-sm text-ink">{r.points_requested} pts</div>
-                  {r.note && <div className="text-xs text-slate-400">{r.note}</div>}
-                </div>
-                <Badge tone={statusTone(r.status)}>{r.status}</Badge>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">My Details</h2>
-          {!editingDetails && (
-            <button onClick={startEditDetails} title="Edit my details" className="text-slate-400 hover:text-accent">
-              <EditIcon className="h-4 w-4" />
-            </button>
-          )}
+      <div className="lg:px-8 lg:pb-10 lg:pt-7">
+        {/* Computer: the green panel carries the title. A phone has the header instead. */}
+        <div className="hidden lg:block">
+          <HeroPanel pad="inner">
+            <h1 className="text-4xl font-extrabold leading-[44px] tracking-[-0.02em]">Profile</h1>
+          </HeroPanel>
         </div>
 
-        {profileSaved && !editingDetails && <p className="mb-3 text-sm text-good-text">Saved.</p>}
-
-        {!editingDetails ? (
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-slate-400">Name</span>
-              <span className="min-w-0 break-words text-right text-ink">{employee.name || '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Email</span>
-              <span className="min-w-0 break-words text-right text-ink">{employee.email || '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Phone</span>
-              <span className="min-w-0 break-words text-right text-ink">{employee.phone || '—'}</span>
-            </div>
-            <div className="flex justify-between gap-4">
-              <span className="shrink-0 text-slate-400">Address</span>
-              <span className="text-right text-ink">{employee.address || '—'}</span>
-            </div>
-
-            <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Filled by employer</p>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Username</span>
-                <span className="min-w-0 break-words text-right text-ink">{employee.username || '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Enroll ID</span>
-                <span className="min-w-0 break-words text-right text-ink">{employee.fingerprint_id || '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Branch</span>
-                <span className="min-w-0 break-words text-right text-ink">{branches.find(b => b.id === employee.branch_id)?.name ?? '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Department</span>
-                <span className="min-w-0 break-words text-right text-ink">{employee.department || '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Designation</span>
-                <span className="min-w-0 break-words text-right text-ink">{employee.designation || '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Current Salary</span>
-                <span className="min-w-0 break-words text-right text-ink">{employee.salary != null ? employee.salary.toLocaleString() : '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">PAN No.</span>
-                <span className="min-w-0 break-words text-right text-ink">{employee.pan_no || '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">SSF No.</span>
-                <span className="min-w-0 break-words text-right text-ink">{employee.ssf_no || '—'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Date of joining</span>
-                <span className="min-w-0 break-words text-right text-ink">{formatAdDate(employee.date_of_joining, system)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">{employee.resigned_at ? 'Days worked' : 'Days with company'}</span>
-                <span className="min-w-0 break-words text-right text-ink">{days !== null ? `${days} days` : '—'}</span>
-              </div>
-              {employee.resigned_at && (
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Resigned</span>
-                  <span className="min-w-0 break-words text-right text-ink">{formatAdDate(employee.resigned_at, system)}</span>
-                </div>
-              )}
-              <p className="pt-1 text-xs text-slate-400">Set by HR/Admin — not editable here.</p>
-            </div>
-
-            <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Emergency contact</p>
-              {employee.emergency_contact_name || employee.emergency_contact_phone ? (
-                <div className="flex justify-between gap-4">
-                  <span className="text-right text-ink">
-                    {[employee.emergency_contact_name, employee.emergency_contact_relationship, employee.emergency_contact_phone]
-                      .filter(Boolean)
-                      .join(' — ')}
-                  </span>
-                </div>
-              ) : (
-                <p className="text-xs text-slate-400">Not set — click Edit to add one.</p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleSaveProfile}>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Name</label>
-                <input
-                  required
-                  value={profileForm.name}
-                  onChange={e => updateField('name', e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Email</label>
-                <input
-                  type="email"
-                  value={profileForm.email}
-                  onChange={e => updateField('email', e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
-                <input
-                  value={profileForm.phone}
-                  onChange={e => updateField('phone', e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="mb-1 block text-xs font-medium text-slate-600">Address</label>
-                <textarea
-                  value={profileForm.address}
-                  onChange={e => updateField('address', e.target.value)}
-                  rows={2}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-
-            <h3 className="mb-3 mt-5 border-t border-slate-100 pt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Emergency Contact
-            </h3>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Name</label>
-                <input
-                  value={emergencyForm.emergency_contact_name}
-                  onChange={e => setEmergencyForm(f => ({ ...f, emergency_contact_name: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Relationship</label>
-                <input
-                  value={emergencyForm.emergency_contact_relationship}
-                  onChange={e => setEmergencyForm(f => ({ ...f, emergency_contact_relationship: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Phone</label>
-                <input
-                  value={emergencyForm.emergency_contact_phone}
-                  onChange={e => setEmergencyForm(f => ({ ...f, emergency_contact_phone: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-
-            <p className="mt-4 text-xs text-slate-400">
-              Username, department, designation, branch, PAN and SSF are set by your employer — contact your admin to change
-              them.
-            </p>
-
-            {profileError && <p className="mt-3 text-sm text-critical">{profileError}</p>}
-            <div className="mt-4 flex gap-2">
+        <div className="relative mx-4 mt-4 pb-4 lg:mx-5 lg:-mt-11 lg:pb-0">
+          {/* Who you are: a centred card on a phone, a wide card with three facts on a computer. */}
+          <section aria-label="Profile summary" className="rounded-2xl border border-slate-200 bg-white p-5 text-center lg:flex lg:flex-wrap lg:items-center lg:gap-x-10 lg:gap-y-6 lg:rounded-[20px] lg:p-7 lg:text-left lg:shadow-[0_10px_24px_rgba(6,78,59,0.12)]">
+            <div className="flex flex-col items-center lg:min-w-0 lg:flex-[1_1_400px] lg:flex-row lg:gap-6">
               <button
                 type="button"
-                onClick={cancelEditDetails}
-                className="flex-1 rounded-lg border border-slate-200 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                onClick={openPhotoPicker}
+                aria-label="Change photo"
+                title="Change photo"
+                className="relative mb-3 h-[72px] w-[72px] shrink-0 rounded-full lg:mb-0 lg:h-[104px] lg:w-[104px]"
               >
-                Cancel
+                <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-brand-light text-3xl font-extrabold text-brand lg:text-[40px]">
+                  {uploadingPhoto ? (
+                    <span className="text-sm">…</span>
+                  ) : employee.profile_photo_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
+                  ) : (
+                    employee.name.slice(0, 1)
+                  )}
+                </span>
+                <span className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-brand text-white">
+                  <CameraIcon className="h-4 w-4" />
+                </span>
               </button>
-              <button
-                type="submit"
-                disabled={savingProfile}
-                className="flex-1 rounded-lg bg-accent py-2 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {savingProfile ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-
-      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">Skills</h2>
-          <button onClick={() => setShowSkillForm(true)} className="text-xs font-medium text-accent hover:underline">
-            + Add
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {employee.skills.map(skill => (
-            <span key={skill} className="flex items-center gap-1 rounded-full bg-good-bg px-3 py-1 text-xs font-medium text-good-text">
-              {skill}
-              <button onClick={() => removeSkill(skill)} className="text-good-text/60 hover:text-good-text">
-                ×
-              </button>
-            </span>
-          ))}
-          {employee.skills.length === 0 && <p className="text-xs text-slate-400">No skills added yet.</p>}
-        </div>
-      </div>
-
-      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">Education</h2>
-          <button onClick={() => setShowEducationForm(true)} className="text-xs font-medium text-accent hover:underline">
-            + Add
-          </button>
-        </div>
-        {education.length === 0 && <p className="text-xs text-slate-400">No education entries yet.</p>}
-        <ul className="divide-y divide-slate-100">
-          {education.map(ed => (
-            <li key={ed.id} className="flex items-center justify-between py-2 text-sm">
-              <div>
-                <span className="font-medium text-ink">{ed.degree}</span>
-                {(ed.institution || ed.year) && (
-                  <span className="block text-xs text-slate-500">{[ed.institution, ed.year ? String(ed.year) : null].filter(Boolean).join(', ')}</span>
-                )}
-              </div>
-              <button onClick={() => handleDeleteEducation(ed.id)} className="text-xs font-medium text-critical hover:underline">
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-ink">Work Experience</h2>
-          <button onClick={() => setShowExperienceForm(true)} className="text-xs font-medium text-accent hover:underline">
-            + Add
-          </button>
-        </div>
-        {experience.length === 0 && <p className="text-xs text-slate-400">No work experience entries yet.</p>}
-        <ul className="divide-y divide-slate-100">
-          {experience.map(exp => (
-            <li key={exp.id} className="py-2 text-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="font-medium text-ink">{exp.employer}</span>
-                  {exp.role && <span className="text-slate-500"> — {exp.role}</span>}
+              <div className="min-w-0">
+                <h2 className="text-lg font-extrabold lg:text-[28px] lg:leading-[34px] lg:tracking-[-0.01em]">{employee.name}</h2>
+                <p className="mt-0.5 text-[13px] font-semibold text-slate-600 lg:text-[15px] lg:font-bold">{employee.designation ?? '—'}</p>
+                <p className="text-xs text-slate-500 lg:hidden">{employee.department ?? '—'}</p>
+                <div className="mt-2.5 hidden flex-wrap gap-2 lg:flex">
+                  {employee.department && <span className="rounded-full bg-brand-light px-3 py-1 text-xs font-extrabold text-brand">{employee.department}</span>}
+                  {branchName && <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-600">{branchName} branch</span>}
                 </div>
-                <button onClick={() => handleDeleteExperience(exp.id)} className="text-xs font-medium text-critical hover:underline">
-                  Remove
+              </div>
+            </div>
+            <div className="hidden lg:flex lg:flex-[1_1_380px] lg:flex-wrap lg:gap-y-4">
+              <Stat label="Joined" value={joined} className="flex-[1_1_130px] pr-5" />
+              <Stat label={daysLabel} value={daysText} className="flex-[1_1_130px] border-l border-slate-200 px-5" />
+              <Stat label="Enroll ID" value={employee.fingerprint_id || '—'} className="flex-[1_1_90px] border-l border-slate-200 pl-5" />
+            </div>
+          </section>
+
+          <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:items-start lg:gap-6">
+            {/* Phone: one card for everything */}
+            <section aria-label="My Details" className={`${CARD} lg:hidden`}>
+              <div className="mb-1 flex items-center justify-between">
+                <h2 className={CARD_TITLE}>My Details</h2>
+                <div className="flex items-center">{editButtons}</div>
+              </div>
+              {personalRows.map(([label, value]) => (
+                <PhoneRow key={label} label={label} value={value} />
+              ))}
+              <p className="mb-1 mt-3 text-[10px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Filled by employer</p>
+              {phoneEmployerRows.map(([label, value]) => (
+                <PhoneRow key={label} label={label} value={value} />
+              ))}
+              <p className="mt-1 text-xs text-slate-500">Set by HR/Admin — not editable here.</p>
+              <p className="mb-1 mt-3 text-[10px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Emergency contact</p>
+              {emergencySet ? (
+                <PhoneRow
+                  label="Contact"
+                  value={[employee.emergency_contact_name, employee.emergency_contact_relationship, employee.emergency_contact_phone].filter(Boolean).join(' — ')}
+                />
+              ) : (
+                <p className="text-xs text-slate-500">Not set — tap Edit to add one.</p>
+              )}
+            </section>
+
+            {/* Computer: Personal, and what the employer set */}
+            <section aria-label="Personal" className={`${CARD} hidden lg:block`}>
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className={CARD_TITLE}>Personal</h2>
+                <div className="flex items-center">{editButtons}</div>
+              </div>
+              {personalRows.map(([label, value]) => (
+                <DetailRow key={label} label={label} value={value} />
+              ))}
+              <p className="mb-1 mt-5 text-[11px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Emergency contact</p>
+              {emergencySet ? (
+                emergencyRows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)
+              ) : (
+                <p className="border-t border-slate-100 pt-3 text-[13px] text-slate-500">Not set — click Edit to add one.</p>
+              )}
+            </section>
+
+            <section aria-label="Set by your employer" className={`${CARD} hidden lg:block`}>
+              <div className="mb-2 flex h-10 items-center justify-between">
+                <h2 className={CARD_TITLE}>Set by your employer</h2>
+                <LockIcon className="h-[18px] w-[18px] text-[#586474]" />
+              </div>
+              {employerRows.map(([label, value]) => (
+                <DetailRow key={label} label={label} value={value} />
+              ))}
+              <p className="border-t border-slate-100 pt-3 text-xs text-slate-500">Set by HR/Admin — not editable here.</p>
+            </section>
+
+            <div className="flex min-w-0 flex-col gap-3 lg:gap-6">
+              <section aria-label="Skills" className={CARD}>
+                <h2 className={`${CARD_TITLE} mb-3`}>Skills</h2>
+                <div className="flex flex-wrap gap-2">
+                  {employee.skills.map(skill => (
+                    <span key={skill} className="flex items-center gap-1 rounded-full bg-brand-light py-1.5 pl-3 pr-1 text-[13px] font-bold text-brand">
+                      {skill}
+                      <button
+                        type="button"
+                        onClick={() => removeSkill(skill)}
+                        aria-label={`Remove ${skill}`}
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-base leading-none hover:bg-white/70"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  {employee.skills.length === 0 && <p className="text-[13px] text-slate-500">No skills added yet.</p>}
+                </div>
+                <form onSubmit={addSkill} className="mt-4 flex flex-col gap-2">
+                  <select
+                    aria-label="Skill category"
+                    value={skillCategory}
+                    onChange={e => setSkillCategory(e.target.value as (typeof SKILL_CATEGORIES)[number])}
+                    className={`${INPUT} bg-white text-slate-600`}
+                  >
+                    {SKILL_CATEGORIES.map(c => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex gap-2">
+                    <input
+                      aria-label="New skill"
+                      required
+                      value={skillInput}
+                      onChange={e => setSkillInput(e.target.value)}
+                      placeholder="e.g. English, Forklift license…"
+                      className={`${INPUT} min-w-0 flex-1`}
+                    />
+                    <button type="submit" className="h-11 shrink-0 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90">
+                      Add
+                    </button>
+                  </div>
+                  {skillError && (
+                    <p role="alert" className="text-[13px] font-semibold text-[#b91c1c]">
+                      {skillError}
+                    </p>
+                  )}
+                </form>
+              </section>
+
+              <section aria-label="Reward points" className={CARD}>
+                <div className="flex items-center justify-between">
+                  <h2 className={CARD_TITLE}>Reward points</h2>
+                  <span className="text-2xl font-extrabold lg:text-[30px]">{board?.total_points ?? 0}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRedeem(true)}
+                  className="mt-3 h-11 w-full rounded-xl bg-brand text-sm font-extrabold text-white hover:bg-brand/90"
+                >
+                  Redeem points
+                </button>
+                {redemptions.length > 0 && (
+                  <ul className="mt-4 border-t border-slate-100">
+                    {redemptions.map(r => (
+                      <li key={r.id} className="flex items-center gap-3 border-b border-slate-100 py-2.5 last:border-b-0">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-bold">{r.points_requested} pts</div>
+                          {r.note && <div className="text-xs text-slate-500">{r.note}</div>}
+                        </div>
+                        <StatusTag tone={statusTone(r.status)}>{r.status}</StatusTag>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
+            <section aria-label="Education" className={CARD}>
+              <div className="flex items-center justify-between">
+                <h2 className={CARD_TITLE}>Education</h2>
+                <button type="button" onClick={() => setShowEducationForm(true)} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
+                  + Add
                 </button>
               </div>
-              {exp.description && <p className="mt-1 text-xs text-slate-500">{exp.description}</p>}
-              {(exp.start_date || exp.end_date) && (
-                <div className="mt-1 flex items-center justify-between text-xs text-slate-400">
-                  <span>
-                    {formatAdDate(exp.start_date, system)} – {exp.end_date ? formatAdDate(exp.end_date, system) : 'Present'}
-                  </span>
-                  {tenureDays(exp.start_date, exp.end_date) !== null && (
-                    <span>{tenureDays(exp.start_date, exp.end_date)} days</span>
-                  )}
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+              {education.length === 0 && <p className="mt-2 text-[13px] text-slate-500">No education entries yet.</p>}
+              <ul className="mt-1 border-t border-slate-100">
+                {education.map(ed => (
+                  <li key={ed.id} className="flex items-start justify-between gap-3 border-b border-slate-100 py-3 last:border-b-0">
+                    <div className="min-w-0">
+                      <div className="text-sm font-extrabold">{ed.degree}</div>
+                      {(ed.institution || ed.year) && (
+                        <div className="text-xs font-medium text-slate-600">{[ed.institution, ed.year ? String(ed.year) : null].filter(Boolean).join(' · ')}</div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteEducation(ed.id)}
+                      className="shrink-0 px-1 py-1 text-xs font-bold text-[#b91c1c] hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section aria-label="Work Experience" className={CARD}>
+              <div className="flex items-center justify-between">
+                <h2 className={CARD_TITLE}>Work Experience</h2>
+                <button type="button" onClick={() => setShowExperienceForm(true)} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
+                  + Add
+                </button>
+              </div>
+              {experience.length === 0 && <p className="mt-2 text-[13px] text-slate-500">No work experience entries yet.</p>}
+              <ul className="mt-1 border-t border-slate-100">
+                {experience.map(exp => {
+                  const span = tenureDays(exp.start_date, exp.end_date);
+                  return (
+                    <li key={exp.id} className="border-b border-slate-100 py-3 last:border-b-0">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-extrabold">{exp.role || exp.employer}</div>
+                          {exp.role && <div className="text-xs font-medium text-slate-600">{exp.employer}</div>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteExperience(exp.id)}
+                          className="shrink-0 px-1 py-1 text-xs font-bold text-[#b91c1c] hover:underline"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      {exp.description && <p className="mt-1 text-[13px] text-slate-600">{exp.description}</p>}
+                      {(exp.start_date || exp.end_date) && (
+                        <div className="mt-1 flex items-center justify-between gap-3 text-xs font-medium text-slate-500">
+                          <span>
+                            {formatAdDate(exp.start_date, system)} – {exp.end_date ? formatAdDate(exp.end_date, system) : 'Present'}
+                          </span>
+                          {span !== null && <span className="shrink-0">{span} days</span>}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-white text-sm font-bold text-slate-600 hover:bg-slate-50 lg:hidden"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
-      <button
-        onClick={handleSignOut}
-        className="mb-6 w-full rounded-lg border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-      >
-        Sign out
-      </button>
+      {showDetails && (
+        <SectionDialog
+          title="my details"
+          hint="Your name, contact details and emergency contact."
+          changed={changedLabels.length}
+          changedLabels={changedLabels}
+          saving={savingProfile}
+          error={profileError ?? undefined}
+          onClose={requestCloseDetails}
+          onSubmit={handleSaveProfile}
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label htmlFor="my-name" className={LABEL}>
+                Name
+              </label>
+              <input id="my-name" required value={profileForm.name} onChange={e => updateField('name', e.target.value)} className={INPUT} />
+            </div>
+            <div>
+              <label htmlFor="my-email" className={LABEL}>
+                Email
+              </label>
+              <input id="my-email" type="email" value={profileForm.email} onChange={e => updateField('email', e.target.value)} className={INPUT} />
+            </div>
+            <div>
+              <label htmlFor="my-phone" className={LABEL}>
+                Phone
+              </label>
+              <input id="my-phone" value={profileForm.phone} onChange={e => updateField('phone', e.target.value)} className={INPUT} />
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="my-address" className={LABEL}>
+                Address
+              </label>
+              <textarea id="my-address" value={profileForm.address} onChange={e => updateField('address', e.target.value)} rows={2} className={TEXTAREA} />
+            </div>
+          </div>
+
+          <h3 className="mb-3 mt-5 border-t border-slate-100 pt-4 text-[11px] font-extrabold uppercase tracking-[0.06em] text-slate-600">Emergency contact</h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div>
+              <label htmlFor="my-em-name" className={LABEL}>
+                Name
+              </label>
+              <input
+                id="my-em-name"
+                value={emergencyForm.emergency_contact_name}
+                onChange={e => setEmergencyForm(f => ({ ...f, emergency_contact_name: e.target.value }))}
+                className={INPUT}
+              />
+            </div>
+            <div>
+              <label htmlFor="my-em-rel" className={LABEL}>
+                Relationship
+              </label>
+              <input
+                id="my-em-rel"
+                value={emergencyForm.emergency_contact_relationship}
+                onChange={e => setEmergencyForm(f => ({ ...f, emergency_contact_relationship: e.target.value }))}
+                className={INPUT}
+              />
+            </div>
+            <div>
+              <label htmlFor="my-em-phone" className={LABEL}>
+                Phone
+              </label>
+              <input
+                id="my-em-phone"
+                value={emergencyForm.emergency_contact_phone}
+                onChange={e => setEmergencyForm(f => ({ ...f, emergency_contact_phone: e.target.value }))}
+                className={INPUT}
+              />
+            </div>
+          </div>
+
+          <p className="mt-4 text-xs text-slate-500">
+            Username, department, designation, branch, PAN and SSF are set by your employer — contact your admin to change them.
+          </p>
+        </SectionDialog>
+      )}
 
       {showRedeem && (
-        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
-          <form onSubmit={handleRedeemSubmit} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
-            <h3 className="mb-1 text-lg font-semibold text-ink">Redeem Points</h3>
-            <p className="mb-4 text-xs text-slate-500">You have {board?.total_points ?? 0} points. HR/Admin will review this request.</p>
-
-            <label className="mb-1 block text-xs font-medium text-slate-600">Points to redeem</label>
-            <input
-              type="number"
-              min={1}
-              max={board?.total_points ?? undefined}
-              required
-              value={redeemPoints || ''}
-              onChange={e => setRedeemPoints(Number(e.target.value))}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <label className="mb-1 block text-xs font-medium text-slate-600">Note (optional)</label>
-            <textarea
-              value={redeemNote}
-              onChange={e => setRedeemNote(e.target.value)}
-              rows={2}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            {redeemError && <p className="mb-3 text-sm text-critical">{redeemError}</p>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowRedeem(false)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submittingRedeem}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
-              >
-                {submittingRedeem ? 'Submitting…' : 'Submit request'}
-              </button>
-            </div>
-          </form>
-        </div>
+        <FormDialog
+          title="Redeem Points"
+          note={`You have ${board?.total_points ?? 0} points. HR/Admin will review this request.`}
+          onSubmit={handleRedeemSubmit}
+          onClose={() => setShowRedeem(false)}
+          saving={submittingRedeem}
+          savingLabel="Submitting…"
+          submitLabel="Submit request"
+          error={redeemError}
+        >
+          <label htmlFor="redeem-points" className={LABEL}>
+            Points to redeem
+          </label>
+          <input
+            id="redeem-points"
+            type="number"
+            min={1}
+            max={board?.total_points ?? undefined}
+            required
+            value={redeemPoints || ''}
+            onChange={e => setRedeemPoints(Number(e.target.value))}
+            className={`${INPUT} mb-3`}
+          />
+          <label htmlFor="redeem-note" className={LABEL}>
+            Note (optional)
+          </label>
+          <textarea id="redeem-note" value={redeemNote} onChange={e => setRedeemNote(e.target.value)} rows={2} className={TEXTAREA} />
+        </FormDialog>
       )}
 
       {showEducationForm && (
-        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
-          <form onSubmit={handleAddEducation} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
-            <h3 className="mb-4 text-lg font-semibold text-ink">Add Education</h3>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Degree</label>
-            <select
-              required
-              value={educationForm.degree}
-              onChange={e => setEducationForm(f => ({ ...f, degree: e.target.value }))}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            >
-              <option value="" disabled>Select degree</option>
-              <option value="Under SEE">Under SEE</option>
-              <option value="SEE">SEE</option>
-              <option value="Intermediate">Intermediate</option>
-              <option value="Bachelors">Bachelors</option>
-              <option value="Masters">Masters</option>
-            </select>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Institution</label>
-            <input
-              value={educationForm.institution}
-              onChange={e => setEducationForm(f => ({ ...f, institution: e.target.value }))}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <label className="mb-1 block text-xs font-medium text-slate-600">Year</label>
-            <input
-              type="number"
-              value={educationForm.year}
-              onChange={e => setEducationForm(f => ({ ...f, year: e.target.value }))}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowEducationForm(false)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={savingEducation}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
-              >
-                {savingEducation ? 'Saving…' : 'Add'}
-              </button>
-            </div>
-          </form>
-        </div>
+        <FormDialog
+          title="Add Education"
+          onSubmit={handleAddEducation}
+          onClose={() => setShowEducationForm(false)}
+          saving={savingEducation}
+          savingLabel="Saving…"
+          submitLabel="Add"
+        >
+          <label htmlFor="edu-degree" className={LABEL}>
+            Degree
+          </label>
+          <select
+            id="edu-degree"
+            required
+            value={educationForm.degree}
+            onChange={e => setEducationForm(f => ({ ...f, degree: e.target.value }))}
+            className={`${INPUT} mb-3 bg-white`}
+          >
+            <option value="" disabled>
+              Select degree
+            </option>
+            <option value="Under SEE">Under SEE</option>
+            <option value="SEE">SEE</option>
+            <option value="Intermediate">Intermediate</option>
+            <option value="Bachelors">Bachelors</option>
+            <option value="Masters">Masters</option>
+          </select>
+          <label htmlFor="edu-institution" className={LABEL}>
+            Institution
+          </label>
+          <input
+            id="edu-institution"
+            value={educationForm.institution}
+            onChange={e => setEducationForm(f => ({ ...f, institution: e.target.value }))}
+            className={`${INPUT} mb-3`}
+          />
+          <label htmlFor="edu-year" className={LABEL}>
+            Year
+          </label>
+          <input id="edu-year" type="number" value={educationForm.year} onChange={e => setEducationForm(f => ({ ...f, year: e.target.value }))} className={INPUT} />
+        </FormDialog>
       )}
 
       {showExperienceForm && (
-        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
-          <form onSubmit={handleAddExperience} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
-            <h3 className="mb-4 text-lg font-semibold text-ink">Add Work Experience</h3>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Employer</label>
-            <input
-              required
-              value={experienceForm.employer}
-              onChange={e => setExperienceForm(f => ({ ...f, employer: e.target.value }))}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <label className="mb-1 block text-xs font-medium text-slate-600">Role</label>
-            <input
-              value={experienceForm.role}
-              onChange={e => setExperienceForm(f => ({ ...f, role: e.target.value }))}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <label className="mb-1 block text-xs font-medium text-slate-600">Description</label>
-            <textarea
-              value={experienceForm.description}
-              onChange={e => setExperienceForm(f => ({ ...f, description: e.target.value }))}
-              rows={2}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <div className="mb-3 grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">Start date</label>
-                <DatePicker value={experienceForm.start_date} onChange={v => setExperienceForm(f => ({ ...f, start_date: v }))} />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-600">End date</label>
-                <DatePicker value={experienceForm.end_date} onChange={v => setExperienceForm(f => ({ ...f, end_date: v }))} />
-              </div>
+        <FormDialog
+          title="Add Work Experience"
+          onSubmit={handleAddExperience}
+          onClose={() => setShowExperienceForm(false)}
+          saving={savingExperience}
+          savingLabel="Saving…"
+          submitLabel="Add"
+        >
+          <label htmlFor="exp-employer" className={LABEL}>
+            Employer
+          </label>
+          <input
+            id="exp-employer"
+            required
+            value={experienceForm.employer}
+            onChange={e => setExperienceForm(f => ({ ...f, employer: e.target.value }))}
+            className={`${INPUT} mb-3`}
+          />
+          <label htmlFor="exp-role" className={LABEL}>
+            Role
+          </label>
+          <input id="exp-role" value={experienceForm.role} onChange={e => setExperienceForm(f => ({ ...f, role: e.target.value }))} className={`${INPUT} mb-3`} />
+          <label htmlFor="exp-description" className={LABEL}>
+            Description
+          </label>
+          <textarea
+            id="exp-description"
+            value={experienceForm.description}
+            onChange={e => setExperienceForm(f => ({ ...f, description: e.target.value }))}
+            rows={2}
+            className={`${TEXTAREA} mb-3`}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL}>Start date</label>
+              <DatePicker value={experienceForm.start_date} onChange={v => setExperienceForm(f => ({ ...f, start_date: v }))} />
             </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowExperienceForm(false)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={savingExperience}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60"
-              >
-                {savingExperience ? 'Saving…' : 'Add'}
-              </button>
+            <div>
+              <label className={LABEL}>End date</label>
+              <DatePicker value={experienceForm.end_date} onChange={v => setExperienceForm(f => ({ ...f, end_date: v }))} />
             </div>
-          </form>
-        </div>
-      )}
-
-      {showSkillForm && (
-        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4">
-          <form onSubmit={addSkill} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-lg">
-            <h3 className="mb-4 text-lg font-semibold text-ink">Add Skill</h3>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Category</label>
-            <select
-              value={skillCategory}
-              onChange={e => setSkillCategory(e.target.value as (typeof SKILL_CATEGORIES)[number])}
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            >
-              {SKILL_CATEGORIES.map(c => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-            <label className="mb-1 block text-xs font-medium text-slate-600">Value</label>
-            <input
-              autoFocus
-              required
-              value={skillInput}
-              onChange={e => setSkillInput(e.target.value)}
-              placeholder="e.g. English, Forklift license…"
-              className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowSkillForm(false)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90"
-              >
-                Add
-              </button>
-            </div>
-          </form>
-        </div>
+          </div>
+        </FormDialog>
       )}
 
       {pendingPhotoFile && (
@@ -934,10 +968,106 @@ export default function MyProfilePage() {
   );
 }
 
-function EditIcon({ className }: { className?: string }) {
+function Stat({ label, value, className }: { label: string; value: string; className: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    <div className={className}>
+      <div className="text-[11px] font-bold uppercase tracking-[0.5px] text-[#586474]">{label}</div>
+      <div className="mt-1 text-lg font-extrabold leading-6">{value}</div>
+    </div>
+  );
+}
+
+/** A label and its value on one line; the computer's cards. */
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-h-11 items-center gap-3 border-t border-slate-100 py-1.5 text-sm">
+      <span className="w-24 shrink-0 text-[#586474]">{label}</span>
+      <span className="min-w-0 break-words font-semibold">{value}</span>
+    </div>
+  );
+}
+
+/** The phone's "My Details" rows: label left, value right. */
+function PhoneRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-h-[34px] items-center justify-between gap-4 text-[13px]">
+      <span className="shrink-0 text-slate-500">{label}</span>
+      <span className="min-w-0 break-words text-right font-semibold">{value}</span>
+    </div>
+  );
+}
+
+/** The small add / request pop-ups (redeem points, education, work experience). */
+function FormDialog({
+  title,
+  note,
+  onSubmit,
+  onClose,
+  saving,
+  savingLabel,
+  submitLabel,
+  error,
+  children,
+}: {
+  title: string;
+  note?: string;
+  onSubmit: (e: React.FormEvent) => void;
+  onClose: () => void;
+  saving: boolean;
+  savingLabel: string;
+  submitLabel: string;
+  error?: string | null;
+  children: React.ReactNode;
+}) {
+  // Kept in a ref so the key listener is attached once, not on every render of the page.
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:items-center">
+      <form onSubmit={onSubmit} role="dialog" aria-modal="true" aria-label={title} className="my-auto w-full max-w-sm rounded-[20px] bg-white p-6 shadow-xl">
+        <h3 className="text-xl font-extrabold">{title}</h3>
+        {note && <p className="mb-4 mt-1 text-[13px] font-medium text-slate-600">{note}</p>}
+        <div className={note ? '' : 'mt-4'}>{children}</div>
+        {error && (
+          <p role="alert" className="mt-3 text-sm font-semibold text-[#b91c1c]">
+            {error}
+          </p>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-11 rounded-xl px-4 text-sm font-bold text-slate-600 hover:bg-slate-100">
+            Cancel
+          </button>
+          <button type="submit" disabled={saving} className="h-11 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90 disabled:opacity-60">
+            {saving ? savingLabel : submitLabel}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CameraIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 8h3l2-3h6l2 3h3v11H4Z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
+  );
+}
+
+function LockIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} role="img" aria-label="Read only">
+      <rect x="5" y="11" width="14" height="9" rx="2" />
+      <path strokeLinecap="round" d="M8 11V8a4 4 0 0 1 8 0v3" />
     </svg>
   );
 }
