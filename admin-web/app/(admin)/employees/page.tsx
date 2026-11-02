@@ -1281,10 +1281,6 @@ function EmployeesView() {
         </div>
       )}
 
-      <p className="mb-3 text-xs text-slate-400">
-        CSV columns: employee_code, name, email, phone, department, designation, fingerprint_id (header row optional).
-      </p>
-
       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelected} className="hidden" />
 
       {pendingCount > 0 && (
