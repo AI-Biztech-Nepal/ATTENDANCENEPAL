@@ -125,8 +125,14 @@ function EmployeesView() {
   const [profiles, setProfiles] = useState<Pick<Profile, 'id' | 'employee_id' | 'role'>[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<Department[]>([]);
-  const [filter, setFilter] = useState('All');
-  // Further narrowing on top of the Department filter above. 'All' = no filter.
+  // Who the list is about: people still working, or former staff (the sidebar's "Resigned" link). 'All' = no filter
+  // on any of the ones below.
+  const [view, setView] = useState<'current' | 'former'>('current');
+  const [departmentFilter, setDepartmentFilter] = useState('All');
+  // Only people with no biometric ID yet.
+  const [notEnrolledOnly, setNotEnrolledOnly] = useState(false);
+  // The Export button, while its panel is open.
+  const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const [branchFilter, setBranchFilter] = useState('All');
   const [designationFilter, setDesignationFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
@@ -367,7 +373,8 @@ function EmployeesView() {
   const searchParams = useSearchParams();
   const filterParam = searchParams.get('filter');
   useEffect(() => {
-    if (filterParam) setFilter(filterParam);
+    setView(filterParam === 'Resigned' ? 'former' : 'current');
+    setStatusFilter('All');
   }, [filterParam]);
   // The top bar's search box lands here as /employees?search=…
   const searchParam = searchParams.get('search');
@@ -401,14 +408,9 @@ function EmployeesView() {
     // the view that promise was never actually kept for, so a resigned
     // employee stayed mixed in with active staff indefinitely. Resigned
     // employees now only show up under the explicit "Resigned" filter.
-    let list = employees;
-    if (filter === 'Resigned') {
-      list = list.filter(e => e.status !== 'active');
-    } else {
-      list = list.filter(e => e.status === 'active');
-      if (filter === 'Unenrolled') list = list.filter(e => !e.fingerprint_id);
-      else if (filter !== 'All') list = list.filter(e => e.department === filter);
-    }
+    let list = view === 'former' ? employees.filter(e => e.status !== 'active') : employees.filter(e => e.status === 'active');
+    if (departmentFilter !== 'All') list = list.filter(e => e.department === departmentFilter);
+    if (notEnrolledOnly) list = list.filter(e => !e.fingerprint_id);
     // The Status filter offers Active / Probation / Suspended among current
     // staff and Resigned / Terminated among former staff, so a value is
     // always one that makes sense for the list it is applied to.
@@ -436,7 +438,7 @@ function EmployeesView() {
     // instead of a just-added (often not-yet-enrolled) employee jumping to
     // the top and reshuffling everyone else.
     return [...list].sort((a, b) => a.employee_code.localeCompare(b.employee_code, undefined, { numeric: true }));
-  }, [employees, shifts, filter, search, statusFilter, branchFilter, designationFilter, typeFilter, separations]);
+  }, [employees, shifts, view, departmentFilter, notEnrolledOnly, search, statusFilter, branchFilter, designationFilter, typeFilter, separations]);
 
   const designations = useMemo(
     () =>
@@ -458,6 +460,60 @@ function EmployeesView() {
     }
     return matches;
   }, [employees, search]);
+
+  // The two tabs (who the list is about) and the small facts the toolbar shows.
+  const currentCount = useMemo(() => employees.filter(e => e.status === 'active').length, [employees]);
+  const formerCount = employees.length - currentCount;
+  const viewCount = view === 'former' ? formerCount : currentCount;
+  const notEnrolledCount = useMemo(
+    () => employees.filter(e => (view === 'former' ? e.status !== 'active' : e.status === 'active') && !e.fingerprint_id).length,
+    [employees, view]
+  );
+  const anyFilterOn =
+    departmentFilter !== 'All' ||
+    branchFilter !== 'All' ||
+    designationFilter !== 'All' ||
+    typeFilter !== 'All' ||
+    statusFilter !== 'All' ||
+    notEnrolledOnly ||
+    search.trim() !== '';
+  const employeeNoun = view === 'former' ? 'former employee' : 'employee';
+  const resultSummary = anyFilterOn
+    ? `${filtered.length} of ${viewCount} ${employeeNoun}${viewCount === 1 ? '' : 's'} match`
+    : `${viewCount} ${employeeNoun}${viewCount === 1 ? '' : 's'}`;
+
+  const exportCountText = `${filtered.length} employee${filtered.length === 1 ? '' : 's'}`;
+
+  function switchView(next: 'current' | 'former') {
+    if (next === view) return;
+    setView(next);
+    // Current and former staff have different statuses, so a leftover one would match nobody.
+    setStatusFilter('All');
+    setPage(1);
+  }
+
+  // Everything back to "show all" for the tab you are on — department and search included.
+  function clearAllFilters() {
+    setDepartmentFilter('All');
+    setBranchFilter('All');
+    setDesignationFilter('All');
+    setTypeFilter('All');
+    setStatusFilter('All');
+    setNotEnrolledOnly(false);
+    setSearch('');
+    setSuggestionsOpen(false);
+    setPage(1);
+  }
+
+  const branchOptions = [{ value: 'All', label: 'All outlets' }, ...branches.map(b => ({ value: b.id, label: b.name })), { value: 'none', label: 'Unassigned' }];
+  const departmentChoices = [{ value: 'All', label: 'All departments' }, ...[...departments].sort((x, y) => x.localeCompare(y)).map(d => ({ value: d, label: d }))];
+  const designationOptions = [{ value: 'All', label: 'All designations' }, ...designations.map(d => ({ value: d, label: d }))];
+  const typeOptions = [{ value: 'All', label: 'All types' }, ...EMPLOYMENT_TYPES.map(t => ({ value: t.value, label: t.label })), { value: 'none', label: 'Not set' }];
+  const statusOptions = [
+    { value: 'All', label: view === 'former' ? 'Resigned & terminated' : 'Active, probation & suspended' },
+    ...(view === 'former' ? (['resigned', 'terminated'] as const) : (['active', 'probation', 'suspended'] as const)).map(s => ({ value: s, label: EMPLOYMENT_STATUS_LABEL[s] })),
+    ...(view === 'former' ? [{ value: 'settlement_pending', label: 'Settlement not completed' }] : []),
+  ];
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -549,7 +605,7 @@ function EmployeesView() {
           'Could not remove: this employee already has attendance, tasks, shifts, leave, or other records tied to them, ' +
             'so deleting would break that history. Use "Mark Resigned" instead — it keeps their history but removes them ' +
             'from active views. If you specifically want their history erased too, mark them resigned first, then use ' +
-            '"Permanently Delete" under the Resigned Employees filter.'
+            '"Permanently Delete" under Former staff.'
         );
       } else {
         alert(`Could not remove: ${error.message}`);
@@ -1176,54 +1232,26 @@ function EmployeesView() {
 
   return (
     <>
-      {/* Deliberately no z-index — see AttendanceReportTable.tsx's own copy of
-          this comment (5be39b2). This used to be `relative z-50`, which lifted
-          a plain in-flow bar above the app's own menus: it painted over the
-          account menu (z-30), over the dimmed overlay behind the phone nav
-          drawer (z-20) and over the Edit Profile / Change Password dialogs
-          (z-40). Nothing in here needs it — the Search box's suggestions
-          dropdown anchors to its own immediate `relative` wrapper a level
-          down (searchBoxRef), not to this outer one. */}
-      <div className="mb-5 rounded-2xl border border-slate-100/80 bg-white/60 backdrop-blur-xl p-5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all duration-500 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-4">
-          <div className="group">
-            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Department</label>
-            <div className="relative">
-              <FilterIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-accent/70 transition-colors group-hover:text-accent" />
-              <select
-                value={filter}
-                onChange={e => {
-                  setFilter(e.target.value);
-                  // Switching between current and former staff changes which
-                  // statuses exist, so a leftover one would match nobody.
-                  setStatusFilter('All');
-                  setPage(1);
-                }}
-                className="min-w-[13rem] appearance-none rounded-xl border border-slate-200/80 bg-white/80 py-2.5 pl-9 pr-8 text-sm font-medium text-ink shadow-sm backdrop-blur-sm transition-all duration-200 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 hover:border-accent/40"
-              >
-                {['All', ...departments, 'Unenrolled', 'Resigned'].map(f => (
-                  <option key={f} value={f}>
-                    {f === 'All' ? 'All Departments' : f === 'Unenrolled' ? 'Biometric Unenrolled' : f === 'Resigned' ? 'Resigned Employees' : f}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="group">
-            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">Search</label>
-            <div
-              ref={searchBoxRef}
-              tabIndex={-1}
-              onBlur={e => {
-                if (!searchBoxRef.current?.contains(e.relatedTarget as Node)) setSuggestionsOpen(false);
-              }}
-              className="relative"
-            >
-              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-hover:text-accent" />
+      {/* The toolbar: search, who the list is about (tabs), export / import / add — then the filters as one row
+          of pills. `relative z-10` lifts it above the table card below, so the search suggestions drop OVER the
+          table, but it stays under every app menu and dialog (z-20 and up). It used to be z-50, which painted
+          over the account menu and the Edit Profile / Change Password dialogs (5be39b2) — keep it low. */}
+      <div className="relative z-10 mb-5 rounded-2xl border border-slate-100/80 bg-white/60 px-5 py-4 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <div
+            ref={searchBoxRef}
+            tabIndex={-1}
+            onBlur={e => {
+              if (!searchBoxRef.current?.contains(e.relatedTarget as Node)) setSuggestionsOpen(false);
+            }}
+            className="relative w-full sm:w-[360px]"
+          >
+            <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-slate-500 shadow-sm transition focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent/20 hover:border-accent/40">
+              <SearchIcon className="h-4 w-4 shrink-0" />
+              <span className="sr-only">Search employees</span>
               <input
                 type="text"
-                placeholder="Search employees..."
+                placeholder="Search name, code, phone or shift"
                 value={search}
                 onChange={e => {
                   setSearch(e.target.value);
@@ -1231,146 +1259,175 @@ function EmployeesView() {
                   setSuggestionsOpen(true);
                 }}
                 onFocus={() => setSuggestionsOpen(true)}
-                className="w-56 appearance-none rounded-xl border border-slate-200/80 bg-white/80 py-2.5 pl-9 pr-4 text-sm text-ink shadow-sm backdrop-blur-sm transition-all duration-200 placeholder:text-slate-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 hover:border-accent/40"
+                className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-ink outline-none placeholder:font-medium placeholder:text-slate-500"
               />
-              {suggestionsOpen && searchSuggestions.length > 0 && (
-                <div className="absolute left-0 top-full z-20 mt-1.5 w-56 overflow-hidden rounded-xl border border-slate-100 bg-white/95 py-1 shadow-xl backdrop-blur-sm">
-                  {searchSuggestions.map(s => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => {
-                        setSearch(s);
-                        setPage(1);
-                        setSuggestionsOpen(false);
-                      }}
-                      className="block w-full truncate px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-accent/5 hover:text-accent"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
+              {search && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setSearch('');
+                    setPage(1);
+                    setSuggestionsOpen(false);
+                  }}
+                  className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-600 hover:bg-slate-300"
+                >
+                  <CloseIcon className="h-3 w-3" />
+                </button>
               )}
-            </div>
-          </div>
-
-          <div className="ml-auto flex gap-2">
-            <button
-              onClick={handleExportExcel}
-              disabled={filtered.length === 0}
-              title="Download everything the current filters show as an Excel file"
-              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-accent/40 hover:bg-white hover:shadow-md disabled:opacity-50"
-            >
-              ⭳ Excel
-            </button>
-            <button
-              onClick={handleExportPdf}
-              disabled={filtered.length === 0 || exportingPdf}
-              title="Download everything the current filters show as a PDF"
-              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-accent/40 hover:bg-white hover:shadow-md disabled:opacity-50"
-            >
-              {exportingPdf ? 'Preparing…' : '⭳ PDF'}
-            </button>
-            <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCsvSelected} className="hidden" />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={importing}
-              className="rounded-xl border border-slate-200/80 bg-white/80 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition-all duration-200 hover:border-accent/40 hover:bg-white hover:shadow-md disabled:opacity-60"
-            >
-              {importing ? 'Importing…' : '⭱ Import CSV'}
-            </button>
-            {filter !== 'Resigned' && (
-              <button
-                onClick={() => setShowForm(true)}
-                className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-accent/90 hover:shadow-md"
-              >
-                + Add Employee
-              </button>
+            </label>
+            {suggestionsOpen && searchSuggestions.length > 0 && (
+              <div role="listbox" aria-label="Matching names" className="absolute left-0 top-full z-20 mt-1.5 w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_14px_36px_rgba(15,23,42,0.14)]">
+                {searchSuggestions.map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    onClick={() => {
+                      setSearch(s);
+                      setPage(1);
+                      setSuggestionsOpen(false);
+                    }}
+                    className="block w-full truncate rounded-lg px-2.5 py-2 text-left text-sm font-semibold text-ink transition-colors hover:bg-accent/5 hover:text-accent"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
-          <div className="flex w-full flex-wrap items-end gap-x-4 gap-y-3 border-t border-slate-100 pt-4">
-            <FilterSelect
-              label="Outlet / branch"
-              value={branchFilter}
-              onChange={v => {
-                setBranchFilter(v);
-                setPage(1);
-              }}
+          <div role="tablist" aria-label="Which employees" className="inline-flex rounded-xl bg-slate-100 p-[3px]">
+            {(
+              [
+                ['current', 'Current staff', currentCount],
+                ['former', 'Former staff', formerCount],
+              ] as const
+            ).map(([id, label, count]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={view === id}
+                onClick={() => switchView(id)}
+                className={`inline-flex h-[34px] items-center gap-2 whitespace-nowrap rounded-[9px] px-3.5 text-[13px] font-extrabold transition ${
+                  view === id ? 'bg-white text-ink shadow-[0_1px_3px_rgba(15,23,42,0.14)]' : 'text-slate-600 hover:text-ink'
+                }`}
+              >
+                {label}
+                <span className={`rounded-full px-2 py-px text-xs font-extrabold ${view === id ? 'bg-accent-light text-teal-800' : 'bg-slate-200 text-slate-700'}`}>{count}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={e => setExportAnchor(exportAnchor ? null : e.currentTarget)}
+              disabled={filtered.length === 0}
+              aria-haspopup="menu"
+              aria-expanded={!!exportAnchor}
+              title="Download everything the current filters show"
+              className={`inline-flex h-10 items-center gap-2 rounded-xl border bg-white px-3.5 text-sm font-bold text-ink shadow-sm transition hover:border-accent/40 disabled:opacity-50 ${
+                exportAnchor ? 'border-accent ring-[3px] ring-accent/20' : 'border-slate-200'
+              }`}
             >
-              <option value="All">All outlets</option>
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-              <option value="none">Unassigned</option>
-            </FilterSelect>
-            <FilterSelect
-              label="Designation"
-              value={designationFilter}
-              onChange={v => {
-                setDesignationFilter(v);
-                setPage(1);
-              }}
+              <DownloadIcon className="h-4 w-4" />
+              Export
+              <ChevronDownIcon className="h-3.5 w-3.5 text-slate-500" />
+            </button>
+            <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCsvSelected} className="hidden" />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="inline-flex h-10 items-center gap-2 rounded-xl px-3.5 text-sm font-bold text-slate-700 transition hover:bg-white hover:shadow-sm disabled:opacity-60"
             >
-              <option value="All">All designations</option>
-              {designations.map(d => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </FilterSelect>
-            <FilterSelect
-              label="Employment type"
-              value={typeFilter}
-              onChange={v => {
-                setTypeFilter(v);
-                setPage(1);
-              }}
-            >
-              <option value="All">All types</option>
-              {EMPLOYMENT_TYPES.map(t => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-              <option value="none">Not set</option>
-            </FilterSelect>
-            <FilterSelect
-              label="Status"
-              value={statusFilter}
-              onChange={v => {
-                setStatusFilter(v);
-                setPage(1);
-              }}
-            >
-              <option value="All">{filter === 'Resigned' ? 'Resigned & terminated' : 'Active, probation & suspended'}</option>
-              {(filter === 'Resigned' ? (['resigned', 'terminated'] as const) : (['active', 'probation', 'suspended'] as const)).map(s => (
-                <option key={s} value={s}>
-                  {EMPLOYMENT_STATUS_LABEL[s]}
-                </option>
-              ))}
-              {filter === 'Resigned' && <option value="settlement_pending">Settlement not completed</option>}
-            </FilterSelect>
-            {(branchFilter !== 'All' || designationFilter !== 'All' || typeFilter !== 'All' || statusFilter !== 'All') && (
+              <UploadIcon className="h-4 w-4" />
+              {importing ? 'Importing…' : 'Import CSV'}
+            </button>
+            {view !== 'former' && (
               <button
                 type="button"
-                onClick={() => {
-                  setBranchFilter('All');
-                  setDesignationFilter('All');
-                  setTypeFilter('All');
-                  setStatusFilter('All');
-                  setPage(1);
-                }}
-                className="pb-2.5 text-xs font-medium text-accent hover:underline"
+                onClick={() => setShowForm(true)}
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent/90 hover:shadow-md"
               >
-                Clear filters
+                <PlusIcon className="h-4 w-4" />
+                Add employee
               </button>
             )}
           </div>
         </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <FilterPill label="Branch" value={branchFilter} options={branchOptions} onChange={v => { setBranchFilter(v); setPage(1); }} />
+          <FilterPill label="Department" value={departmentFilter} options={departmentChoices} onChange={v => { setDepartmentFilter(v); setPage(1); }} />
+          <FilterPill label="Designation" value={designationFilter} options={designationOptions} onChange={v => { setDesignationFilter(v); setPage(1); }} />
+          <FilterPill label="Type" value={typeFilter} options={typeOptions} onChange={v => { setTypeFilter(v); setPage(1); }} />
+          <FilterPill label="Status" value={statusFilter} options={statusOptions} onChange={v => { setStatusFilter(v); setPage(1); }} />
+          <button
+            type="button"
+            aria-pressed={notEnrolledOnly}
+            onClick={() => {
+              setNotEnrolledOnly(v => !v);
+              setPage(1);
+            }}
+            title="Only people with no biometric ID yet"
+            className={`inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-xl border px-2.5 text-[13px] font-extrabold transition ${
+              notEnrolledOnly ? 'border-accent bg-teal-50 text-teal-700' : 'border-dashed border-slate-400 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <FingerprintIcon className="h-3.5 w-3.5" />
+            Not enrolled
+            <span className={`rounded-full px-1.5 text-xs font-extrabold ${notEnrolledOnly ? 'bg-accent-light' : 'bg-slate-100'}`}>{notEnrolledCount}</span>
+          </button>
+          {anyFilterOn && (
+            <button type="button" onClick={clearAllFilters} className="h-9 px-2 text-[13px] font-extrabold text-teal-700 underline hover:text-teal-800">
+              Clear all
+            </button>
+          )}
+          <span aria-live="polite" className="ml-auto text-[13px] font-bold text-slate-600">
+            {resultSummary}
+          </span>
+        </div>
       </div>
+
+      {exportAnchor && (
+        <AnchoredPopover
+          anchor={exportAnchor}
+          title="Export"
+          hint="Everything the filters match, not just the page you are on."
+          onClose={() => setExportAnchor(null)}
+          width={280}
+        >
+          <div className="space-y-1">
+            <button
+              type="button"
+              onClick={() => {
+                setExportAnchor(null);
+                handleExportExcel();
+              }}
+              className="flex w-full items-center justify-between rounded-lg px-2.5 py-2.5 text-left text-sm font-bold text-ink hover:bg-slate-50"
+            >
+              Excel (.xlsx)
+              <span className="text-xs font-bold text-slate-500">{exportCountText}</span>
+            </button>
+            <button
+              type="button"
+              disabled={exportingPdf}
+              onClick={() => {
+                setExportAnchor(null);
+                handleExportPdf();
+              }}
+              className="flex w-full items-center justify-between rounded-lg px-2.5 py-2.5 text-left text-sm font-bold text-ink hover:bg-slate-50 disabled:opacity-50"
+            >
+              {exportingPdf ? 'Preparing…' : 'PDF'}
+              <span className="text-xs font-bold text-slate-500">{exportCountText}</span>
+            </button>
+          </div>
+        </AnchoredPopover>
+      )}
 
       {importResult && (
         <div className="mb-5 rounded-lg border border-slate-200 bg-white p-4 text-sm">
@@ -2433,10 +2490,26 @@ function ActionTile({
   );
 }
 
-function FilterIcon({ className }: { className?: string }) {
+function DownloadIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M7 12h10M10 18h4" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+    </svg>
+  );
+}
+
+function UploadIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 21V9M7 14l5-5 5 5M5 3h14" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }
@@ -2534,29 +2607,55 @@ function AlertIcon({ className }: { className?: string }) {
   );
 }
 
-function FilterSelect({
+// One filter as a small pill: "Branch  All". It is a real <select> laid invisibly over the pill, so the
+// browser's own list, keyboard and screen-reader behaviour all still work. When it is not "All" the pill turns
+// teal, shows the chosen value, and gets its own × that puts it back to "All".
+function FilterPill({
   label,
   value,
+  options,
   onChange,
-  children,
 }: {
   label: string;
   value: string;
+  options: { value: string; label: string }[];
   onChange: (value: string) => void;
-  children: React.ReactNode;
 }) {
+  const active = value !== 'All';
+  const face = active ? (options.find(o => o.value === value)?.label ?? value) : 'All';
   return (
-    <div className="group">
-      <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-500 transition-colors group-hover:text-accent">
-        {label}
-      </label>
+    <div
+      className={`relative inline-flex h-9 items-center rounded-xl border text-[13px] transition focus-within:ring-[3px] focus-within:ring-accent/20 ${
+        active ? 'border-accent bg-teal-50' : 'border-slate-200 bg-white hover:border-accent/40'
+      }`}
+    >
+      <span className={`pointer-events-none flex items-center gap-1.5 whitespace-nowrap pl-3 ${active ? 'pr-9' : 'pr-2.5'}`}>
+        <span className={`font-bold ${active ? 'text-teal-700' : 'text-slate-500'}`}>{label}</span>
+        <span className={`max-w-[9rem] truncate font-extrabold ${active ? 'text-teal-700' : 'text-ink'}`}>{face}</span>
+        {!active && <ChevronDownIcon className="h-3.5 w-3.5 text-slate-500" />}
+      </span>
       <select
+        aria-label={`${label} filter`}
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="min-w-[10rem] rounded-xl border border-slate-200/80 bg-white/80 py-2.5 pl-3 pr-3 text-sm font-medium text-ink shadow-sm backdrop-blur-sm transition-all duration-200 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 hover:border-accent/40"
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
       >
-        {children}
+        {options.map(o => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
       </select>
+      {active && (
+        <button
+          type="button"
+          aria-label={`Clear ${label} filter`}
+          onClick={() => onChange('All')}
+          className="absolute right-1.5 top-1/2 flex h-[22px] w-[22px] -translate-y-1/2 items-center justify-center rounded-full bg-accent-light text-teal-700 hover:bg-teal-200"
+        >
+          <CloseIcon className="h-3 w-3" />
+        </button>
+      )}
     </div>
   );
 }
