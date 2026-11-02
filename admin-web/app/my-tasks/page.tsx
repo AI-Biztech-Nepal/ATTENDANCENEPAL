@@ -277,7 +277,7 @@ export default function MyTasksPage() {
     );
   }
 
-  const subtitle = tasks.length === 0 ? 'No tasks yet' : `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}${runningLog ? ' · 1 timer running' : ''}`;
+  const taskCount = tasks.length === 0 ? 'No tasks yet' : `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`;
 
   return (
     <EmployeeShell title="My Tasks" flush>
@@ -290,8 +290,8 @@ export default function MyTasksPage() {
             <HeroPanel pad="inner">
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div className="min-w-0">
-                  <h1 className="text-4xl font-extrabold leading-[44px] tracking-[-0.02em]">My Tasks</h1>
-                  <p className="mt-0.5 text-[15px] font-semibold leading-[22px] text-white/90">{subtitle}</p>
+                  <h2 className="text-4xl font-extrabold leading-[44px] tracking-[-0.02em]">{taskCount}</h2>
+                  {runningLog && <p className="mt-0.5 text-[15px] font-semibold leading-[22px] text-white/90">1 timer running</p>}
                 </div>
                 <button
                   onClick={() => setShowTaskForm(true)}

@@ -184,10 +184,10 @@ export default function PortalCalendar(props: PortalCalendarProps) {
       <HeroPanel pad="inner">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
           <div className="hidden min-w-0 lg:block">
-            <h1 className="text-4xl font-extrabold leading-[44px] tracking-[-0.02em]">Calendar</h1>
-            <p className="mt-0.5 text-[15px] font-semibold leading-[22px] text-white/90">
+            <p className="text-xs font-extrabold uppercase leading-4 tracking-[0.06em] text-white/90">Date range</p>
+            <h2 className="mt-0.5 text-[32px] font-extrabold leading-10 tracking-[-0.02em]">
               {formatDdMmYyyy(range.start, system)} to {formatDdMmYyyy(range.end, system)}
-            </p>
+            </h2>
           </div>
           <div className="flex items-center rounded-[14px] bg-white/15 p-1">
             <button

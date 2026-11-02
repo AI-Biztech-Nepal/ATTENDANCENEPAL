@@ -3,8 +3,9 @@
 import { useCalendarSystem } from '@/lib/calendarSystem';
 
 /** The one AD/BS switch for the whole app — lives next to the page title.
- * `pill` is the owner top bar's rounded version. */
-export default function CalendarSystemSwitch({ variant = 'boxed' }: { variant?: 'boxed' | 'pill' | 'onDark' }) {
+ * `pill` is the owner top bar's rounded version; `portal` is the same look with
+ * 44px touch targets, for the employee pages' header. */
+export default function CalendarSystemSwitch({ variant = 'boxed' }: { variant?: 'boxed' | 'pill' | 'portal' | 'onDark' }) {
   const { system, setSystem } = useCalendarSystem();
 
   // The employee pages' version, for the green sidebar / header: a translucent
@@ -22,6 +23,27 @@ export default function CalendarSystemSwitch({ variant = 'boxed' }: { variant?: 
             title={s === 'AD' ? 'Gregorian calendar' : 'Nepali (Bikram Sambat) calendar'}
             className={`h-[38px] flex-1 rounded-full px-3.5 text-xs transition-colors ${
               system === s ? 'bg-white font-extrabold text-brand' : 'font-bold text-white hover:bg-white/10'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  if (variant === 'portal') {
+    return (
+      <div role="group" aria-label="Calendar system" className="flex shrink-0 rounded-full bg-slate-100 p-[3px]">
+        {(['AD', 'BS'] as const).map(s => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSystem(s)}
+            aria-pressed={system === s}
+            title={s === 'AD' ? 'Gregorian calendar' : 'Nepali (Bikram Sambat) calendar'}
+            className={`h-[38px] rounded-full px-4 text-xs transition-colors ${
+              system === s ? 'bg-brand font-extrabold text-white' : 'font-bold text-slate-600 hover:text-ink'
             }`}
           >
             {s}

@@ -458,8 +458,8 @@ export default function MyPayrollPage() {
             <HeroPanel pad="inner">
               <div className="flex items-end justify-between gap-6">
                 <div className="min-w-0">
-                  <h1 className="text-4xl font-extrabold leading-[44px] tracking-[-0.02em]">Payroll</h1>
-                  <p className="mt-0.5 text-[15px] font-semibold leading-[22px] text-white/90">{rangeText}</p>
+                  <p className="text-xs font-extrabold uppercase leading-4 tracking-[0.06em] text-white/90">Pay period</p>
+                  <h2 className="mt-0.5 text-[32px] font-extrabold leading-10 tracking-[-0.02em]">{rangeText}</h2>
                 </div>
                 {stepper(true)}
               </div>

@@ -506,15 +506,19 @@ export default function CheckInPage() {
       : null;
 
   return (
-    <EmployeeShell title="Check In/Out" flush>
+    <EmployeeShell
+      title={view === 'fix' ? 'Fix a Missed Punch' : view === 'leave' ? 'Leave Requests' : 'Check In/Out'}
+      eyebrow={view === 'menu' ? undefined : 'Check In/Out'}
+      flush
+    >
       {view === 'menu' && (
         <div className="lg:px-8 lg:pb-10 lg:pt-7">
           <HeroPanel pad="check">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
               <div className="min-w-0">
-                <h1 className="truncate text-[26px] font-extrabold leading-8 tracking-[-0.4px] lg:text-[40px] lg:leading-[48px] lg:tracking-[-0.02em]">
+                <h2 className="truncate text-[26px] font-extrabold leading-8 tracking-[-0.4px] lg:text-[40px] lg:leading-[48px] lg:tracking-[-0.02em]">
                   Namaste{firstName ? `, ${firstName}` : ''}
-                </h1>
+                </h2>
                 <p className="mt-1 text-[13px] font-semibold text-white/85 lg:text-[15px] lg:leading-[22px]">{todayLine}</p>
               </div>
               {/* Computer: the punch buttons live in the green panel. */}
@@ -806,9 +810,10 @@ export default function CheckInPage() {
               <ChevronLeftIcon className="h-4 w-4" />
               Check In/Out
             </button>
-            <h1 className="text-2xl font-extrabold leading-8 tracking-[-0.3px] lg:text-4xl lg:leading-[44px] lg:tracking-[-0.02em]">
+            {/* A phone shows the page name here; on a computer the header above already says it. */}
+            <h2 className="text-2xl font-extrabold leading-8 tracking-[-0.3px] lg:hidden">
               {view === 'fix' ? 'Fix a Missed Punch' : 'Leave Requests'}
-            </h1>
+            </h2>
           </HeroPanel>
 
           <div className="relative mx-4 -mt-10 flex flex-col gap-4 lg:mx-5 lg:-mt-11 lg:flex-row lg:items-start lg:gap-6">

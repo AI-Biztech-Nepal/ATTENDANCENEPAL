@@ -487,10 +487,10 @@ export default function MyProfilePage() {
       <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoSelected} className="hidden" />
 
       <div className="lg:px-8 lg:pb-10 lg:pt-7">
-        {/* Computer: the green panel carries the title. A phone has the header instead. */}
+        {/* Computer: just the green band the identity card sits over; the header says "Profile". */}
         <div className="hidden lg:block">
           <HeroPanel pad="inner">
-            <h1 className="text-4xl font-extrabold leading-[44px] tracking-[-0.02em]">Profile</h1>
+            <div aria-hidden="true" />
           </HeroPanel>
         </div>
 
