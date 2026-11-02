@@ -1871,9 +1871,7 @@ function DateField({
         {label}
         {edited && <EditedTag />}
       </span>
-      <div className={edited ? 'rounded-[10px] ring-2 ring-accent' : ''}>
-        <DatePicker value={value} onChange={onChange} />
-      </div>
+      <DatePicker value={value} onChange={onChange} ariaLabel={label} className={edited ? 'ring-2 ring-accent' : ''} />
       {hint && <span className={`mt-1.5 block text-xs font-semibold ${hintTone === 'warn' ? 'text-warning-text' : 'text-slate-500'}`}>{hint}</span>}
     </div>
   );

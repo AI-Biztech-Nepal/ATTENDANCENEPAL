@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { buildMonth, formatAdDate, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
+import { buildMonth, formatAdDate, formatDdMmYyyy, parseTypedDate, stepAnchor, todayAnchor, type CalendarAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
@@ -15,11 +15,20 @@ function parseAdKey(value: string): CalendarAnchor | null {
   return { year: Number(m[1]), month: Number(m[2]) - 1, day: Number(m[3]) };
 }
 
+/** Puts the slashes in while plain digits are typed ("25072056" -> "25/07/2056"). Anything with
+ * other separators ("2056-07-25") is left exactly as typed. */
+function shapeTyped(raw: string): string {
+  if (!/^[\d/]*$/.test(raw)) return raw;
+  const d = raw.replace(/\D/g, '').slice(0, 8);
+  return d.length <= 2 ? d : d.length <= 4 ? `${d.slice(0, 2)}/${d.slice(2)}` : `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
+}
+
 /**
- * Click-to-pick calendar with an AD/BS switch — the same date-grid model
- * (lib/calendar.ts) the Attendance calendar already uses, reused here so
- * every date field in the app can toggle to the Nepali (Bikram Sambat)
- * calendar instead of just the Gregorian one.
+ * A date box you can either type into (DD/MM/YYYY, in whichever calendar is active) or fill by
+ * clicking the calendar icon — the same date-grid model (lib/calendar.ts) the Attendance calendar
+ * already uses, reused here so every date field in the app can toggle to the Nepali (Bikram
+ * Sambat) calendar instead of just the Gregorian one. Typing is the fast way to a date far from
+ * today (a date of birth is dozens of months of clicking away).
  *
  * The AD/BS system itself isn't chosen here — it comes from the one global
  * switch in the page header (CalendarSystemSwitch), so every date picker
@@ -37,18 +46,28 @@ export default function DatePicker({
   onChange,
   placeholder = 'Select date',
   className,
+  ariaLabel = 'Date',
 }: {
   /** AD date as YYYY-MM-DD (what's actually stored/sent), or '' for unset. */
   value: string;
   onChange: (adKey: string) => void;
   placeholder?: string;
   className?: string;
+  /** What a screen reader calls the box ("Date of birth"). */
+  ariaLabel?: string;
 }) {
   const { system } = useCalendarSystem();
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState(todayAnchor);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  // While the box has focus it shows what is being typed; otherwise the friendly "25 Kartik 2056".
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+  const [badDate, setBadDate] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const justFocused = useRef(false);
+  const ownSlashes = useRef(false); // true once the person types a "/" themselves
   const popoverRef = useRef<HTMLDivElement>(null);
 
   function openPicker() {
@@ -99,21 +118,111 @@ export default function DatePicker({
     setOpen(false);
   }
 
+  function startTyping() {
+    setText(value ? formatDdMmYyyy(value, system) : '');
+    setBadDate(false);
+    ownSlashes.current = false;
+    setEditing(true);
+  }
+  // Select what is there so the first key typed replaces it.
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  function handleType(typed: string) {
+    let raw = typed.slice(0, 10);
+    // What was just put in, and where: the first place the old and new text differ.
+    let at = 0;
+    while (at < text.length && at < typed.length && text[at] === typed[at]) at++;
+    const inserted = typed.length > text.length ? typed.slice(at, at + typed.length - text.length) : '';
+    if (typed.length === text.length + 1 && raw.replace(/\D/g, '').length > 8) {
+      // A digit typed after a complete date starts a new date instead of being lost at the end of it.
+      raw = inserted;
+      ownSlashes.current = false;
+    } else if (inserted.includes('/')) {
+      ownSlashes.current = true; // they are typing the separators themselves (5/7/2056): leave them be
+    } else if (!typed) {
+      ownSlashes.current = false;
+    }
+    const next = ownSlashes.current ? raw : shapeTyped(raw);
+    setText(next);
+    const adKey = parseTypedDate(next, system);
+    // Only call it wrong once it is a full-length date; "25/07" is just unfinished.
+    setBadDate(!adKey && next.replace(/\D/g, '').length >= 8);
+    if (!adKey) return;
+    if (adKey !== value) onChange(adKey);
+    setAnchor(parseAdKey(adKey) ?? anchor); // an open calendar follows what is typed
+  }
+
+  function stopTyping() {
+    // A date that was typed in full is already saved as it became valid; anything half-typed or
+    // wrong is dropped, and clearing the box clears the date.
+    if (!text.trim() && value) onChange('');
+    setEditing(false);
+    setBadDate(false);
+  }
+
   const today = new Date();
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const displayValue = value ? formatAdDate(value, system) : '';
 
   return (
     <>
-      <button
+      <div
         ref={triggerRef}
-        type="button"
-        onClick={() => (open ? setOpen(false) : openPicker())}
-        className={`flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm shadow-sm hover:border-accent/40 ${className ?? ''}`}
+        className={`flex w-full items-center gap-2 rounded-lg border bg-white px-3 py-2 text-sm shadow-sm ${
+          badDate ? 'border-critical-text' : 'border-slate-200 hover:border-accent/40 focus-within:border-accent'
+        } ${className ?? ''}`}
       >
-        <CalendarGlyph className="h-4 w-4 shrink-0 text-accent" />
-        <span className={`truncate whitespace-nowrap ${displayValue ? 'text-ink' : 'text-slate-400'}`}>{displayValue || placeholder}</span>
-      </button>
+        {/* The input comes first in the page so a <label> around the field would focus it; the icon is shown first. */}
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          aria-label={ariaLabel}
+          aria-invalid={badDate || undefined}
+          value={editing ? text : displayValue}
+          placeholder={editing ? 'DD/MM/YYYY' : placeholder}
+          onFocus={() => {
+            justFocused.current = true;
+            startTyping();
+          }}
+          // The click that focuses the box would otherwise drop the select-all on mouse-up.
+          onMouseUp={e => {
+            if (justFocused.current) e.preventDefault();
+            justFocused.current = false;
+          }}
+          onBlur={() => {
+            justFocused.current = false;
+            stopTyping();
+          }}
+          onChange={e => handleType(e.target.value)}
+          onKeyDown={e => {
+            // Enter keeps the date and moves on; it should not submit the whole form behind it.
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              inputRef.current?.blur();
+            }
+          }}
+          className="order-2 min-w-0 flex-1 truncate bg-transparent text-ink outline-none placeholder:text-slate-400"
+        />
+        <button
+          type="button"
+          aria-label={open ? 'Close calendar' : 'Open calendar'}
+          aria-expanded={open}
+          onClick={() => (open ? setOpen(false) : openPicker())}
+          className="order-1 shrink-0 rounded text-accent hover:text-accent/80"
+        >
+          <CalendarGlyph className="h-4 w-4" />
+        </button>
+        {editing && <span className="order-3 shrink-0 text-[10px] font-semibold text-slate-400">{system}</span>}
+      </div>
+      {badDate && (
+        <p role="alert" className="mt-1 text-[11px] font-medium text-critical-text">
+          Not a real {system} date — type it as day/month/year.
+        </p>
+      )}
       {open &&
         coords &&
         createPortal(

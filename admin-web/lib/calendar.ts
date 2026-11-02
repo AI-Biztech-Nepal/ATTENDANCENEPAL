@@ -154,6 +154,38 @@ export function formatDdMmYyyy(adKey: string, system: CalendarSystem): string {
   return NepaliDate.fromAD(new Date(y, m - 1, d)).format('DD/MM/YYYY');
 }
 
+/** What a person typed into a date box -> an AD date key (YYYY-MM-DD), or null if it is not a
+ * real date in the active calendar `system`. Takes D/M/YYYY (the order formatDdMmYyyy writes) or,
+ * when pasted, YYYY-M-D; "/", "-" and "." all work as separators. Days that do not exist (31 in
+ * a 30-day month) and years the BS table does not cover (2000-2090) are refused, not rolled over. */
+export function parseTypedDate(text: string, system: CalendarSystem): string | null {
+  const t = text.trim();
+  let y: number;
+  let m: number;
+  let d: number;
+  const dayFirst = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t);
+  const yearFirst = /^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})$/.exec(t);
+  if (dayFirst) [d, m, y] = [Number(dayFirst[1]), Number(dayFirst[2]), Number(dayFirst[3])];
+  else if (yearFirst) [y, m, d] = [Number(yearFirst[1]), Number(yearFirst[2]), Number(yearFirst[3])];
+  else return null;
+  if (m < 1 || m > 12 || d < 1 || d > 32) return null;
+  if (system === 'AD') {
+    if (y < 1900 || y > 2200) return null;
+    const date = new Date(y, m - 1, d);
+    if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return null;
+    return dateKey(y, m - 1, d);
+  }
+  try {
+    const bs = new NepaliDate(y, m - 1, d);
+    const back = bs.getBS();
+    if (back.year !== y || back.month !== m - 1 || back.date !== d) return null;
+    const ad = bs.getAD();
+    return dateKey(ad.year, ad.month, ad.date);
+  } catch {
+    return null;
+  }
+}
+
 /** A selectable month-long period: a real calendar month in whichever
  * system it was built for, with its true AD start/end already resolved
  * (see monthDateRange()) — never an AD month wearing a BS label that
