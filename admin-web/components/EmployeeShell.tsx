@@ -121,7 +121,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
   const account = { name, designation, photoUrl, initials, isHr, onSignOut: handleSignOut };
 
   return (
-    <div className={`${manrope.className} flex min-h-screen flex-col bg-slate-100 text-ink lg:flex-row`}>
+    <div className={`${manrope.className} flex min-h-screen flex-col bg-slate-100 text-ink lg:h-screen lg:flex-row lg:overflow-hidden`}>
       <BodyFontClass className={manrope.className} />
 
       {/* Computer: the sidebar, the owner console's look and behaviour */}
@@ -147,9 +147,9 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col lg:overflow-hidden">
         {/* Computer: the owner console's white top header */}
-        <header className="hidden border-b border-slate-200 bg-white lg:sticky lg:top-0 lg:z-20 lg:flex lg:items-center lg:justify-between lg:gap-4 lg:px-7 lg:py-4">
+        <header className="hidden shrink-0 border-b border-slate-200 bg-white lg:flex lg:items-center lg:justify-between lg:gap-4 lg:px-7 lg:py-4">
           <div className="flex min-w-0 items-center gap-1.5">
             {eyebrow && (
               <>
@@ -174,7 +174,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <main className="flex-1 pb-24 lg:pb-0">{children}</main>
+        <main className="flex-1 pb-24 lg:min-h-0 lg:overflow-y-auto lg:pb-0">{children}</main>
       </div>
 
       {/* Phone: the bottom tab bar */}
@@ -246,7 +246,7 @@ function DesktopSidebar({ pathname }: { pathname: string }) {
       onBlur={e => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setExpanded(false);
       }}
-      className={`sticky top-0 hidden h-screen shrink-0 flex-col self-start overflow-hidden bg-sidebar text-slate-300 transition-[width] duration-200 lg:flex ${
+      className={`hidden h-screen shrink-0 flex-col overflow-hidden bg-sidebar text-slate-300 transition-[width] duration-200 lg:flex ${
         rail ? 'w-16' : 'w-60'
       }`}
     >

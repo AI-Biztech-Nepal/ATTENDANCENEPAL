@@ -424,6 +424,7 @@ export default function MyPayrollPage() {
   const gross = breakdown ? breakdown.total + breakdown.ot : 0;
   const deductions = breakdown ? breakdown.pf + breakdown.ssf + breakdown.tds : 0;
   const shortDate = (key: string) => formatDdMmYyyy(key, system).slice(0, 5);
+  const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
   const stepper = (onDark: boolean) => (
     <PeriodStepper
@@ -650,7 +651,7 @@ export default function MyPayrollPage() {
                         {upcomingRows.length > 0 && (
                           <tr className="h-[46px] border-t border-slate-100 bg-slate-50">
                             <td colSpan={4} className="pl-5 text-sm font-semibold tabular-nums text-slate-600">
-                              {upcomingRows.length} upcoming days · {shortDate(upcomingRows[0].date)} – {shortDate(upcomingRows[upcomingRows.length - 1].date)}
+                              {upcomingRows.length} upcoming {upcomingRows.length === 1 ? 'day' : 'days'} · {shortDate(upcomingRows[0].date)} – {shortDate(upcomingRows[upcomingRows.length - 1].date)}
                             </td>
                           </tr>
                         )}
@@ -670,7 +671,7 @@ export default function MyPayrollPage() {
               </section>
               </div>
 
-              <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-24 lg:gap-6">
+              <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-0 lg:gap-6">
                 {employee?.salary != null && breakdown && (
                   <section className="hidden rounded-[20px] bg-brand px-7 py-6 text-white lg:block">
                     <div className="text-sm font-bold text-emerald-100">Earned to date</div>
@@ -727,9 +728,9 @@ export default function MyPayrollPage() {
                   <section className="hidden rounded-[20px] border border-slate-200 bg-white p-6 lg:block">
                     <h2 className="text-lg font-extrabold leading-6">This period</h2>
                     <dl className="mt-2.5">
-                      <PeriodRow label="Present" value={`${totals.presentDays} days`} />
-                      <PeriodRow label="Week off" value={`${totals.paidOffDays} days`} />
-                      <PeriodRow label="Absent" value={`${totals.absentDays} days`} />
+                      <PeriodRow label="Present" value={dayCount(totals.presentDays)} />
+                      <PeriodRow label="Week off" value={dayCount(totals.paidOffDays)} />
+                      <PeriodRow label="Absent" value={dayCount(totals.absentDays)} />
                       <PeriodRow label="Hours worked" value={fmtHrs(totals.totalHours)} strong />
                       <PeriodRow label="Overtime" value={fmtHrs(totals.overtimeHours)} />
                     </dl>
