@@ -8,7 +8,8 @@ import type { Employee } from '@/lib/types';
  * Always-visible employee list for master/detail pages (Attendance
  * Calendar): search at the top, one row per employee, the selected one
  * highlighted and kept scrolled into view. Hidden below lg, where pages fall
- * back to EmployeePicker.
+ * back to EmployeePicker. It takes the width and the height its parent gives
+ * it (the page puts the Team today card under it and caps the column's height).
  */
 export default function EmployeeListPanel({
   employees,
@@ -36,7 +37,7 @@ export default function EmployeeListPanel({
   }, [value]);
 
   return (
-    <aside className="flex max-h-[calc(100vh-8rem)] w-72 shrink-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:sticky lg:top-4">
+    <aside className="flex min-h-[11rem] w-full flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-4 pb-3 pt-4">
         <div className="flex items-baseline justify-between">
           <h2 className="text-sm font-extrabold text-ink">Employees</h2>
