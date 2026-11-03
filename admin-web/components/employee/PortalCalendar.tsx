@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { HeroPanel, ChevronLeftIcon, ChevronRightIcon, StatusTag, type TagTone } from '@/components/employee/parts';
 import { dayFlags, type DayFlags } from '@/components/MonthCalendar';
+import CalendarViewSwitch, { type CalendarView } from '@/components/CalendarViewSwitch';
 import type { LogRow } from '@/components/AttendanceLogTable';
 import type { CardEntry, CardKey } from '@/components/EmployeeCalendarView';
 import { buildMonth, formatAdDate, formatDdMmYyyy, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
@@ -106,6 +107,8 @@ export default function PortalCalendar(props: PortalCalendarProps) {
   } = props;
   const { system } = useCalendarSystem();
   const [anchor, setAnchor] = useState(todayAnchor);
+  // The switch only exists on a phone: a computer has no daily log here, so it always shows the calendar.
+  const [view, setView] = useState<CalendarView>('calendar');
 
   const month = useMemo(() => buildMonth(system, anchor), [system, anchor]);
   const range = useMemo(() => monthDateRange(system, anchor), [system, anchor]);
@@ -223,6 +226,7 @@ export default function PortalCalendar(props: PortalCalendarProps) {
               <ChevronRightIcon className="h-[18px] w-[18px]" />
             </button>
           </div>
+          <CalendarViewSwitch value={view} onChange={setView} variant="hero" />
         </div>
       </HeroPanel>
       </div>
@@ -257,7 +261,7 @@ export default function PortalCalendar(props: PortalCalendarProps) {
 
 
 
-      <div className="relative mx-4 -mt-10 flex flex-col gap-4 lg:mx-0 lg:mt-0 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-6">
+      <div className={`relative mx-4 -mt-10 flex flex-col gap-4 lg:mx-0 lg:mt-0 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-6 ${view === 'log' ? 'max-lg:hidden' : ''}`}>
         {/* On a phone the two columns dissolve so the picked day can sit right under the grid. */}
         <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
         {/* Month grid */}
@@ -582,9 +586,9 @@ export default function PortalCalendar(props: PortalCalendarProps) {
         </div>
       </div>
 
-      <div className="mx-4 mt-4 lg:hidden">
-        {/* Daily log (phone) */}
-        <section className="min-w-0 rounded-[20px] border border-slate-200 bg-white p-5 lg:p-6">
+      {/* Daily log (phone): takes the calendar's place, up over the hero's edge like the grid does */}
+      <div className={`mx-4 lg:hidden ${view === 'log' ? '-mt-10' : 'hidden'}`}>
+        <section className="relative min-w-0 rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_10px_24px_rgba(6,78,59,0.10)] lg:p-6">
           <h2 className="mb-4 text-xl font-extrabold leading-6">Daily log</h2>
           {tableRows.length === 0 ? (
             <p className="py-6 text-center text-sm text-slate-500">Nothing to show yet.</p>

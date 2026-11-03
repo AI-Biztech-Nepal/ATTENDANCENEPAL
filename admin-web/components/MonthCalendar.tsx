@@ -20,6 +20,10 @@ type Props = {
    * the visible month changes) — lets a parent aggregate stats for exactly
    * the month this grid is showing, without owning the anchor itself. */
   onMonthChange?: (adKeys: string[]) => void;
+  /** Only the month stepper, no grid — for when something else (the daily log) is
+   * showing but the month still has to be changeable. Stays mounted so the month
+   * in view isn't lost. */
+  compact?: boolean;
 };
 
 export type DayFlags = {
@@ -94,7 +98,7 @@ export function captionFor(flags: DayFlags): string | undefined {
   return parts.length > 0 ? parts.join(' & ') : undefined;
 }
 
-export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, selectedDate, onSelectDate, onMonthChange }: Props) {
+export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, selectedDate, onSelectDate, onMonthChange, compact }: Props) {
   const { system } = useCalendarSystem();
   const [anchor, setAnchor] = useState(todayAnchor);
 
@@ -113,7 +117,7 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-      <div className="mb-3 flex items-center justify-center gap-3">
+      <div className={`flex items-center justify-center gap-3 ${compact ? '' : 'mb-3'}`}>
         <button onClick={() => go(-1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
           ←
         </button>
@@ -123,7 +127,7 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-medium uppercase text-slate-400">
+      <div className={`grid-cols-7 gap-1 text-center text-[11px] font-medium uppercase text-slate-400 ${compact ? 'hidden' : 'grid'}`}>
         {WEEKDAY_LABELS.map(w => (
           <div key={w} className="py-1">
             {w}
@@ -131,7 +135,7 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-1">
+      <div className={`grid-cols-7 gap-1 ${compact ? 'hidden' : 'grid'}`}>
         {month.weeks.flat().map((cell, i) => {
           const status = dayStatus.get(cell.adKey);
           const onLeave = leaveDates?.has(cell.adKey) ?? false;
@@ -198,7 +202,7 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
         })}
       </div>
 
-      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+      <div className={`mt-2.5 flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 ${compact ? 'hidden' : 'flex'}`}>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm bg-good-bg" /> Present
         </span>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { supabase } from '@/lib/supabase';
 import MonthCalendar from '@/components/MonthCalendar';
+import CalendarViewSwitch, { type CalendarView } from '@/components/CalendarViewSwitch';
 import Badge from '@/components/Badge';
 import AttendanceLogTable, { type LogRow } from '@/components/AttendanceLogTable';
 import PortalCalendar from '@/components/employee/PortalCalendar';
@@ -80,6 +81,7 @@ export default function EmployeeCalendarView({
   const [dayLoading, setDayLoading] = useState(false);
   const [visibleDates, setVisibleDates] = useState<string[]>([]);
   const [expandedCard, setExpandedCard] = useState<CardKey | null>(null);
+  const [view, setView] = useState<CalendarView>('calendar');
   const [weeklyOffDay, setWeeklyOffDay] = useState<number | null>(null);
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ weekday: number; shift_id: string | null }[]>([]);
@@ -443,6 +445,10 @@ export default function EmployeeCalendarView({
 
   return (
     <>
+      <div className="mb-3">
+        <CalendarViewSwitch value={view} onChange={setView} />
+      </div>
+
       <MonthCalendar
         dayStatus={dayStatus}
         leaveDates={leaveDates}
@@ -450,178 +456,183 @@ export default function EmployeeCalendarView({
         selectedDate={selectedDate}
         onSelectDate={d => setSelectedDate(cur => (cur === d ? null : d))}
         onMonthChange={setVisibleDates}
+        compact={view === 'log'}
       />
 
-      {selectedDate && (
-        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="mb-2 text-sm font-semibold text-ink">{formatAdDate(selectedDate, system)}</h2>
-          {selectedLeave && (
-            <div className="mb-3 rounded-xl bg-purple-100 p-3">
-              <div className="text-xs font-medium text-purple-700">On Leave</div>
-              <div className="text-base font-bold capitalize text-ink">{selectedLeave.leave_type}</div>
-            </div>
-          )}
-          {dayLoading ? (
-            <p className="text-sm text-slate-400">Loading…</p>
-          ) : !selectedDaySummary ? (
-            !selectedLeave && <p className="text-sm text-slate-400">No punches recorded.</p>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-good-bg p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-xs font-medium text-good-text">IN</div>
-                      <div className="text-base font-bold text-ink">
-                        {new Date(selectedDaySummary.checkIn.punch_time).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </div>
-                      <div className="text-xs capitalize text-slate-500">{selectedDaySummary.checkIn.method}</div>
-                    </div>
-                    {selectedDaySummary.isLate && (
-                      <Badge tone="warning">Late by {formatHoursMinutes(selectedDaySummary.lateMinutes)}</Badge>
-                    )}
-                  </div>
+      {view === 'calendar' && (
+        <>
+          {selectedDate && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+              <h2 className="mb-2 text-sm font-semibold text-ink">{formatAdDate(selectedDate, system)}</h2>
+              {selectedLeave && (
+                <div className="mb-3 rounded-xl bg-purple-100 p-3">
+                  <div className="text-xs font-medium text-purple-700">On Leave</div>
+                  <div className="text-base font-bold capitalize text-ink">{selectedLeave.leave_type}</div>
                 </div>
-                <div className="rounded-xl bg-warning-bg p-3">
-                  {selectedDaySummary.checkOut ? (
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="text-xs font-medium text-warning-text">OUT</div>
-                        <div className="text-base font-bold text-ink">
-                          {new Date(selectedDaySummary.checkOut.punch_time).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
+              )}
+              {dayLoading ? (
+                <p className="text-sm text-slate-400">Loading…</p>
+              ) : !selectedDaySummary ? (
+                !selectedLeave && <p className="text-sm text-slate-400">No punches recorded.</p>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-good-bg p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-medium text-good-text">IN</div>
+                          <div className="text-base font-bold text-ink">
+                            {new Date(selectedDaySummary.checkIn.punch_time).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </div>
+                          <div className="text-xs capitalize text-slate-500">{selectedDaySummary.checkIn.method}</div>
                         </div>
-                        <div className="text-xs capitalize text-slate-500">{selectedDaySummary.checkOut.method}</div>
-                      </div>
-                      {selectedDaySummary.isEarly && (
-                        <Badge tone="critical">Early by {formatHoursMinutes(selectedDaySummary.earlyMinutes)}</Badge>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-xs font-medium text-warning-text">OUT</div>
-                      <div className="text-sm text-slate-400">Not yet</div>
-                    </>
-                  )}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-good-bg p-3">
-                  <div className="text-xs font-medium text-good-text">Total Work Hours</div>
-                  <div className="text-base font-bold text-ink">{formatHoursMinutes(selectedDaySummary.totalMinutes)}</div>
-                </div>
-                <div className="rounded-xl bg-info-bg p-3">
-                  <div className="text-xs font-medium text-info-text">Overtime</div>
-                  <div className="text-base font-bold text-ink">{formatHoursMinutes(selectedDaySummary.overtimeMinutes)}</div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      <h2 className="mb-3 mt-6 text-sm font-semibold text-ink">This Month</h2>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {(Object.keys(CARD_STYLES) as CardKey[]).map(key => {
-          const style = CARD_STYLES[key];
-          const open = expandedCard === key;
-          return (
-            <button
-              key={key}
-              onClick={() => setExpandedCard(open ? null : key)}
-              className={`rounded-xl p-4 text-left ${style.bg} ${open ? 'ring-2 ring-accent' : ''}`}
-            >
-              <div className={`text-xs font-medium ${style.text}`}>{style.label}</div>
-              <div className="mt-1 text-xl font-bold text-ink">{cardValue(key)}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      {tableRows.length > 0 && <AttendanceLogTable rows={tableRows} todayKey={todayKey} />}
-
-      <div className="mb-2 mt-4 flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold text-ink">Hours Trend</h2>
-        <span className="text-[10px] text-slate-400">Scroll to see all days →</span>
-      </div>
-      <div className="rounded-xl border border-slate-200 bg-white p-3">
-        {chartData.length === 0 ? (
-          <p className="py-8 text-center text-sm text-slate-400">No data to chart yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <div style={{ width: Math.max(chartData.length * 30, 320), height: 160 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
-                  <CartesianGrid vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} interval={0} />
-                  <YAxis tick={{ fontSize: 9, fill: '#0d9488' }} axisLine={false} tickLine={false} allowDecimals={false} width={22} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
-                    formatter={(v: number) => [fmtHrs(v), 'Hours']}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="hours"
-                    name="hours"
-                    stroke="#0d9488"
-                    strokeWidth={2}
-                    dot={{ r: 2, fill: '#0d9488' }}
-                    activeDot={{ r: 5 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {expandedCard && (
-        <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-2 text-sm font-semibold text-ink">{CARD_STYLES[expandedCard].label}</h3>
-          {monthSummary.entries[expandedCard].length === 0 ? (
-            <p className="text-sm text-slate-400">Nothing to show for this month.</p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {monthSummary.entries[expandedCard].map(entry => {
-                const day = dayStatus.get(entry.date);
-                return (
-                  <div key={entry.date} className="py-2 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-ink">{formatAdDate(entry.date, system)}</span>
-                      {!day && <Badge tone="neutral">Absent</Badge>}
-                      {day?.isLate && <Badge tone="warning">Late</Badge>}
-                    </div>
-                    {day && (
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-                        <span>
-                          IN {new Date(day.checkIn.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        <span>
-                          OUT{' '}
-                          {day.checkOut
-                            ? new Date(day.checkOut.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                            : '–:–'}
-                        </span>
-                        {day.isLate && <span className="text-warning-text">Late {formatHoursMinutes(day.lateMinutes)}</span>}
-                        {day.isEarly && <span className="text-critical-text">Early {formatHoursMinutes(day.earlyMinutes)}</span>}
-                        <span>{formatHoursMinutes(day.totalMinutes)}</span>
-                        {day.overtimeMinutes > 0 && (
-                          <span className="text-info-text">OT {formatHoursMinutes(day.overtimeMinutes)}</span>
+                        {selectedDaySummary.isLate && (
+                          <Badge tone="warning">Late by {formatHoursMinutes(selectedDaySummary.lateMinutes)}</Badge>
                         )}
                       </div>
-                    )}
+                    </div>
+                    <div className="rounded-xl bg-warning-bg p-3">
+                      {selectedDaySummary.checkOut ? (
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-xs font-medium text-warning-text">OUT</div>
+                            <div className="text-base font-bold text-ink">
+                              {new Date(selectedDaySummary.checkOut.punch_time).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </div>
+                            <div className="text-xs capitalize text-slate-500">{selectedDaySummary.checkOut.method}</div>
+                          </div>
+                          {selectedDaySummary.isEarly && (
+                            <Badge tone="critical">Early by {formatHoursMinutes(selectedDaySummary.earlyMinutes)}</Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-xs font-medium text-warning-text">OUT</div>
+                          <div className="text-sm text-slate-400">Not yet</div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                );
-              })}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl bg-good-bg p-3">
+                      <div className="text-xs font-medium text-good-text">Total Work Hours</div>
+                      <div className="text-base font-bold text-ink">{formatHoursMinutes(selectedDaySummary.totalMinutes)}</div>
+                    </div>
+                    <div className="rounded-xl bg-info-bg p-3">
+                      <div className="text-xs font-medium text-info-text">Overtime</div>
+                      <div className="text-base font-bold text-ink">{formatHoursMinutes(selectedDaySummary.overtimeMinutes)}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </div>
+
+          <h2 className="mb-3 mt-6 text-sm font-semibold text-ink">This Month</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {(Object.keys(CARD_STYLES) as CardKey[]).map(key => {
+              const style = CARD_STYLES[key];
+              const open = expandedCard === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setExpandedCard(open ? null : key)}
+                  className={`rounded-xl p-4 text-left ${style.bg} ${open ? 'ring-2 ring-accent' : ''}`}
+                >
+                  <div className={`text-xs font-medium ${style.text}`}>{style.label}</div>
+                  <div className="mt-1 text-xl font-bold text-ink">{cardValue(key)}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mb-2 mt-4 flex items-baseline justify-between">
+            <h2 className="text-sm font-semibold text-ink">Hours Trend</h2>
+            <span className="text-[10px] text-slate-400">Scroll to see all days →</span>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            {chartData.length === 0 ? (
+              <p className="py-8 text-center text-sm text-slate-400">No data to chart yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <div style={{ width: Math.max(chartData.length * 30, 320), height: 160 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid vertical={false} stroke="#e2e8f0" />
+                      <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} interval={0} />
+                      <YAxis tick={{ fontSize: 9, fill: '#0d9488' }} axisLine={false} tickLine={false} allowDecimals={false} width={22} />
+                      <Tooltip
+                        contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+                        formatter={(v: number) => [fmtHrs(v), 'Hours']}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="hours"
+                        name="hours"
+                        stroke="#0d9488"
+                        strokeWidth={2}
+                        dot={{ r: 2, fill: '#0d9488' }}
+                        activeDot={{ r: 5 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {expandedCard && (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
+              <h3 className="mb-2 text-sm font-semibold text-ink">{CARD_STYLES[expandedCard].label}</h3>
+              {monthSummary.entries[expandedCard].length === 0 ? (
+                <p className="text-sm text-slate-400">Nothing to show for this month.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {monthSummary.entries[expandedCard].map(entry => {
+                    const day = dayStatus.get(entry.date);
+                    return (
+                      <div key={entry.date} className="py-2 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-ink">{formatAdDate(entry.date, system)}</span>
+                          {!day && <Badge tone="neutral">Absent</Badge>}
+                          {day?.isLate && <Badge tone="warning">Late</Badge>}
+                        </div>
+                        {day && (
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                            <span>
+                              IN {new Date(day.checkIn.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span>
+                              OUT{' '}
+                              {day.checkOut
+                                ? new Date(day.checkOut.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : '–:–'}
+                            </span>
+                            {day.isLate && <span className="text-warning-text">Late {formatHoursMinutes(day.lateMinutes)}</span>}
+                            {day.isEarly && <span className="text-critical-text">Early {formatHoursMinutes(day.earlyMinutes)}</span>}
+                            <span>{formatHoursMinutes(day.totalMinutes)}</span>
+                            {day.overtimeMinutes > 0 && (
+                              <span className="text-info-text">OT {formatHoursMinutes(day.overtimeMinutes)}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
+
+      {view === 'log' && tableRows.length > 0 && <AttendanceLogTable rows={tableRows} todayKey={todayKey} />}
     </>
   );
 }
