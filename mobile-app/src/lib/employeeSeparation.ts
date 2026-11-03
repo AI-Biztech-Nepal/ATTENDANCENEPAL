@@ -43,6 +43,8 @@ export type EmployeeSeparation = {
   other_dues_note: string | null;
   settlement_status: SettlementStatus;
   settlement_on: string | null;
+  /** True when the employee handed in the resignation themselves (20261103140000_employee_self_edit_hris.sql). */
+  requested_by_employee?: boolean;
   updated_at: string;
 };
 
@@ -122,6 +124,30 @@ export function checklist(
     { key: 'other', label: 'Other company assets', done: handled(s.asset_other_status) },
     { key: 'letter', label: 'Experience letter', done: s.experience_letter_status === 'issued' },
   ];
+}
+
+/** Nothing for HR to have started yet: no checklist item ticked, no notice period, no money entered.
+ * The employee can still change or withdraw a resignation they handed in while this holds — the same
+ * test as separation_is_untouched() in the database, which is what actually enforces it. */
+export function isUntouched(s: EmployeeSeparation): boolean {
+  return (
+    s.exit_interview_status === 'pending' &&
+    s.clearance_status === 'pending' &&
+    s.uniform_id_status === 'pending' &&
+    s.asset_keys_status === 'pending' &&
+    s.asset_equipment_status === 'pending' &&
+    s.asset_device_status === 'pending' &&
+    s.asset_other_status === 'pending' &&
+    s.experience_letter_status === 'pending' &&
+    s.settlement_status === 'pending' &&
+    s.notice_required_days === null &&
+    s.final_salary === 0 &&
+    s.leave_encashment === 0 &&
+    s.incentive_settlement === 0 &&
+    s.other_payments === 0 &&
+    s.outstanding_advances === 0 &&
+    s.other_deductions === 0
+  );
 }
 
 export function formatAmount(n: number): string {

@@ -39,6 +39,8 @@ export type EmployeeDocument = {
   file_name: string;
   mime_type: string | null;
   size_bytes: number | null;
+  /** True when the employee added it from their own profile rather than HR (20261103140000_employee_self_edit_hris.sql). */
+  uploaded_by_employee?: boolean;
   created_at: string;
 };
 

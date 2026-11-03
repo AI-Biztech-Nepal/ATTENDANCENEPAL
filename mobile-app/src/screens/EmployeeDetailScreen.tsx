@@ -12,6 +12,7 @@ import {
   PROFILE_COLUMNS,
   STATUS_TONE,
   WORKING_STATUSES,
+  contractLabel,
   effectiveStatus,
   employmentTypeLabel,
   formatAddress,
@@ -167,14 +168,6 @@ const SECTION_META: Record<SectionId, { title: string; hint?: string; fields: Fo
   },
   pay: { title: 'Pay & statutory', fields: ['salary', 'allowance', 'pan_no', 'ssf_no'], required: [] },
 };
-
-/** "Contract ends in 10 days" / "Contract ended 3 days ago". */
-function contractLabel(daysLeft: number) {
-  if (daysLeft < 0) return `Contract ended ${-daysLeft} day${daysLeft === -1 ? '' : 's'} ago`;
-  if (daysLeft === 0) return 'Contract ends today';
-  if (daysLeft === 1) return 'Contract ends tomorrow';
-  return `Contract ends in ${daysLeft} days`;
-}
 
 type Tab = 'overview' | 'records' | 'docs' | 'exit';
 

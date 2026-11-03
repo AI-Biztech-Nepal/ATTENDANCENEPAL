@@ -24,8 +24,19 @@ type Picked = { uri: string; name: string; size: number | null };
 
 /** An employee's documents: a checklist of the 17 kinds HR keeps, each with its uploaded
  * files. Files sit in a private bucket and are only ever opened through a short-lived
- * signed link made on the spot. */
-export default function DocumentsCard({ employeeId, companyId, defaultOpen }: { employeeId: string; companyId: string | null; defaultOpen?: boolean }) {
+ * signed link made on the spot. With `selfService` it is the employee's own copy: what they
+ * upload is tagged as theirs, and they can only delete what they added. */
+export default function DocumentsCard({
+  employeeId,
+  companyId,
+  defaultOpen,
+  selfService,
+}: {
+  employeeId: string;
+  companyId: string | null;
+  defaultOpen?: boolean;
+  selfService?: boolean;
+}) {
   const { system } = useCalendarSystem();
   const [docs, setDocs] = useState<EmployeeDocument[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
@@ -131,6 +142,7 @@ export default function DocumentsCard({ employeeId, companyId, defaultOpen }: { 
         file_name: file.name,
         mime_type: contentType,
         size_bytes: buffer.byteLength,
+        ...(selfService ? { uploaded_by_employee: true } : {}),
       });
       if (rowError) {
         // Don't leave a file behind that nothing points to.
@@ -203,14 +215,22 @@ export default function DocumentsCard({ employeeId, companyId, defaultOpen }: { 
 
   return (
     <CollapsibleCard title="Documents" summary={summary} defaultOpen={defaultOpen}>
-      <Text style={styles.intro}>PDF, image or Word file, up to 10 MB each. Stored privately — only the owner and HR can open them.</Text>
+      <Text style={styles.intro}>
+        {selfService
+          ? 'PDF, image or Word file, up to 10 MB each. Stored privately — only you and HR can open them. You can add files and remove only the ones you added.'
+          : 'PDF, image or Word file, up to 10 MB each. Stored privately — only the owner and HR can open them.'}
+      </Text>
 
       {status === 'unavailable' && (
         <Notice tone="warning">
-          Documents can't be loaded yet. If this is the first time, run the latest database migration (20261101140000_employee_documents.sql) in Supabase. ({loadError})
+          {selfService
+            ? `Your documents aren't available right now. (${loadError})`
+            : `Documents can't be loaded yet. If this is the first time, run the latest database migration (20261101140000_employee_documents.sql) in Supabase. (${loadError})`}
         </Notice>
       )}
-      {status !== 'unavailable' && !companyId && <Notice tone="error">This employee has no company recorded, so files can't be stored for them.</Notice>}
+      {status !== 'unavailable' && !companyId && (
+        <Notice tone="error">{selfService ? "Your account has no company recorded, so files can't be stored." : "This employee has no company recorded, so files can't be stored for them."}</Notice>
+      )}
       {!!actionError && <Notice tone="error">{actionError}</Notice>}
 
       {status !== 'unavailable' &&
@@ -229,13 +249,14 @@ export default function DocumentsCard({ employeeId, companyId, defaultOpen }: { 
                   <Text style={styles.fileName} numberOfLines={2}>
                     {doc.title || doc.file_name}
                   </Text>
+                  {!!doc.uploaded_by_employee && <Text style={styles.byEmployee}>{selfService ? 'Added by you' : 'Added by employee'}</Text>}
                   <Text style={styles.fileMeta}>
                     {[doc.title ? doc.file_name : null, formatBytes(doc.size_bytes) || null, formatAdDate(localDateKey(doc.created_at), system)].filter(Boolean).join(' · ')}
                   </Text>
                   <View style={styles.fileActions}>
                     <LinkText label="Open" onPress={() => handleOpen(doc)} />
                     <LinkText label="Share" onPress={() => handleShare(doc)} disabled={busyId === doc.id} />
-                    <LinkText label="Delete" tone="critical" onPress={() => handleDelete(doc)} disabled={busyId === doc.id} />
+                    {(!selfService || doc.uploaded_by_employee) && <LinkText label="Delete" tone="critical" onPress={() => handleDelete(doc)} disabled={busyId === doc.id} />}
                   </View>
                 </View>
               ))}
@@ -284,6 +305,7 @@ const styles = StyleSheet.create({
   file: { marginTop: 8, marginLeft: 26, backgroundColor: colors.slate50, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
   fileName: { fontSize: 13, fontWeight: '700', color: colors.ink },
   fileMeta: { fontSize: 11, color: colors.slate500, marginTop: 2 },
+  byEmployee: { fontSize: 10, fontWeight: '800', color: colors.goodText, marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.4 },
   fileActions: { flexDirection: 'row', gap: 16, marginTop: 6 },
   pickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   picked: { fontSize: 13, color: colors.ink, marginTop: 8 },
