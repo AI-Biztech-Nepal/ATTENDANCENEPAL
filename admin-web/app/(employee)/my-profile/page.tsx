@@ -15,6 +15,14 @@ import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { SKILL_CATEGORIES } from '@/lib/skillCategories';
 import type { Branch, Employee, EmployeeEducation, EmployeeWorkExperience } from '@/lib/types';
+import { ProfileTabs, type ProfileTab } from '@/components/profile/ProfileParts';
+import MyEmploymentCards from '@/components/employee/hris/MyEmploymentCards';
+import MyRecords from '@/components/employee/hris/MyRecords';
+import MyDocuments from '@/components/employee/hris/MyDocuments';
+import MyExit from '@/components/employee/hris/MyExit';
+import { DOCUMENT_TYPES, type EmployeeDocument } from '@/lib/employeeDocuments';
+import { degreeLabel, experienceSummary, formatDuration, formatPassingYear, highestQualification } from '@/lib/employeeProfile';
+import type { EmployeeSeparation } from '@/lib/employeeSeparation';
 
 const EMPTY_PROFILE_FORM = { name: '', email: '', phone: '', address: '', department: '', designation: '' };
 const EMPTY_EMERGENCY_FORM = { emergency_contact_name: '', emergency_contact_relationship: '', emergency_contact_phone: '' };
@@ -42,6 +50,12 @@ export default function MyProfilePage() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // The rest of what HR keeps on file, read only. `undefined` = still loading, null = couldn't be read.
+  const [tab, setTab] = useState<'overview' | 'records' | 'documents' | 'exit'>('overview');
+  const [docs, setDocs] = useState<EmployeeDocument[] | null | undefined>(undefined);
+  const [sep, setSep] = useState<EmployeeSeparation | null>(null);
+  const [managerName, setManagerName] = useState<string | null>(null);
 
   const [profileForm, setProfileForm] = useState(EMPTY_PROFILE_FORM);
   const [showDetails, setShowDetails] = useState(false);
@@ -109,6 +123,24 @@ export default function MyProfilePage() {
       .then(({ data }) => setExperience(data ?? []));
   }
 
+  // Each read may fail — before the latest migration the policies aren't there — and
+  // that tab then says it isn't available instead of breaking the page.
+  function loadHris(empId: string) {
+    supabase
+      .from('employee_documents')
+      .select('*')
+      .eq('employee_id', empId)
+      .order('created_at', { ascending: false })
+      .then(({ data, error }) => setDocs(error ? null : ((data ?? []) as EmployeeDocument[])));
+    supabase
+      .from('employee_separations')
+      .select('*')
+      .eq('employee_id', empId)
+      .maybeSingle()
+      .then(({ data }) => setSep((data as EmployeeSeparation | null) ?? null));
+    supabase.rpc('my_reporting_manager').then(({ data, error }) => setManagerName(error ? null : ((data as string | null) ?? null)));
+  }
+
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
@@ -118,7 +150,10 @@ export default function MyProfilePage() {
         .eq('id', data.user.id)
         .single();
       setLoading(false);
-      if (profile?.employee_id) reload(profile.employee_id);
+      if (profile?.employee_id) {
+        reload(profile.employee_id);
+        loadHris(profile.employee_id);
+      }
     });
     supabase.from('branches').select('*').then(({ data }) => setBranches(data ?? []));
   }, []);
@@ -356,6 +391,21 @@ export default function MyProfilePage() {
   const daysLabel = employee.resigned_at ? 'Days worked' : 'With the company';
   const emergencySet = !!(employee.emergency_contact_name || employee.emergency_contact_phone);
 
+  const haveDocs = docs ? DOCUMENT_TYPES.filter(t => docs.some(d => d.doc_type === t.value)).length : null;
+  const profileTabs: ProfileTab[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'records', label: 'Records' },
+    {
+      id: 'documents',
+      label: 'Documents',
+      badge: haveDocs !== null ? { text: `${haveDocs} / ${DOCUMENT_TYPES.length}`, tone: haveDocs < DOCUMENT_TYPES.length ? 'warn' : 'good' } : undefined,
+    },
+    // Only once HR has started an exit for you.
+    ...(sep ? [{ id: 'exit', label: 'Exit' }] : []),
+  ];
+  const highest = highestQualification(education);
+  const experienceTotals = experienceSummary(experience, employee.date_of_joining, employee.resigned_at);
+
   // Skills are stored as "Category: value"; the ones added from the phone app have no category.
   const skillGroups = (() => {
     const groups = new Map<string, { skill: string; value: string }[]>();
@@ -386,6 +436,7 @@ export default function MyProfilePage() {
     ['Department', employee.department || '—'],
     ['Designation', employee.designation || '—'],
     ['Current salary', employee.salary != null ? employee.salary.toLocaleString() : '—'],
+    ['Allowance', employee.allowance != null ? employee.allowance.toLocaleString() : '—'],
     ['PAN No.', employee.pan_no || '—'],
     ['SSF No.', employee.ssf_no || '—'],
     ...(employee.resigned_at ? ([['Resigned', formatAdDate(employee.resigned_at, system)]] as [string, string][]) : []),
@@ -398,6 +449,7 @@ export default function MyProfilePage() {
     ['Department', employee.department || '—'],
     ['Designation', employee.designation || '—'],
     ['Current Salary', employee.salary != null ? employee.salary.toLocaleString() : '—'],
+    ['Allowance', employee.allowance != null ? employee.allowance.toLocaleString() : '—'],
     ['PAN No.', employee.pan_no || '—'],
     ['SSF No.', employee.ssf_no || '—'],
     ['Date of joining', joined],
@@ -501,184 +553,207 @@ export default function MyProfilePage() {
             </div>
           </section>
 
-          <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:items-start lg:gap-6">
-            {/* Phone: one card for everything */}
-            <section aria-label="My Details" className={`${CARD} lg:hidden`}>
-              <div className="mb-1 flex items-center justify-between">
-                <h2 className={CARD_TITLE}>My Details</h2>
-                <div className="flex items-center">{editButtons}</div>
-              </div>
-              {personalRows.map(([label, value]) => (
-                <PhoneRow key={label} label={label} value={value} />
-              ))}
-              <p className="mb-1 mt-3 text-[10px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Filled by employer</p>
-              {phoneEmployerRows.map(([label, value]) => (
-                <PhoneRow key={label} label={label} value={value} />
-              ))}
-              <p className="mt-1 text-xs text-slate-500">Set by HR/Admin — not editable here.</p>
-              <p className="mb-1 mt-3 text-[10px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Emergency contact</p>
-              {emergencySet ? (
-                <PhoneRow
-                  label="Contact"
-                  value={[employee.emergency_contact_name, employee.emergency_contact_relationship, employee.emergency_contact_phone].filter(Boolean).join(' — ')}
-                />
-              ) : (
-                <p className="text-xs text-slate-500">Not set — tap Edit to add one.</p>
-              )}
-            </section>
+          <div className="mt-3 lg:mt-6">
+            <ProfileTabs tabs={profileTabs} active={tab} onChange={id => setTab(id as typeof tab)} />
+          </div>
 
-            {/* Computer: Personal, and what the employer set */}
-            <section aria-label="Personal" className={`${CARD} hidden lg:block`}>
-              <div className="mb-2 flex items-center justify-between">
-                <h2 className={CARD_TITLE}>Personal</h2>
-                <div className="flex items-center">{editButtons}</div>
-              </div>
-              {personalRows.map(([label, value]) => (
-                <DetailRow key={label} label={label} value={value} />
-              ))}
-              <p className="mb-1 mt-5 text-[11px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Emergency contact</p>
-              {emergencySet ? (
-                emergencyRows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)
-              ) : (
-                <p className="border-t border-slate-100 pt-3 text-[13px] text-slate-500">Not set — click Edit to add one.</p>
-              )}
-            </section>
-
-            <section aria-label="Set by your employer" className={`${CARD} hidden lg:block`}>
-              <div className="mb-2 flex h-10 items-center justify-between">
-                <h2 className={CARD_TITLE}>Set by your employer</h2>
-                <LockIcon className="h-[18px] w-[18px] text-[#586474]" />
-              </div>
-              {employerRows.map(([label, value]) => (
-                <DetailRow key={label} label={label} value={value} />
-              ))}
-              <p className="border-t border-slate-100 pt-3 text-xs text-slate-500">Set by HR/Admin — not editable here.</p>
-            </section>
-
-            <div className="flex min-w-0 flex-col gap-3 lg:gap-6">
-              <section aria-label="Skills" className={CARD}>
-                <h2 className={CARD_TITLE}>Skills</h2>
-                {skillGroups.length === 0 && <p className="mt-2 text-[13px] text-slate-600">No skills added yet.</p>}
-                {skillGroups.map(group => (
-                  <div key={group.category} className="mt-3 border-t border-slate-100 pt-3">
-                    <div className="mb-2 text-[13px] font-bold text-slate-600">{group.category}</div>
-                    <div className="flex flex-wrap gap-2">
-                      {group.items.map(({ skill, value }) => (
-                        <span key={skill} className="flex items-center gap-1 rounded-full bg-brand-light py-1.5 pl-3 pr-1.5 text-[13px] font-bold text-[#065f46]">
-                          {value}
-                          <button
-                            type="button"
-                            onClick={() => removeSkill(skill)}
-                            aria-label={`Remove ${value}`}
-                            className="flex h-6 w-6 items-center justify-center rounded-full text-base leading-none hover:bg-white/70"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
+          <div hidden={tab !== 'overview'}>
+            <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:items-start lg:gap-6">
+              {/* Phone: one card for everything */}
+              <section aria-label="My Details" className={`${CARD} lg:hidden`}>
+                <div className="mb-1 flex items-center justify-between">
+                  <h2 className={CARD_TITLE}>My Details</h2>
+                  <div className="flex items-center">{editButtons}</div>
+                </div>
+                {personalRows.map(([label, value]) => (
+                  <PhoneRow key={label} label={label} value={value} />
                 ))}
-                <form onSubmit={addSkill} className="mt-3 border-t border-slate-100 pt-4">
-                  <div role="group" aria-label="Skill category" className="inline-flex flex-wrap rounded-xl bg-slate-100 p-[3px]">
-                    {SKILL_CATEGORIES.map(c => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => setSkillCategory(c)}
-                        aria-pressed={skillCategory === c}
-                        className={`h-9 rounded-[9px] px-3 text-[13px] ${
-                          skillCategory === c ? 'bg-white font-extrabold text-brand shadow-[0_1px_2px_rgba(15,23,42,0.12)]' : 'font-bold text-slate-600 hover:text-ink'
-                        }`}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-2.5 flex gap-2">
-                    <input
-                      aria-label="New skill"
-                      required
-                      value={skillInput}
-                      onChange={e => setSkillInput(e.target.value)}
-                      placeholder="e.g. English, Forklift license…"
-                      className={`${INPUT} min-w-0 flex-1`}
-                    />
-                    <button type="submit" className="h-11 shrink-0 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90">
-                      Add
-                    </button>
-                  </div>
-                  {skillError && (
-                    <p role="alert" className="mt-2 text-[13px] font-semibold text-[#b91c1c]">
-                      {skillError}
-                    </p>
-                  )}
-                </form>
+                <p className="mb-1 mt-3 text-[10px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Filled by employer</p>
+                {phoneEmployerRows.map(([label, value]) => (
+                  <PhoneRow key={label} label={label} value={value} />
+                ))}
+                <p className="mt-1 text-xs text-slate-500">Set by HR/Admin — not editable here.</p>
+                <p className="mb-1 mt-3 text-[10px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Emergency contact</p>
+                {emergencySet ? (
+                  <PhoneRow
+                    label="Contact"
+                    value={[employee.emergency_contact_name, employee.emergency_contact_relationship, employee.emergency_contact_phone].filter(Boolean).join(' — ')}
+                  />
+                ) : (
+                  <p className="text-xs text-slate-500">Not set — tap Edit to add one.</p>
+                )}
               </section>
 
+              {/* Computer: Personal, and what the employer set */}
+              <section aria-label="Personal" className={`${CARD} hidden lg:block`}>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className={CARD_TITLE}>Personal</h2>
+                  <div className="flex items-center">{editButtons}</div>
+                </div>
+                {personalRows.map(([label, value]) => (
+                  <DetailRow key={label} label={label} value={value} />
+                ))}
+                <p className="mb-1 mt-5 text-[11px] font-extrabold uppercase tracking-[0.06em] text-[#586474]">Emergency contact</p>
+                {emergencySet ? (
+                  emergencyRows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)
+                ) : (
+                  <p className="border-t border-slate-100 pt-3 text-[13px] text-slate-500">Not set — click Edit to add one.</p>
+                )}
+              </section>
 
+              <section aria-label="Set by your employer" className={`${CARD} hidden lg:block`}>
+                <div className="mb-2 flex h-10 items-center justify-between">
+                  <h2 className={CARD_TITLE}>Set by your employer</h2>
+                  <LockIcon className="h-[18px] w-[18px] text-[#586474]" />
+                </div>
+                {employerRows.map(([label, value]) => (
+                  <DetailRow key={label} label={label} value={value} />
+                ))}
+                <p className="border-t border-slate-100 pt-3 text-xs text-slate-500">Set by HR/Admin — not editable here.</p>
+              </section>
+
+              <div className="flex min-w-0 flex-col gap-3 lg:gap-6">
+                <section aria-label="Skills" className={CARD}>
+                  <h2 className={CARD_TITLE}>Skills</h2>
+                  {skillGroups.length === 0 && <p className="mt-2 text-[13px] text-slate-600">No skills added yet.</p>}
+                  {skillGroups.map(group => (
+                    <div key={group.category} className="mt-3 border-t border-slate-100 pt-3">
+                      <div className="mb-2 text-[13px] font-bold text-slate-600">{group.category}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {group.items.map(({ skill, value }) => (
+                          <span key={skill} className="flex items-center gap-1 rounded-full bg-brand-light py-1.5 pl-3 pr-1.5 text-[13px] font-bold text-[#065f46]">
+                            {value}
+                            <button
+                              type="button"
+                              onClick={() => removeSkill(skill)}
+                              aria-label={`Remove ${value}`}
+                              className="flex h-6 w-6 items-center justify-center rounded-full text-base leading-none hover:bg-white/70"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <form onSubmit={addSkill} className="mt-3 border-t border-slate-100 pt-4">
+                    <div role="group" aria-label="Skill category" className="inline-flex flex-wrap rounded-xl bg-slate-100 p-[3px]">
+                      {SKILL_CATEGORIES.map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setSkillCategory(c)}
+                          aria-pressed={skillCategory === c}
+                          className={`h-9 rounded-[9px] px-3 text-[13px] ${
+                            skillCategory === c ? 'bg-white font-extrabold text-brand shadow-[0_1px_2px_rgba(15,23,42,0.12)]' : 'font-bold text-slate-600 hover:text-ink'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2.5 flex gap-2">
+                      <input
+                        aria-label="New skill"
+                        required
+                        value={skillInput}
+                        onChange={e => setSkillInput(e.target.value)}
+                        placeholder="e.g. English, Forklift license…"
+                        className={`${INPUT} min-w-0 flex-1`}
+                      />
+                      <button type="submit" className="h-11 shrink-0 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90">
+                        Add
+                      </button>
+                    </div>
+                    {skillError && (
+                      <p role="alert" className="mt-2 text-[13px] font-semibold text-[#b91c1c]">
+                        {skillError}
+                      </p>
+                    )}
+                  </form>
+                </section>
+
+
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:items-start lg:gap-6">
+              <MyEmploymentCards employee={employee} managerName={managerName} />
+            </div>
+
+            <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
+              <section aria-label="Education" className={CARD}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className={CARD_TITLE}>Education</h2>
+                    {highest && <p className="text-xs font-semibold text-slate-600">Highest qualification: {degreeLabel(highest.degree)}</p>}
+                  </div>
+                  <button type="button" onClick={() => setShowEducationForm(true)} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
+                    + Add
+                  </button>
+                </div>
+                {education.length === 0 && <p className="mt-2 text-[13px] text-slate-500">No education entries yet.</p>}
+                <ul className="mt-1 border-t border-slate-100">
+                  {education.map(ed => (
+                    <li key={ed.id} className="flex items-start justify-between gap-3 border-b border-slate-100 py-3 last:border-b-0">
+                      <div className="min-w-0">
+                        <div className="text-sm font-extrabold">{degreeLabel(ed.degree)}</div>
+                        {(ed.institution || ed.board_university || ed.year) && (
+                          <div className="text-xs font-medium text-slate-600">{[ed.institution, ed.board_university, formatPassingYear(ed)].filter(Boolean).join(' · ')}</div>
+                        )}
+                      </div>
+                      <RowMenu label={ed.degree} items={[{ label: 'Remove', danger: true, onSelect: () => handleDeleteEducation(ed.id) }]} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section aria-label="Work Experience" className={CARD}>
+                <div className="flex items-center justify-between">
+                  <h2 className={CARD_TITLE}>Work Experience</h2>
+                  <button type="button" onClick={() => setShowExperienceForm(true)} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
+                    + Add
+                  </button>
+                </div>
+                {experienceTotals.total > 0 && (
+                  <p className="mt-2 text-xs font-semibold text-slate-600">
+                    Before joining {formatDuration(experienceTotals.previous)} · With this company {formatDuration(experienceTotals.here)} ·{' '}
+                    <span className="font-extrabold text-ink">Total {formatDuration(experienceTotals.total)}</span>
+                  </p>
+                )}
+                {experience.length === 0 && <p className="mt-2 text-[13px] text-slate-500">No work experience entries yet.</p>}
+                <ul className="mt-1 border-t border-slate-100">
+                  {experience.map(exp => {
+                    const span = tenureDays(exp.start_date, exp.end_date);
+                    return (
+                      <li key={exp.id} className="border-b border-slate-100 py-3 last:border-b-0">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-extrabold">{exp.role || exp.employer}</div>
+                            {exp.role && <div className="text-xs font-medium text-slate-600">{exp.employer}</div>}
+                          </div>
+                          <RowMenu label={exp.role || exp.employer} items={[{ label: 'Remove', danger: true, onSelect: () => handleDeleteExperience(exp.id) }]} />
+                        </div>
+                        {exp.description && <p className="mt-1 text-[13px] text-slate-600">{exp.description}</p>}
+                        {(exp.start_date || exp.end_date) && (
+                          <div className="mt-1 flex items-center justify-between gap-3 text-xs font-medium text-slate-500">
+                            <span>
+                              {formatAdDate(exp.start_date, system)} – {exp.end_date ? formatAdDate(exp.end_date, system) : 'Present'}
+                            </span>
+                            {span !== null && <span className="shrink-0">{span} days</span>}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
             </div>
           </div>
 
-          <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
-            <section aria-label="Education" className={CARD}>
-              <div className="flex items-center justify-between">
-                <h2 className={CARD_TITLE}>Education</h2>
-                <button type="button" onClick={() => setShowEducationForm(true)} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
-                  + Add
-                </button>
-              </div>
-              {education.length === 0 && <p className="mt-2 text-[13px] text-slate-500">No education entries yet.</p>}
-              <ul className="mt-1 border-t border-slate-100">
-                {education.map(ed => (
-                  <li key={ed.id} className="flex items-start justify-between gap-3 border-b border-slate-100 py-3 last:border-b-0">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold">{ed.degree}</div>
-                      {(ed.institution || ed.year) && (
-                        <div className="text-xs font-medium text-slate-600">{[ed.institution, ed.year ? String(ed.year) : null].filter(Boolean).join(' · ')}</div>
-                      )}
-                    </div>
-                    <RowMenu label={ed.degree} items={[{ label: 'Remove', danger: true, onSelect: () => handleDeleteEducation(ed.id) }]} />
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section aria-label="Work Experience" className={CARD}>
-              <div className="flex items-center justify-between">
-                <h2 className={CARD_TITLE}>Work Experience</h2>
-                <button type="button" onClick={() => setShowExperienceForm(true)} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
-                  + Add
-                </button>
-              </div>
-              {experience.length === 0 && <p className="mt-2 text-[13px] text-slate-500">No work experience entries yet.</p>}
-              <ul className="mt-1 border-t border-slate-100">
-                {experience.map(exp => {
-                  const span = tenureDays(exp.start_date, exp.end_date);
-                  return (
-                    <li key={exp.id} className="border-b border-slate-100 py-3 last:border-b-0">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-sm font-extrabold">{exp.role || exp.employer}</div>
-                          {exp.role && <div className="text-xs font-medium text-slate-600">{exp.employer}</div>}
-                        </div>
-                        <RowMenu label={exp.role || exp.employer} items={[{ label: 'Remove', danger: true, onSelect: () => handleDeleteExperience(exp.id) }]} />
-                      </div>
-                      {exp.description && <p className="mt-1 text-[13px] text-slate-600">{exp.description}</p>}
-                      {(exp.start_date || exp.end_date) && (
-                        <div className="mt-1 flex items-center justify-between gap-3 text-xs font-medium text-slate-500">
-                          <span>
-                            {formatAdDate(exp.start_date, system)} – {exp.end_date ? formatAdDate(exp.end_date, system) : 'Present'}
-                          </span>
-                          {span !== null && <span className="shrink-0">{span} days</span>}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          </div>
+          {tab === 'records' && <MyRecords employeeId={employee.id} joinedOn={employee.date_of_joining} />}
+          {tab === 'documents' && (docs === undefined ? <p className="p-4 text-center text-sm text-slate-500">Loading…</p> : <MyDocuments docs={docs} />)}
+          {tab === 'exit' && sep && <MyExit sep={sep} />}
 
           <button
             type="button"
