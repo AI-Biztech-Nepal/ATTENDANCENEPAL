@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { buildMonth, localDateKey, stepAnchor, todayAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { DayStatus } from '@/lib/shift';
@@ -24,6 +24,9 @@ type Props = {
    * showing but the month still has to be changeable. Stays mounted so the month
    * in view isn't lost. */
   compact?: boolean;
+  /** A control for the right end of the stepper row (the Calendar / Daily log switch).
+   * With one, the stepper moves to the left so the two never fight for room on a phone. */
+  action?: ReactNode;
 };
 
 export type DayFlags = {
@@ -98,7 +101,7 @@ export function captionFor(flags: DayFlags): string | undefined {
   return parts.length > 0 ? parts.join(' & ') : undefined;
 }
 
-export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, selectedDate, onSelectDate, onMonthChange, compact }: Props) {
+export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, selectedDate, onSelectDate, onMonthChange, compact, action }: Props) {
   const { system } = useCalendarSystem();
   const [anchor, setAnchor] = useState(todayAnchor);
 
@@ -117,14 +120,17 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-      <div className={`flex items-center justify-center gap-3 ${compact ? '' : 'mb-3'}`}>
-        <button onClick={() => go(-1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
-          ←
-        </button>
-        <span className="min-w-[10ch] text-center text-base font-semibold text-ink">{month.label}</span>
-        <button onClick={() => go(1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
-          →
-        </button>
+      <div className={`flex items-center gap-3 ${action ? 'justify-between' : 'justify-center'} ${compact ? '' : 'mb-3'}`}>
+        <div className="flex items-center gap-3">
+          <button onClick={() => go(-1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
+            ←
+          </button>
+          <span className="min-w-[10ch] text-center text-base font-semibold text-ink">{month.label}</span>
+          <button onClick={() => go(1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
+            →
+          </button>
+        </div>
+        {action}
       </div>
 
       <div className={`grid-cols-7 gap-1 text-center text-[11px] font-medium uppercase text-slate-400 ${compact ? 'hidden' : 'grid'}`}>

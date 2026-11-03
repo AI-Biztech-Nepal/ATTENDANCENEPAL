@@ -445,10 +445,6 @@ export default function EmployeeCalendarView({
 
   return (
     <>
-      <div className="mb-3">
-        <CalendarViewSwitch value={view} onChange={setView} />
-      </div>
-
       <MonthCalendar
         dayStatus={dayStatus}
         leaveDates={leaveDates}
@@ -457,6 +453,7 @@ export default function EmployeeCalendarView({
         onSelectDate={d => setSelectedDate(cur => (cur === d ? null : d))}
         onMonthChange={setVisibleDates}
         compact={view === 'log'}
+        action={<CalendarViewSwitch value={view} onChange={setView} />}
       />
 
       {view === 'calendar' && (

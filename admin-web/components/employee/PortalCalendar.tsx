@@ -204,8 +204,8 @@ export default function PortalCalendar(props: PortalCalendarProps) {
     <div className="lg:px-8 lg:pb-10 lg:pt-7">
       <div className="lg:hidden">
       <HeroPanel pad="inner">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
-          <div className="flex items-center rounded-[14px] bg-white/15 p-1">
+        <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center rounded-[14px] bg-white/15 p-1">
             <button
               type="button"
               onClick={() => go(-1)}
