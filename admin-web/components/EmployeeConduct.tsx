@@ -143,7 +143,7 @@ export default function EmployeeConduct({ employeeId }: { employeeId: string }) 
             Conduct records
           </h2>
           <p className="mt-0.5 text-xs text-slate-400">
-            Warnings, disciplinary actions and grievances, with the final decision. Only admins and HR of your company can see these.
+            Warnings, disciplinary actions and grievances, with the final decision. Only admins and HR of your company can edit these; the employee sees their own, read only.
           </p>
         </div>
         {status === 'ready' && (

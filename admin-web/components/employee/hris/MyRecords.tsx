@@ -1,7 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import DatePicker from '@/components/DatePicker';
+import FormDialog from '@/components/employee/FormDialog';
+import RowMenu from '@/components/employee/RowMenu';
 import { StatusTag, type TagTone } from '@/components/employee/parts';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { supabase } from '@/lib/supabase';
 import { formatAdDate, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -35,36 +39,86 @@ type Loaded = {
   training: EmployeeTraining[] | null;
 };
 
-/** Your own file, read only: transfers / promotions / increments, appraisals and
- * awards, conduct records and training. Each list loads on its own; one that can't
- * be read (null) says so without taking the others down with it. */
+const EMPTY_TRAINING = { title: '', provider: '', start_date: '', end_date: '' };
+const INPUT = 'h-11 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium';
+const LABEL = 'mb-1.5 block text-xs font-bold text-slate-600';
+
+/** Your own file: transfers / promotions / increments, appraisals and awards and conduct
+ * records (HR's — read only) and training (yours to add, change and remove). Each list
+ * loads on its own; one that can't be read (null) says so without taking the others down. */
 export default function MyRecords({ employeeId, joinedOn }: { employeeId: string; joinedOn: string | null }) {
   const { system } = useCalendarSystem();
+  const confirm = useConfirm();
   const [data, setData] = useState<Loaded | null>(null);
 
-  useEffect(() => {
-    let live = true;
+  // Training: null = no pop-up, 'new' = adding, otherwise the id being edited.
+  const [trainingDialog, setTrainingDialog] = useState<'new' | string | null>(null);
+  const [trainingForm, setTrainingForm] = useState(EMPTY_TRAINING);
+  const [savingTraining, setSavingTraining] = useState(false);
+  const [trainingError, setTrainingError] = useState('');
+
+  const load = useCallback(() => {
     const list = <T,>(r: { data: unknown; error: unknown }) => (r.error ? null : ((r.data ?? []) as T[]));
-    Promise.all([
+    return Promise.all([
       supabase.from('employee_history').select('*').eq('employee_id', employeeId).order('effective_date', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('employee_appraisals').select('*').eq('employee_id', employeeId).order('appraisal_date', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('employee_awards').select('*').eq('employee_id', employeeId).order('awarded_on', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('employee_conduct_records').select('*').eq('employee_id', employeeId).order('record_date', { ascending: false }).order('created_at', { ascending: false }),
       supabase.from('employee_training').select('*').eq('employee_id', employeeId).order('start_date', { ascending: false }),
-    ]).then(([h, a, w, c, t]) => {
-      if (!live) return;
+    ]).then(([h, a, w, c, t]) =>
       setData({
         history: list<EmployeeHistoryEntry>(h),
         appraisals: list<Appraisal>(a),
         awards: list<Award>(w),
         conduct: list<ConductRecord>(c),
         training: list<EmployeeTraining>(t),
-      });
-    });
-    return () => {
-      live = false;
-    };
+      })
+    );
   }, [employeeId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function openTraining(t: EmployeeTraining | null) {
+    setTrainingForm(t ? { title: t.title, provider: t.provider ?? '', start_date: t.start_date ?? '', end_date: t.end_date ?? '' } : EMPTY_TRAINING);
+    setTrainingError('');
+    setTrainingDialog(t ? t.id : 'new');
+  }
+
+  async function saveTraining(e: React.FormEvent) {
+    e.preventDefault();
+    if (!trainingDialog) return;
+    if (trainingForm.start_date && trainingForm.end_date && trainingForm.end_date < trainingForm.start_date) {
+      setTrainingError('The end date is before the start date.');
+      return;
+    }
+    setSavingTraining(true);
+    setTrainingError('');
+    const row = {
+      title: trainingForm.title.trim(),
+      provider: trainingForm.provider.trim() || null,
+      start_date: trainingForm.start_date || null,
+      end_date: trainingForm.end_date || null,
+    };
+    const { error } =
+      trainingDialog === 'new'
+        ? await supabase.from('employee_training').insert({ ...row, employee_id: employeeId })
+        : await supabase.from('employee_training').update(row).eq('id', trainingDialog);
+    setSavingTraining(false);
+    if (error) {
+      setTrainingError(`Could not save: ${error.message}`);
+      return;
+    }
+    setTrainingDialog(null);
+    load();
+  }
+
+  async function removeTraining(t: EmployeeTraining) {
+    if (!(await confirm(`Remove "${t.title}"?`, { title: 'Remove training?', confirmLabel: 'Remove', tone: 'danger' }))) return;
+    await supabase.from('employee_training').delete().eq('id', t.id);
+    load();
+  }
 
   const date = (d: string | null | undefined) => (d ? formatAdDate(d, system) : '—');
 
@@ -77,7 +131,7 @@ export default function MyRecords({ employeeId, joinedOn }: { employeeId: string
   return (
     <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
       <div className="flex min-w-0 flex-col gap-3 lg:gap-6">
-        <Card title="Transfers, promotions & increments" note="Recorded when your branch, designation, department, manager or pay changes.">
+        <Card title="Transfers, promotions & increments" note="Recorded when your branch, designation, department, manager or pay changes. Kept by HR — read only.">
           {data.history === null ? (
             <Unavailable />
           ) : (
@@ -130,7 +184,16 @@ export default function MyRecords({ employeeId, joinedOn }: { employeeId: string
           )}
         </Card>
 
-        <Card title="Training & certification">
+        <Card
+          title="Training & certification"
+          right={
+            data.training ? (
+              <button type="button" onClick={() => openTraining(null)} className="flex h-11 shrink-0 items-center px-1 text-[13px] font-extrabold text-brand">
+                + Add
+              </button>
+            ) : undefined
+          }
+        >
           {data.training === null ? (
             <Unavailable />
           ) : data.training.length === 0 ? (
@@ -138,15 +201,24 @@ export default function MyRecords({ employeeId, joinedOn }: { employeeId: string
           ) : (
             <ul className="mt-2 divide-y divide-slate-100">
               {data.training.map(t => (
-                <li key={t.id} className="py-3">
-                  <div className="text-sm font-extrabold">{t.title}</div>
-                  {t.provider && <div className="text-xs font-medium text-slate-600">{t.provider}</div>}
-                  {(t.start_date || t.end_date) && (
-                    <div className="mt-0.5 text-xs font-medium text-slate-500">
-                      {date(t.start_date)}
-                      {t.end_date ? ` – ${date(t.end_date)}` : ''}
-                    </div>
-                  )}
+                <li key={t.id} className="flex items-start justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-extrabold">{t.title}</div>
+                    {t.provider && <div className="text-xs font-medium text-slate-600">{t.provider}</div>}
+                    {(t.start_date || t.end_date) && (
+                      <div className="mt-0.5 text-xs font-medium text-slate-500">
+                        {date(t.start_date)}
+                        {t.end_date ? ` – ${date(t.end_date)}` : ''}
+                      </div>
+                    )}
+                  </div>
+                  <RowMenu
+                    label={t.title}
+                    items={[
+                      { label: 'Edit', onSelect: () => openTraining(t) },
+                      { label: 'Remove', danger: true, onSelect: () => removeTraining(t) },
+                    ]}
+                  />
                 </li>
               ))}
             </ul>
@@ -155,7 +227,7 @@ export default function MyRecords({ employeeId, joinedOn }: { employeeId: string
       </div>
 
       <div className="flex min-w-0 flex-col gap-3 lg:gap-6">
-        <Card title="Performance & recognition">
+        <Card title="Performance & recognition" note="Entered by HR — read only.">
           {data.appraisals === null || data.awards === null ? (
             <Unavailable />
           ) : (
@@ -223,7 +295,7 @@ export default function MyRecords({ employeeId, joinedOn }: { employeeId: string
 
         <Card
           title="Conduct records"
-          note="Warnings, disciplinary actions and grievances, with the final decision."
+          note="Warnings, disciplinary actions and grievances, with the final decision. Entered by HR — read only."
           right={openConduct > 0 ? <span className="shrink-0 text-xs font-extrabold text-[#c2410c]">{openConduct} still open</span> : undefined}
         >
           {data.conduct === null ? (
@@ -257,6 +329,37 @@ export default function MyRecords({ employeeId, joinedOn }: { employeeId: string
           )}
         </Card>
       </div>
+
+      {trainingDialog && (
+        <FormDialog
+          title={trainingDialog === 'new' ? 'Add training' : 'Edit training'}
+          onSubmit={saveTraining}
+          onClose={() => !savingTraining && setTrainingDialog(null)}
+          saving={savingTraining}
+          savingLabel="Saving…"
+          submitLabel={trainingDialog === 'new' ? 'Add' : 'Save'}
+          error={trainingError}
+        >
+          <label htmlFor="tr-title" className={LABEL}>
+            Course or certificate
+          </label>
+          <input id="tr-title" required value={trainingForm.title} onChange={e => setTrainingForm(f => ({ ...f, title: e.target.value }))} className={`${INPUT} mb-3`} />
+          <label htmlFor="tr-provider" className={LABEL}>
+            Provider
+          </label>
+          <input id="tr-provider" value={trainingForm.provider} onChange={e => setTrainingForm(f => ({ ...f, provider: e.target.value }))} className={`${INPUT} mb-3`} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL}>Start date</label>
+              <DatePicker value={trainingForm.start_date} onChange={v => setTrainingForm(f => ({ ...f, start_date: v }))} ariaLabel="Start date" />
+            </div>
+            <div>
+              <label className={LABEL}>End date</label>
+              <DatePicker value={trainingForm.end_date} onChange={v => setTrainingForm(f => ({ ...f, end_date: v }))} ariaLabel="End date" />
+            </div>
+          </div>
+        </FormDialog>
+      )}
     </div>
   );
 }

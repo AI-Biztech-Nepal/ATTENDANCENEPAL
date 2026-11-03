@@ -26,7 +26,7 @@ import type { EmployeeSeparation } from '@/lib/employeeSeparation';
 
 const EMPTY_PROFILE_FORM = { name: '', email: '', phone: '', address: '', department: '', designation: '' };
 const EMPTY_EMERGENCY_FORM = { emergency_contact_name: '', emergency_contact_relationship: '', emergency_contact_phone: '' };
-const EMPTY_EDUCATION_FORM = { degree: '', institution: '', year: '' };
+const EMPTY_EDUCATION_FORM = { degree: '', institution: '', board_university: '', year: '', year_calendar: 'AD' };
 const EMPTY_EXPERIENCE_FORM = { employer: '', role: '', description: '', start_date: '', end_date: '' };
 
 const CARD = 'rounded-2xl border border-slate-200 bg-white p-4 lg:rounded-[20px] lg:p-6';
@@ -54,7 +54,7 @@ export default function MyProfilePage() {
   // The rest of what HR keeps on file, read only. `undefined` = still loading, null = couldn't be read.
   const [tab, setTab] = useState<'overview' | 'records' | 'documents' | 'exit'>('overview');
   const [docs, setDocs] = useState<EmployeeDocument[] | null | undefined>(undefined);
-  const [sep, setSep] = useState<EmployeeSeparation | null>(null);
+  const [sep, setSep] = useState<EmployeeSeparation | null | undefined>(undefined);
   const [managerName, setManagerName] = useState<string | null>(null);
 
   const [profileForm, setProfileForm] = useState(EMPTY_PROFILE_FORM);
@@ -76,11 +76,13 @@ export default function MyProfilePage() {
   const [education, setEducation] = useState<EmployeeEducation[]>([]);
   const [showEducationForm, setShowEducationForm] = useState(false);
   const [educationForm, setEducationForm] = useState(EMPTY_EDUCATION_FORM);
+  const [editingEducationId, setEditingEducationId] = useState<string | null>(null);
   const [savingEducation, setSavingEducation] = useState(false);
 
   const [experience, setExperience] = useState<EmployeeWorkExperience[]>([]);
   const [showExperienceForm, setShowExperienceForm] = useState(false);
   const [experienceForm, setExperienceForm] = useState(EMPTY_EXPERIENCE_FORM);
+  const [editingExperienceId, setEditingExperienceId] = useState<string | null>(null);
   const [savingExperience, setSavingExperience] = useState(false);
 
   function reload(empId: string) {
@@ -137,7 +139,7 @@ export default function MyProfilePage() {
       .select('*')
       .eq('employee_id', empId)
       .maybeSingle()
-      .then(({ data }) => setSep((data as EmployeeSeparation | null) ?? null));
+      .then(({ data, error }) => setSep(error ? null : ((data as EmployeeSeparation | null) ?? null)));
     supabase.rpc('my_reporting_manager').then(({ data, error }) => setManagerName(error ? null : ((data as string | null) ?? null)));
   }
 
@@ -264,22 +266,45 @@ export default function MyProfilePage() {
     reload(employee.id);
   }
 
-  async function handleAddEducation(e: React.FormEvent) {
+  function openAddEducation() {
+    setEditingEducationId(null);
+    setEducationForm(EMPTY_EDUCATION_FORM);
+    setShowEducationForm(true);
+  }
+
+  function openEditEducation(ed: EmployeeEducation) {
+    setEditingEducationId(ed.id);
+    setEducationForm({
+      degree: ed.degree,
+      institution: ed.institution ?? '',
+      board_university: ed.board_university ?? '',
+      year: ed.year ? String(ed.year) : '',
+      year_calendar: ed.year_calendar ?? 'AD',
+    });
+    setShowEducationForm(true);
+  }
+
+  async function handleSaveEducation(e: React.FormEvent) {
     e.preventDefault();
     if (!employee) return;
     setSavingEducation(true);
-    const { error } = await supabase.from('employee_education').insert({
-      employee_id: employee.id,
+    const row = {
       degree: educationForm.degree,
       institution: educationForm.institution || null,
+      board_university: educationForm.board_university || null,
       year: educationForm.year ? Number(educationForm.year) : null,
-    });
+      year_calendar: educationForm.year_calendar,
+    };
+    const { error } = editingEducationId
+      ? await supabase.from('employee_education').update(row).eq('id', editingEducationId)
+      : await supabase.from('employee_education').insert({ ...row, employee_id: employee.id });
     setSavingEducation(false);
     if (error) {
-      alert(`Could not add: ${error.message}`);
+      alert(`Could not save: ${error.message}`);
       return;
     }
     setEducationForm(EMPTY_EDUCATION_FORM);
+    setEditingEducationId(null);
     setShowEducationForm(false);
     reload(employee.id);
   }
@@ -291,24 +316,45 @@ export default function MyProfilePage() {
     reload(employee.id);
   }
 
-  async function handleAddExperience(e: React.FormEvent) {
+  function openAddExperience() {
+    setEditingExperienceId(null);
+    setExperienceForm(EMPTY_EXPERIENCE_FORM);
+    setShowExperienceForm(true);
+  }
+
+  function openEditExperience(exp: EmployeeWorkExperience) {
+    setEditingExperienceId(exp.id);
+    setExperienceForm({
+      employer: exp.employer,
+      role: exp.role ?? '',
+      description: exp.description ?? '',
+      start_date: exp.start_date ?? '',
+      end_date: exp.end_date ?? '',
+    });
+    setShowExperienceForm(true);
+  }
+
+  async function handleSaveExperience(e: React.FormEvent) {
     e.preventDefault();
     if (!employee) return;
     setSavingExperience(true);
-    const { error } = await supabase.from('employee_work_experience').insert({
-      employee_id: employee.id,
+    const row = {
       employer: experienceForm.employer,
       role: experienceForm.role || null,
       description: experienceForm.description || null,
       start_date: experienceForm.start_date || null,
       end_date: experienceForm.end_date || null,
-    });
+    };
+    const { error } = editingExperienceId
+      ? await supabase.from('employee_work_experience').update(row).eq('id', editingExperienceId)
+      : await supabase.from('employee_work_experience').insert({ ...row, employee_id: employee.id });
     setSavingExperience(false);
     if (error) {
-      alert(`Could not add: ${error.message}`);
+      alert(`Could not save: ${error.message}`);
       return;
     }
     setExperienceForm(EMPTY_EXPERIENCE_FORM);
+    setEditingExperienceId(null);
     setShowExperienceForm(false);
     reload(employee.id);
   }
@@ -400,8 +446,7 @@ export default function MyProfilePage() {
       label: 'Documents',
       badge: haveDocs !== null ? { text: `${haveDocs} / ${DOCUMENT_TYPES.length}`, tone: haveDocs < DOCUMENT_TYPES.length ? 'warn' : 'good' } : undefined,
     },
-    // Only once HR has started an exit for you.
-    ...(sep ? [{ id: 'exit', label: 'Exit' }] : []),
+    { id: 'exit', label: 'Exit' },
   ];
   const highest = highestQualification(education);
   const experienceTotals = experienceSummary(experience, employee.date_of_joining, employee.resigned_at);
@@ -678,7 +723,7 @@ export default function MyProfilePage() {
             </div>
 
             <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-[repeat(auto-fit,minmax(300px,1fr))] lg:items-start lg:gap-6">
-              <MyEmploymentCards employee={employee} managerName={managerName} />
+              <MyEmploymentCards employee={employee} managerName={managerName} onSaved={() => reload(employee.id)} />
             </div>
 
             <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
@@ -688,7 +733,7 @@ export default function MyProfilePage() {
                     <h2 className={CARD_TITLE}>Education</h2>
                     {highest && <p className="text-xs font-semibold text-slate-600">Highest qualification: {degreeLabel(highest.degree)}</p>}
                   </div>
-                  <button type="button" onClick={() => setShowEducationForm(true)} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
+                  <button type="button" onClick={openAddEducation} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
                     + Add
                   </button>
                 </div>
@@ -702,7 +747,13 @@ export default function MyProfilePage() {
                           <div className="text-xs font-medium text-slate-600">{[ed.institution, ed.board_university, formatPassingYear(ed)].filter(Boolean).join(' · ')}</div>
                         )}
                       </div>
-                      <RowMenu label={ed.degree} items={[{ label: 'Remove', danger: true, onSelect: () => handleDeleteEducation(ed.id) }]} />
+                      <RowMenu
+                        label={ed.degree}
+                        items={[
+                          { label: 'Edit', onSelect: () => openEditEducation(ed) },
+                          { label: 'Remove', danger: true, onSelect: () => handleDeleteEducation(ed.id) },
+                        ]}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -711,7 +762,7 @@ export default function MyProfilePage() {
               <section aria-label="Work Experience" className={CARD}>
                 <div className="flex items-center justify-between">
                   <h2 className={CARD_TITLE}>Work Experience</h2>
-                  <button type="button" onClick={() => setShowExperienceForm(true)} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
+                  <button type="button" onClick={openAddExperience} className="flex h-11 items-center px-1 text-[13px] font-extrabold text-brand">
                     + Add
                   </button>
                 </div>
@@ -732,7 +783,13 @@ export default function MyProfilePage() {
                             <div className="text-sm font-extrabold">{exp.role || exp.employer}</div>
                             {exp.role && <div className="text-xs font-medium text-slate-600">{exp.employer}</div>}
                           </div>
-                          <RowMenu label={exp.role || exp.employer} items={[{ label: 'Remove', danger: true, onSelect: () => handleDeleteExperience(exp.id) }]} />
+                          <RowMenu
+                          label={exp.role || exp.employer}
+                          items={[
+                            { label: 'Edit', onSelect: () => openEditExperience(exp) },
+                            { label: 'Remove', danger: true, onSelect: () => handleDeleteExperience(exp.id) },
+                          ]}
+                        />
                         </div>
                         {exp.description && <p className="mt-1 text-[13px] text-slate-600">{exp.description}</p>}
                         {(exp.start_date || exp.end_date) && (
@@ -752,8 +809,8 @@ export default function MyProfilePage() {
           </div>
 
           {tab === 'records' && <MyRecords employeeId={employee.id} joinedOn={employee.date_of_joining} />}
-          {tab === 'documents' && (docs === undefined ? <p className="p-4 text-center text-sm text-slate-500">Loading…</p> : <MyDocuments docs={docs} />)}
-          {tab === 'exit' && sep && <MyExit sep={sep} />}
+          {tab === 'documents' && (docs === undefined ? <p className="p-4 text-center text-sm text-slate-500">Loading…</p> : <MyDocuments docs={docs} employeeId={employee.id} companyId={employee.company_id ?? null} onChanged={() => loadHris(employee.id)} />)}
+          {tab === 'exit' && <MyExit sep={sep} onChanged={() => loadHris(employee.id)} />}
 
           <button
             type="button"
@@ -848,12 +905,12 @@ export default function MyProfilePage() {
 
       {showEducationForm && (
         <FormDialog
-          title="Add Education"
-          onSubmit={handleAddEducation}
+          title={editingEducationId ? 'Edit Education' : 'Add Education'}
+          onSubmit={handleSaveEducation}
           onClose={() => setShowEducationForm(false)}
           saving={savingEducation}
           savingLabel="Saving…"
-          submitLabel="Add"
+          submitLabel={editingEducationId ? 'Save' : 'Add'}
         >
           <label htmlFor="edu-degree" className={LABEL}>
             Degree
@@ -883,21 +940,44 @@ export default function MyProfilePage() {
             onChange={e => setEducationForm(f => ({ ...f, institution: e.target.value }))}
             className={`${INPUT} mb-3`}
           />
-          <label htmlFor="edu-year" className={LABEL}>
-            Year
+          <label htmlFor="edu-board" className={LABEL}>
+            Board / university
           </label>
-          <input id="edu-year" type="number" value={educationForm.year} onChange={e => setEducationForm(f => ({ ...f, year: e.target.value }))} className={INPUT} />
+          <input
+            id="edu-board"
+            value={educationForm.board_university}
+            onChange={e => setEducationForm(f => ({ ...f, board_university: e.target.value }))}
+            placeholder="e.g. NEB, Tribhuvan University"
+            className={`${INPUT} mb-3`}
+          />
+          <div className="grid grid-cols-[1fr_auto] gap-3">
+            <div>
+              <label htmlFor="edu-year" className={LABEL}>
+                Passing year
+              </label>
+              <input id="edu-year" type="number" value={educationForm.year} onChange={e => setEducationForm(f => ({ ...f, year: e.target.value }))} className={INPUT} />
+            </div>
+            <div>
+              <label htmlFor="edu-cal" className={LABEL}>
+                Calendar
+              </label>
+              <select id="edu-cal" value={educationForm.year_calendar} onChange={e => setEducationForm(f => ({ ...f, year_calendar: e.target.value }))} className={`${INPUT} bg-white`}>
+                <option value="AD">AD</option>
+                <option value="BS">BS</option>
+              </select>
+            </div>
+          </div>
         </FormDialog>
       )}
 
       {showExperienceForm && (
         <FormDialog
-          title="Add Work Experience"
-          onSubmit={handleAddExperience}
+          title={editingExperienceId ? 'Edit Work Experience' : 'Add Work Experience'}
+          onSubmit={handleSaveExperience}
           onClose={() => setShowExperienceForm(false)}
           saving={savingExperience}
           savingLabel="Saving…"
-          submitLabel="Add"
+          submitLabel={editingExperienceId ? 'Save' : 'Add'}
         >
           <label htmlFor="exp-employer" className={LABEL}>
             Employer

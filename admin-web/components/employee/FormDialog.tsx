@@ -11,6 +11,7 @@ export default function FormDialog({
   saving,
   savingLabel,
   submitLabel,
+  submitDisabled,
   error,
   children,
 }: {
@@ -21,6 +22,8 @@ export default function FormDialog({
   saving: boolean;
   savingLabel: string;
   submitLabel: string;
+  /** Keeps Save off until the form can be sent (a file chosen, say). */
+  submitDisabled?: boolean;
   error?: string | null;
   children: React.ReactNode;
 }) {
@@ -50,7 +53,7 @@ export default function FormDialog({
           <button type="button" onClick={onClose} className="h-11 rounded-xl px-4 text-sm font-bold text-slate-600 hover:bg-slate-100">
             Cancel
           </button>
-          <button type="submit" disabled={saving} className="h-11 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90 disabled:opacity-60">
+          <button type="submit" disabled={saving || submitDisabled} className="h-11 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90 disabled:opacity-60">
             {saving ? savingLabel : submitLabel}
           </button>
         </div>

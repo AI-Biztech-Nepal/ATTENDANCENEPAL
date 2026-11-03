@@ -1,14 +1,20 @@
 'use client';
 
+import { useState } from 'react';
+import DatePicker from '@/components/DatePicker';
+import FormDialog from '@/components/employee/FormDialog';
 import { Fact, FactGrid } from '@/components/profile/ProfileParts';
 import { StatusTag } from '@/components/employee/parts';
-import { formatAdDate } from '@/lib/calendar';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { supabase } from '@/lib/supabase';
+import { formatAdDate, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   SEPARATION_TYPES,
   SETTLEMENT_LABEL,
   checklist,
   formatAmount,
+  isUntouched,
   noticeShortfall,
   settlementTotals,
   type EmployeeSeparation,
@@ -18,9 +24,137 @@ import { Card, SubHeading } from './ui';
 
 const returnWord = (s: ReturnStatus) => (s === 'returned' ? 'Returned' : s === 'not_applicable' ? 'Not applicable' : 'Pending');
 
-/** Your exit: the checklist HR works through and what you are owed, read only. Only
- * shown when HR has started a separation for you. */
-export default function MyExit({ sep }: { sep: EmployeeSeparation }) {
+const INPUT = 'h-11 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium';
+const LABEL = 'mb-1.5 block text-xs font-bold text-slate-600';
+
+/** Your exit. With nothing started you can hand in a resignation; while HR hasn't begun working
+ * on one you handed in you can change or withdraw it; after that — or for an exit HR started —
+ * it is HR's record and you see the checklist and settlement read only. `sep` is undefined while
+ * loading and null when there is no separation. */
+export default function MyExit({ sep, onChanged }: { sep: EmployeeSeparation | null | undefined; onChanged: () => void }) {
+  if (sep === undefined) return <p className="p-4 text-center text-sm text-slate-500">Loading…</p>;
+  if (sep === null || (sep.requested_by_employee && isUntouched(sep))) return <Resignation sep={sep} onChanged={onChanged} />;
+  return <ExitDetails sep={sep} />;
+}
+
+function Resignation({ sep, onChanged }: { sep: EmployeeSeparation | null; onChanged: () => void }) {
+  const { system } = useCalendarSystem();
+  const confirm = useConfirm();
+  const date = (d: string | null | undefined) => (d ? formatAdDate(d, system) : null);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ submitted: '', last: '', reason: '' });
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  function start() {
+    setForm({ submitted: sep?.resignation_submitted_on ?? localDateKey(new Date().toISOString()), last: sep?.last_working_on ?? '', reason: sep?.separation_reason ?? '' });
+    setError('');
+    setOpen(true);
+  }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.submitted || !form.last) return setError('Pick the day you are handing it in and your last working day.');
+    if (form.last < form.submitted) return setError('Your last working day cannot be before the day you hand it in.');
+    setSaving(true);
+    setError('');
+    const { error: rpcError } = await supabase.rpc('submit_my_resignation', {
+      p_submitted_on: form.submitted,
+      p_last_working_on: form.last,
+      p_reason: form.reason,
+    });
+    setSaving(false);
+    if (rpcError) return setError(rpcError.message);
+    setOpen(false);
+    onChanged();
+  }
+
+  async function withdraw() {
+    if (!(await confirm('Withdraw your resignation? HR will no longer see it.', { title: 'Withdraw resignation?', confirmLabel: 'Withdraw', tone: 'danger' }))) return;
+    setBusy(true);
+    setError('');
+    const { error: rpcError } = await supabase.rpc('withdraw_my_resignation');
+    setBusy(false);
+    if (rpcError) return setError(rpcError.message);
+    onChanged();
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <Card
+        title={sep ? 'Your resignation' : 'Exit'}
+        note={
+          sep
+            ? 'HR has it. You can change or withdraw it until they start working on it — after that, contact HR.'
+            : 'Nothing has been started. If you are leaving, you can hand in your resignation here and HR will take it from there.'
+        }
+      >
+        {sep && (
+          <FactGrid>
+            <Fact label="Handed in on">{date(sep.resignation_submitted_on)}</Fact>
+            <Fact label="Last working day">{date(sep.last_working_on)}</Fact>
+            <Fact label="Reason" wide>
+              {sep.separation_reason}
+            </Fact>
+          </FactGrid>
+        )}
+        {error && !open && (
+          <p role="alert" className="mt-3 text-[13px] font-bold text-[#b91c1c]">
+            {error}
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={start} disabled={busy} className="h-11 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90 disabled:opacity-60">
+            {sep ? 'Change' : 'Hand in resignation'}
+          </button>
+          {sep && (
+            <button type="button" onClick={withdraw} disabled={busy} className="h-11 rounded-xl border border-slate-300 bg-white px-5 text-sm font-extrabold text-[#b91c1c] hover:bg-slate-50 disabled:opacity-60">
+              {busy ? 'Withdrawing…' : 'Withdraw'}
+            </button>
+          )}
+        </div>
+      </Card>
+
+      {open && (
+        <FormDialog
+          title={sep ? 'Change resignation' : 'Hand in resignation'}
+          note="This tells HR you are leaving. HR sets the notice period and the exit checklist."
+          onSubmit={save}
+          onClose={() => !saving && setOpen(false)}
+          saving={saving}
+          savingLabel="Saving…"
+          submitLabel={sep ? 'Save' : 'Hand in'}
+          error={error}
+        >
+          <div className="mb-3 grid grid-cols-2 gap-3">
+            <div>
+              <label className={LABEL}>Handing in on</label>
+              <DatePicker value={form.submitted} onChange={v => setForm(f => ({ ...f, submitted: v }))} ariaLabel="Handing in on" />
+            </div>
+            <div>
+              <label className={LABEL}>Last working day</label>
+              <DatePicker value={form.last} onChange={v => setForm(f => ({ ...f, last: v }))} ariaLabel="Last working day" />
+            </div>
+          </div>
+          <label htmlFor="res-reason" className={LABEL}>
+            Reason (optional)
+          </label>
+          <textarea
+            id="res-reason"
+            rows={3}
+            value={form.reason}
+            onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+            className={`${INPUT} h-auto py-2.5`}
+          />
+        </FormDialog>
+      )}
+    </div>
+  );
+}
+
+/** HR's record of the exit — the checklist HR works through and what you are owed, read only. */
+function ExitDetails({ sep }: { sep: EmployeeSeparation }) {
   const { system } = useCalendarSystem();
   const date = (d: string | null | undefined) => (d ? formatAdDate(d, system) : null);
   const items = checklist(sep);

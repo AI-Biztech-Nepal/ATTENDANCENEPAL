@@ -218,7 +218,7 @@ export default function EmployeeDocuments({
         <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(typesOnFile / DOCUMENT_TYPES.length) * 100}%` }} />
       </div>
       <p className="mb-3 text-xs text-slate-400">
-        PDF, image or Word file, up to 10 MB each. Stored privately — only admins and HR of your company can open them.
+        PDF, image or Word file, up to 10 MB each. Stored privately — only admins and HR of your company, and this employee, can open them. The employee can add files and remove only their own.
       </p>
 
       {status === 'unavailable' && (
@@ -274,7 +274,12 @@ export default function EmployeeDocuments({
                       <li key={doc.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50 px-3 py-2">
                         <FileIcon className="h-4 w-4 shrink-0 text-slate-400" />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium text-ink">{doc.title || doc.file_name}</span>
+                          <span className="block truncate text-sm font-medium text-ink">
+                            {doc.title || doc.file_name}
+                            {doc.uploaded_by_employee && (
+                              <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Added by employee</span>
+                            )}
+                          </span>
                           <span className="block truncate text-xs text-slate-500">
                             {[
                               doc.title ? doc.file_name : null,

@@ -436,8 +436,13 @@ export default function EmployeeSeparation({ employee, onEmployeeChanged }: { em
             Separation &amp; final settlement
           </h2>
           <p className="mt-0.5 text-xs text-slate-400">
-            The exit checklist and what the employee is owed. Only admins and HR of your company can see this.
+            The exit checklist and what the employee is owed. Only admins and HR of your company can edit this; the employee sees it read only.
           </p>
+          {sep?.requested_by_employee && (
+            <p className="mt-1 text-xs font-semibold text-info-text">
+              Handed in by the employee from their own profile. They can change or withdraw it until you start working on it.
+            </p>
+          )}
         </div>
         {sep && form && (
           <span className="text-xs font-semibold text-slate-600">
