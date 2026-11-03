@@ -4,7 +4,7 @@ import { useState } from 'react';
 import DatePicker from '@/components/DatePicker';
 import FormDialog from '@/components/employee/FormDialog';
 import { Fact, FactGrid } from '@/components/profile/ProfileParts';
-import { StatusTag } from '@/components/employee/parts';
+import Badge from '@/components/Badge';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { supabase } from '@/lib/supabase';
 import { formatAdDate, localDateKey } from '@/lib/calendar';
@@ -105,11 +105,11 @@ function Resignation({ sep, onChanged }: { sep: EmployeeSeparation | null; onCha
           </p>
         )}
         <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" onClick={start} disabled={busy} className="h-11 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90 disabled:opacity-60">
+          <button type="button" onClick={start} disabled={busy} className="h-11 rounded-xl bg-accent px-5 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60">
             {sep ? 'Change' : 'Hand in resignation'}
           </button>
           {sep && (
-            <button type="button" onClick={withdraw} disabled={busy} className="h-11 rounded-xl border border-slate-300 bg-white px-5 text-sm font-extrabold text-[#b91c1c] hover:bg-slate-50 disabled:opacity-60">
+            <button type="button" onClick={withdraw} disabled={busy} className="h-11 rounded-xl border border-slate-300 bg-white px-5 text-sm font-semibold text-[#b91c1c] hover:bg-slate-50 disabled:opacity-60">
               {busy ? 'Withdrawing…' : 'Withdraw'}
             </button>
           )}
@@ -179,15 +179,15 @@ function ExitDetails({ sep }: { sep: EmployeeSeparation }) {
   ];
 
   const money = (label: string, value: number, strong?: boolean) => (
-    <div className={`flex justify-between gap-3 border-t border-slate-100 py-2.5 text-sm ${strong ? 'font-extrabold' : ''}`}>
+    <div className={`flex justify-between gap-3 border-t border-slate-100 py-2.5 text-sm ${strong ? 'font-semibold' : ''}`}>
       <dt className={strong ? '' : 'text-slate-600'}>{label}</dt>
       <dd className="m-0 tabular-nums">{formatAmount(value)}</dd>
     </div>
   );
 
   return (
-    <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-6">
-      <div className="flex min-w-0 flex-col gap-3 lg:gap-6">
+    <div className="flex flex-col lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-5">
+      <div className="min-w-0">
         <Card
           title="Separation"
           note={`${doneCount} of ${items.length} checklist items done · Settlement ${SETTLEMENT_LABEL[sep.settlement_status].toLowerCase()}`}
@@ -217,17 +217,17 @@ function ExitDetails({ sep }: { sep: EmployeeSeparation }) {
             {rows.map(r => (
               <li key={r.key} className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-extrabold">{r.label}</div>
+                  <div className="text-sm font-semibold">{r.label}</div>
                   <div className="text-xs font-medium text-slate-600">{r.detail}</div>
                 </div>
-                <StatusTag tone={done(r.key) ? 'good' : 'warning'}>{done(r.key) ? 'Done' : 'Pending'}</StatusTag>
+                <Badge tone={done(r.key) ? 'good' : 'warning'}>{done(r.key) ? 'Done' : 'Pending'}</Badge>
               </li>
             ))}
           </ul>
         </Card>
       </div>
 
-      <Card title="Final settlement" right={<StatusTag tone={sep.settlement_status === 'pending' ? 'warning' : 'good'}>{SETTLEMENT_LABEL[sep.settlement_status]}</StatusTag>}>
+      <Card title="Final settlement" right={<Badge tone={sep.settlement_status === 'pending' ? 'warning' : 'good'}>{SETTLEMENT_LABEL[sep.settlement_status]}</Badge>}>
         <SubHeading>You are owed</SubHeading>
         <dl>
           {money('Final salary', sep.final_salary)}
@@ -242,10 +242,10 @@ function ExitDetails({ sep }: { sep: EmployeeSeparation }) {
           {money('Other deductions', sep.other_deductions)}
           {money('Total deductions', totals.deductions, true)}
         </dl>
-        <div className="mt-4 rounded-xl bg-brand-light px-4 py-3">
+        <div className="mt-4 rounded-xl bg-good-bg px-4 py-3">
           <div className="flex items-baseline justify-between gap-3">
-            <span className="text-sm font-extrabold text-[#065f46]">{totals.net >= 0 ? 'Net payable to you' : 'Net owed to the company'}</span>
-            <span className="text-lg font-extrabold tabular-nums text-[#065f46]">{formatAmount(Math.abs(totals.net))}</span>
+            <span className="text-sm font-semibold text-good-text">{totals.net >= 0 ? 'Net payable to you' : 'Net owed to the company'}</span>
+            <span className="text-lg font-semibold tabular-nums text-good-text">{formatAmount(Math.abs(totals.net))}</span>
           </div>
           {sep.settlement_on && sep.settlement_status !== 'pending' && (
             <p className="mt-0.5 text-xs font-semibold text-slate-600">

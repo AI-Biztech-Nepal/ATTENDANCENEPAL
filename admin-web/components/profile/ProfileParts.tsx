@@ -249,19 +249,31 @@ export function ReportingLine({
   manager,
   directReports,
 }: {
-  manager: { id: string; name: string } | null;
+  /** Without an `id` the name is shown but not linked — an employee can read only their manager's name. */
+  manager: { id?: string; name: string } | null;
   directReports: { id: string; name: string }[] | null;
 }) {
   return (
     <ProfileCard title="Reporting line">
       {manager ? (
-        <Link href={`/employees/${manager.id}`} className="mt-4 flex items-center gap-3 hover:opacity-80">
-          <Avatar name={manager.name} photoUrl={null} className="h-10 w-10 text-sm" />
-          <span className="min-w-0">
-            <span className="block text-sm font-extrabold text-ink">{manager.name}</span>
-            <span className="block text-xs font-semibold text-slate-500">Reports to</span>
-          </span>
-        </Link>
+        (() => {
+          const who = (
+            <>
+              <Avatar name={manager.name} photoUrl={null} className="h-10 w-10 text-sm" />
+              <span className="min-w-0">
+                <span className="block text-sm font-extrabold text-ink">{manager.name}</span>
+                <span className="block text-xs font-semibold text-slate-500">Reports to</span>
+              </span>
+            </>
+          );
+          return manager.id ? (
+            <Link href={`/employees/${manager.id}`} className="mt-4 flex items-center gap-3 hover:opacity-80">
+              {who}
+            </Link>
+          ) : (
+            <div className="mt-4 flex items-center gap-3">{who}</div>
+          );
+        })()
       ) : (
         <p className="mt-3 text-sm font-semibold text-slate-600">Reports to no one.</p>
       )}

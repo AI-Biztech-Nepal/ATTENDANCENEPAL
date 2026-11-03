@@ -2,7 +2,6 @@
 
 import { useMemo, useRef, useState } from 'react';
 import FormDialog from '@/components/employee/FormDialog';
-import { StatusTag } from '@/components/employee/parts';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { supabase } from '@/lib/supabase';
 import { formatAdDate, localDateKey } from '@/lib/calendar';
@@ -18,7 +17,7 @@ import {
   type DocumentType,
   type EmployeeDocument,
 } from '@/lib/employeeDocuments';
-import { Card, Unavailable } from './ui';
+import { Card, DANGER_BTN, LINK_BTN, Unavailable } from './ui';
 
 /** Your documents on file, as the admin's checklist shows them — what is there and what is
  * still missing. You can open or download any of them, add your own, and remove what you
@@ -159,79 +158,80 @@ export default function MyDocuments({
     onChanged();
   }
 
-  const linkBtn = 'flex h-11 items-center px-1 text-[13px] font-extrabold text-brand disabled:opacity-50 lg:h-9';
-
   return (
     <Card
       title="Documents"
-      note="Added by your employer or by you. You can remove only what you added. Only you and HR can open them."
-      right={docs ? <span className="shrink-0 text-[13px] font-bold text-slate-600">{onFile} of {DOCUMENT_TYPES.length} on file</span> : undefined}
+      right={docs ? <span className="shrink-0 text-xs text-slate-500">{onFile} of {DOCUMENT_TYPES.length} kinds on file</span> : undefined}
     >
       {docs === null ? (
         <Unavailable />
       ) : (
         <>
+          <div className="mb-2 mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+            <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(onFile / DOCUMENT_TYPES.length) * 100}%` }} />
+          </div>
+          <p className="mb-3 text-xs text-slate-400">
+            PDF, image or Word file, up to 10 MB each. Stored privately — only you and HR of your company can open them. You can add files and remove only the ones you added.
+          </p>
           {actionError && (
-            <p role="alert" className="mt-3 text-[13px] font-semibold text-[#b91c1c]">
+            <p role="alert" className="mb-3 text-xs text-critical">
               {actionError}
             </p>
           )}
-          <ul className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
+          <ul className="divide-y divide-slate-100">
             {DOCUMENT_TYPES.map(type => {
               const files = byType.get(type.value) ?? [];
               return (
-                <li key={type.value} className="py-3">
+                <li key={type.value} className="py-2.5">
                   <div className="flex items-center gap-3">
                     <span
                       aria-hidden="true"
-                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${files.length > 0 ? 'border-brand bg-brand text-white' : 'border-slate-300 bg-white'}`}
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${files.length > 0 ? 'border-accent bg-accent text-white' : 'border-slate-300 bg-white'}`}
                     >
                       {files.length > 0 && (
-                        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round">
-                          <path d="m5 12.5 4.5 4.5L19 7.5" />
+                        <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m5 12 5 5 9-10" />
                         </svg>
                       )}
                     </span>
-                    <span className="min-w-0 flex-1 text-sm font-extrabold">{type.label}</span>
-                    <span className={`shrink-0 text-xs font-bold ${files.length > 0 ? 'text-[#14532d]' : 'text-[#c2410c]'}`}>
-                      {files.length > 0 ? `${files.length} file${files.length === 1 ? '' : 's'}` : 'Missing'}
-                    </span>
-                    <button type="button" onClick={() => openUpload(type.value)} disabled={!companyId} aria-label={`Upload ${type.label}`} className={`${linkBtn} shrink-0`}>
-                      Upload
+                    <span className="min-w-0 flex-1 text-sm font-medium text-ink">{type.label}</span>
+                    <span className="shrink-0 text-xs text-slate-400">{files.length > 0 ? `${files.length} file${files.length === 1 ? '' : 's'}` : 'Missing'}</span>
+                    <button type="button" onClick={() => openUpload(type.value)} disabled={!companyId} aria-label={`Upload ${type.label}`} className={LINK_BTN}>
+                      + Upload
                     </button>
                   </div>
                   {files.length > 0 && (
-                    <ul className="ml-8 mt-1.5 flex flex-col gap-1">
+                    <ul className="ml-7 mt-2 space-y-1.5">
                       {files.map(doc => (
-                        <li key={doc.id} className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="truncate text-[13px] font-bold">{doc.title || doc.file_name}</span>
-                              {doc.uploaded_by_employee && <StatusTag tone="brand">Added by you</StatusTag>}
-                            </div>
-                            <div className="truncate text-xs font-medium text-slate-500">
-                              {[doc.title ? doc.file_name : null, formatBytes(doc.size_bytes), formatAdDate(localDateKey(doc.created_at), system)].filter(Boolean).join(' · ')}
-                            </div>
-                          </div>
-                          <div className="flex shrink-0 items-center gap-2">
-                            <button type="button" onClick={() => handleView(doc)} aria-label={`View ${doc.title || doc.file_name}`} className={linkBtn}>
+                        <li key={doc.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50 px-3 py-2">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M14 3v5h5" />
+                          </svg>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-ink">
+                              {doc.title || doc.file_name}
+                              {doc.uploaded_by_employee && (
+                                <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Added by you</span>
+                              )}
+                            </span>
+                            <span className="block truncate text-xs text-slate-500">
+                              {[doc.title ? doc.file_name : null, formatBytes(doc.size_bytes) || null, formatAdDate(localDateKey(doc.created_at), system)].filter(Boolean).join(' · ')}
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-3">
+                            <button type="button" onClick={() => handleView(doc)} aria-label={`View ${doc.title || doc.file_name}`} className={LINK_BTN}>
                               View
                             </button>
-                            <button type="button" onClick={() => handleDownload(doc)} disabled={busyId === doc.id} aria-label={`Download ${doc.title || doc.file_name}`} className={linkBtn}>
+                            <button type="button" onClick={() => handleDownload(doc)} disabled={busyId === doc.id} aria-label={`Download ${doc.title || doc.file_name}`} className={LINK_BTN}>
                               Download
                             </button>
                             {doc.uploaded_by_employee && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemove(doc)}
-                                disabled={busyId === doc.id}
-                                aria-label={`Remove ${doc.title || doc.file_name}`}
-                                className="flex h-11 items-center px-1 text-[13px] font-extrabold text-[#b91c1c] disabled:opacity-50 lg:h-9"
-                              >
+                              <button type="button" onClick={() => handleRemove(doc)} disabled={busyId === doc.id} aria-label={`Remove ${doc.title || doc.file_name}`} className={DANGER_BTN}>
                                 Remove
                               </button>
                             )}
-                          </div>
+                          </span>
                         </li>
                       ))}
                     </ul>

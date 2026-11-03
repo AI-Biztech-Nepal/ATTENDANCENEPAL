@@ -43,6 +43,7 @@ import {
   PROFILE_COLUMNS,
   STATUS_TONE,
   WORKING_STATUSES,
+  contractLabel,
   degreeLabel,
   effectiveStatus,
   employmentTypeLabel,
@@ -67,14 +68,6 @@ function tenureDays(dateOfJoining: string | null, resignedAt: string | null) {
   const start = new Date(dateOfJoining).getTime();
   const end = resignedAt ? new Date(resignedAt).getTime() : Date.now();
   return Math.max(0, Math.floor((end - start) / 86400000));
-}
-
-/** "Contract ends in 10 days" / "Contract ended 3 days ago". */
-function contractLabel(daysLeft: number) {
-  if (daysLeft < 0) return `Contract ended ${-daysLeft} day${daysLeft === -1 ? '' : 's'} ago`;
-  if (daysLeft === 0) return 'Contract ends today';
-  if (daysLeft === 1) return 'Contract ends tomorrow';
-  return `Contract ends in ${daysLeft} days`;
 }
 
 const EMPTY_EDUCATION_FORM = { degree: '', institution: '', board_university: '', year: '', year_calendar: 'AD' };

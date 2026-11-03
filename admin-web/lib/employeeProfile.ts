@@ -45,6 +45,14 @@ export function effectiveStatus(e: Pick<Employee, 'status' | 'employment_status'
   return label === 'probation' || label === 'suspended' ? label : 'active';
 }
 
+/** "Contract ends in 10 days" / "Contract ended 3 days ago". */
+export function contractLabel(daysLeft: number) {
+  if (daysLeft < 0) return `Contract ended ${-daysLeft} day${daysLeft === -1 ? '' : 's'} ago`;
+  if (daysLeft === 0) return 'Contract ends today';
+  if (daysLeft === 1) return 'Contract ends tomorrow';
+  return `Contract ends in ${daysLeft} days`;
+}
+
 export const MARITAL_STATUSES = [
   { value: 'single', label: 'Single' },
   { value: 'married', label: 'Married' },
