@@ -22,7 +22,8 @@ type Props = {
   onMonthChange?: (adKeys: string[]) => void;
   /** Only the month stepper, no grid — for when something else (the daily log) is
    * showing but the month still has to be changeable. Stays mounted so the month
-   * in view isn't lost. */
+   * in view isn't lost. Its bottom edge is left open: the log's card sits flush
+   * under it, so the two read as one card, like the grid and its stepper do. */
   compact?: boolean;
   /** A control for the right end of the stepper row (the Calendar / Daily log switch).
    * With one, the stepper moves to the left so the two never fight for room on a phone. */
@@ -119,7 +120,7 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+    <div className={`rounded-xl border border-slate-200 bg-white p-3 sm:p-4 ${compact ? 'rounded-b-none border-b-0' : ''}`}>
       <div className={`flex items-center gap-3 ${action ? 'justify-between' : 'justify-center'} ${compact ? '' : 'mb-3'}`}>
         <div className="flex items-center gap-3">
           <button onClick={() => go(-1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">

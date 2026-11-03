@@ -51,7 +51,9 @@ function weekday(date: string) {
 type Item = { kind: 'day'; row: LogRow } | { kind: 'gap'; from: string; to: string; count: number };
 
 /**
- * The day-by-day table under the Attendance Calendar's "This Month" cards.
+ * The Attendance Calendar's day-by-day table. It sits flush under the month
+ * stepper (MonthCalendar `compact`) as one card with it, so its top corners are
+ * square and it has no visible heading — the Calendar / Daily log switch names it.
  *
  * A table from 768px up, a stacked list below. Late and early sit beside the
  * time they belong to instead of in columns that are empty on most days, and a
@@ -126,8 +128,8 @@ export default function AttendanceLogTable({ rows, todayKey }: { rows: LogRow[];
 
   return (
     <>
-      <h2 className="mb-2 mt-6 text-sm font-semibold text-ink">Daily Log</h2>
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <h2 className="sr-only">Daily Log</h2>
+      <div className="overflow-hidden rounded-xl rounded-t-none border border-slate-200 bg-white">
         <table className="hidden w-full text-sm md:table">
           <thead>
             <tr className="divide-x divide-slate-200 border-b border-slate-300 bg-slate-100">
