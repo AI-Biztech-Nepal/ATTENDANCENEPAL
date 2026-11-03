@@ -1,18 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
-import { ClockIcon, StatusTag, type TagTone } from '@/components/employee/parts';
-import PointsCard from '@/components/employee/PointsCard';
+import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import TaskHoursChart from '@/components/TaskHoursChart';
+import FormDialog from '@/components/employee/FormDialog';
+import PointsCard from '@/components/employee/PointsCard';
+import { PageBody } from '@/components/employee/parts';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
+import { nepalTodayIso } from '@/lib/shift';
 import { totalsByTask } from '@/lib/taskHours';
 import type { Task, TaskStatus, TaskTimeLog } from '@/lib/types';
 
-const STATUS_TONE: Record<TaskStatus, TagTone> = {
+const STATUS_TONE: Record<TaskStatus, 'warning' | 'info' | 'neutral' | 'good' | 'critical'> = {
   pending: 'warning',
   in_progress: 'info',
   submitted: 'neutral',
@@ -20,26 +23,26 @@ const STATUS_TONE: Record<TaskStatus, TagTone> = {
   rejected: 'critical',
 };
 
-// The board's four columns. A rejected task has been reviewed, so it sits with the approved ones.
-const COLUMNS: { key: string; title: string; statuses: TaskStatus[] }[] = [
-  { key: 'todo', title: 'To do', statuses: ['pending'] },
-  { key: 'doing', title: 'In progress', statuses: ['in_progress'] },
-  { key: 'review', title: 'Waiting for review', statuses: ['submitted'] },
-  { key: 'done', title: 'Done', statuses: ['approved', 'rejected'] },
-];
+const FILTERS = ['pending', 'in_progress', 'submitted', 'approved', 'rejected', 'All'] as const;
+type Filter = (typeof FILTERS)[number];
 
 const EMPTY_TASK_FORM = { title: '', description: '', due_date: '' };
+const LABEL = 'mb-1 block text-xs font-medium text-slate-600';
+const INPUT = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
+const PRIMARY_SM = 'rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90 disabled:opacity-50';
+const OUTLINE_SM = 'rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50';
 
 function formatElapsed(startedAt: string, now: number) {
   const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`;
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** The employee's own tasks, laid out like the owner console's Tasks page: filter pills, the task
+ * table beside the points and leaderboard, then the hours. Instead of Review, each task carries
+ * what the employee does with it — accept it, hold or resume the timer, complete it. */
 export default function MyTasksPage() {
   usePageTitle('My Tasks');
   const { system } = useCalendarSystem();
@@ -48,11 +51,11 @@ export default function MyTasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [logs, setLogs] = useState<TaskTimeLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<Filter>('All');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [hoursTab, setHoursTab] = useState<'task' | 'time'>('task');
 
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
@@ -77,11 +80,7 @@ export default function MyTasksPage() {
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       setUserId(data.user.id);
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('employee_id')
-        .eq('id', data.user.id)
-        .single();
+      const { data: profile } = await supabase.from('profiles').select('employee_id').eq('id', data.user.id).single();
       setLoading(false);
       if (profile?.employee_id) {
         setEmployeeId(profile.employee_id);
@@ -125,10 +124,7 @@ export default function MyTasksPage() {
   async function submit(id: string) {
     setBusyId(id);
     setError(null);
-    const { error: rpcError } = await supabase.rpc('submit_task', {
-      p_task_id: id,
-      p_work_notes: noteDraft[id] || null,
-    });
+    const { error: rpcError } = await supabase.rpc('submit_task', { p_task_id: id, p_work_notes: noteDraft[id] || null });
     setBusyId(null);
     if (rpcError) {
       setError(rpcError.message);
@@ -162,343 +158,253 @@ export default function MyTasksPage() {
     reload(employeeId);
   }
 
-  const taskTotals = totalsByTask(logs);
-  const taskHours = (taskId: string) => taskTotals.find(t => t.task_id === taskId)?.hours ?? 0;
-  const maxHours = Math.max(0, ...taskTotals.map(r => r.hours));
+  const filtered = useMemo(() => (filter === 'All' ? tasks : tasks.filter(t => t.status === filter)), [tasks, filter]);
+  const taskTotals = useMemo(() => totalsByTask(logs), [logs]);
+  const todayIso = useMemo(nepalTodayIso, []);
+  const isOverdue = (t: Task) => (t.status === 'pending' || t.status === 'in_progress') && !!t.due_date && t.due_date < todayIso;
+  const hoursOf = (taskId: string) => taskTotals.find(r => r.task_id === taskId)?.hours ?? 0;
 
-  // One card per task, the same on a phone (a single list, grouped like the board) and on a
-  // computer (inside its column).
-  function renderTask(t: Task, colKey: string) {
-    const isRunningHere = runningLog?.task_id === t.id;
-    const hours = taskHours(t.id);
-    const meta = [
-      `${t.points} pts`,
-      t.due_date ? `Due ${formatAdDate(t.due_date, system)}` : null,
-      hours > 0 ? `${hours} ${hours === 1 ? 'hr' : 'hrs'} logged` : null,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-    const actionBtn = 'flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-extrabold disabled:opacity-60 lg:h-11 lg:text-[13px]';
-    return (
-      <article
-        key={t.id}
-        className={`rounded-2xl bg-white ${isRunningHere ? 'border-2 border-brand p-3 lg:p-[15px]' : 'border border-slate-200 p-3.5 lg:p-4'}`}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="text-sm font-extrabold leading-5">
-            {t.title}
-            {t.source === 'self' && <span className="ml-1.5 text-[11px] font-medium text-slate-500 lg:hidden">(self-created)</span>}
-          </h3>
-          {isRunningHere ? (
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand-light px-2.5 py-1 text-[13px] font-extrabold tabular-nums text-brand">
-              <span aria-hidden="true" className="h-2 w-2 rounded-full bg-brand" />
-              {formatElapsed(runningLog.started_at, now)}
-            </span>
-          ) : (
-            /* On the board the column already says the status; only the Done column needs the verdict. */
-            <span className={colKey === 'done' ? '' : 'lg:hidden'}>
-              <StatusTag tone={STATUS_TONE[t.status]}>{t.status.replace('_', ' ')}</StatusTag>
-            </span>
-          )}
-        </div>
-        {t.source === 'self' && <p className="mt-0.5 hidden text-[11px] font-semibold text-[#586474] lg:block">Self-created</p>}
-        {t.description && <p className="mt-1 text-[13px] font-medium leading-[18px] text-slate-600 lg:mt-1.5">{t.description}</p>}
-        <p className="mt-1.5 text-xs font-semibold text-slate-500 lg:mt-2 lg:text-[#586474]">{meta}</p>
-
-        {t.review_note && (
-          <p className="mt-2 rounded-[10px] bg-slate-50 px-2.5 py-2 text-[13px] leading-[18px] text-slate-600 lg:mt-2.5 lg:bg-slate-100 lg:px-3 lg:py-2.5">
-            <b>Feedback:</b> {t.review_note}
-          </p>
-        )}
-
-        {t.status === 'pending' && (
-          <button
-            disabled={busyId === t.id}
-            onClick={() => startTimer(t.id)}
-            className={`${actionBtn} mt-2.5 bg-brand text-white lg:mt-3`}
-          >
-            <CheckIcon className="h-4 w-4" />
-            Accept Task
-          </button>
-        )}
-
-        {t.status === 'in_progress' && (
-          <div className="mt-2.5 lg:mt-3">
-            {runningLog && !isRunningHere && (
-              <p className="mb-3 rounded-[10px] bg-slate-100 px-3 py-2.5 text-xs font-semibold text-slate-600">
-                Timer running on another task — hold it first to resume this one.
-              </p>
-            )}
-            <label htmlFor={`note-${t.id}`} className="mb-1.5 block text-xs font-bold text-slate-600">
-              Work notes
-            </label>
-            <textarea
-              id={`note-${t.id}`}
-              placeholder="What did you do? (optional)"
-              value={noteDraft[t.id] ?? ''}
-              onChange={e => setNoteDraft(d => ({ ...d, [t.id]: e.target.value }))}
-              rows={2}
-              className="h-16 w-full resize-none rounded-[10px] border border-slate-300 px-3 py-2.5 text-[13px] font-medium text-ink placeholder:text-slate-400"
-            />
-            <div className="mt-2.5 flex gap-2">
-              {isRunningHere ? (
-                <button
-                  disabled={busyId === runningLog.id}
-                  onClick={() => stopTimer(runningLog.id)}
-                  className={`${actionBtn} flex-1 border border-slate-300 bg-white text-brand hover:bg-slate-50`}
-                >
-                  <PauseIcon className="h-3.5 w-3.5" />
-                  Hold
-                </button>
-              ) : !runningLog ? (
-                <button
-                  disabled={busyId === t.id}
-                  onClick={() => startTimer(t.id)}
-                  className={`${actionBtn} flex-1 border border-slate-300 bg-white text-brand hover:bg-slate-50`}
-                >
-                  <PlayIcon className="h-3.5 w-3.5" />
-                  Resume
-                </button>
-              ) : null}
-              <button
-                disabled={busyId === t.id}
-                onClick={() => submit(t.id)}
-                className={`${actionBtn} flex-1 bg-brand text-white hover:bg-brand/90`}
-              >
-                <CheckIcon className="h-4 w-4" />
-                Complete
-              </button>
-            </div>
-          </div>
-        )}
-
-        {t.status === 'submitted' && (
-          <p className="mt-2 flex items-center gap-2 text-[13px] font-semibold text-slate-600 lg:mt-3 lg:rounded-[10px] lg:bg-slate-100 lg:px-3 lg:py-2.5">
-            <ClockIcon className="hidden h-4 w-4 lg:block" />
-            <span>
-              Awaiting review<span className="lg:hidden">.</span>
-            </span>
-          </p>
-        )}
-      </article>
-    );
-  }
-
-  if (loading) {
+  /** Title, description, notes and — while it is in progress — the box for what you did. */
+  function taskBody(t: Task) {
+    const hours = hoursOf(t.id);
     return (
       <>
-        <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium text-ink">{t.title}</span>
+          {t.source === 'self' && <Badge tone="info">Self-assigned</Badge>}
+        </div>
+        {t.description && <div className="text-xs text-slate-400">{t.description}</div>}
+        {hours > 0 && (
+          <div className="mt-0.5 text-xs text-slate-400">
+            {hours} {hours === 1 ? 'hr' : 'hrs'} logged
+          </div>
+        )}
+        {t.work_notes && (
+          <div className="mt-1 text-xs text-slate-500">
+            <span className="font-medium">Your note:</span> {t.work_notes}
+          </div>
+        )}
+        {t.review_note && (
+          <div className="mt-1 text-xs text-slate-500">
+            <span className="font-medium">Review note:</span> {t.review_note}
+          </div>
+        )}
+        {t.status === 'in_progress' && (
+          <textarea
+            aria-label={`Work notes for ${t.title}`}
+            placeholder="What did you do? (optional)"
+            value={noteDraft[t.id] ?? ''}
+            onChange={e => setNoteDraft(d => ({ ...d, [t.id]: e.target.value }))}
+            rows={2}
+            className={`${INPUT} mt-2 max-w-md resize-none text-xs`}
+          />
+        )}
       </>
     );
   }
 
-  const taskCount = tasks.length === 0 ? 'No tasks yet' : `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'}`;
+  function statusCell(t: Task) {
+    const running = runningLog?.task_id === t.id;
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <span className="whitespace-nowrap">
+          <Badge tone={STATUS_TONE[t.status]}>{t.status.replace('_', ' ')}</Badge>
+        </span>
+        {running && runningLog && (
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold tabular-nums text-accent">
+            <span aria-hidden="true" className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+            {formatElapsed(runningLog.started_at, now)}
+          </span>
+        )}
+        {isOverdue(t) && <Badge tone="critical">Overdue</Badge>}
+      </div>
+    );
+  }
+
+  function actions(t: Task) {
+    const running = runningLog?.task_id === t.id;
+    if (t.status === 'pending') {
+      return (
+        <button disabled={busyId === t.id} onClick={() => startTimer(t.id)} className={PRIMARY_SM}>
+          Accept
+        </button>
+      );
+    }
+    if (t.status === 'in_progress') {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          {running && runningLog ? (
+            <button disabled={busyId === runningLog.id} onClick={() => stopTimer(runningLog.id)} className={OUTLINE_SM}>
+              Hold
+            </button>
+          ) : !runningLog ? (
+            <button disabled={busyId === t.id} onClick={() => startTimer(t.id)} className={OUTLINE_SM}>
+              Resume
+            </button>
+          ) : (
+            <span className="text-xs text-slate-400">Timer running on another task</span>
+          )}
+          <button disabled={busyId === t.id} onClick={() => submit(t.id)} className={PRIMARY_SM}>
+            Complete
+          </button>
+        </div>
+      );
+    }
+    return <span className="text-xs text-slate-400">{t.status === 'submitted' ? 'Awaiting review' : 'Reviewed'}</span>;
+  }
+
+  if (loading) {
+    return <p className="p-4 text-center text-sm text-slate-500">Loading…</p>;
+  }
+
+  if (!employeeId) {
+    return <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>;
+  }
+
+  const emptyText = `No ${filter !== 'All' ? filter.replace('_', ' ') + ' ' : ''}tasks${filter === 'All' ? ' yet' : ''}.`;
+  const maxHours = Math.max(0, ...taskTotals.map(r => r.hours));
 
   return (
-    <>
-      {!employeeId ? (
-        <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
-      ) : (
-        <div className="lg:px-8 lg:pb-10 lg:pt-7">
-          {/* Computer: how many tasks, and the way to add one. A phone has its own "Tasks" row below. */}
-          <div className="mb-5 hidden items-center justify-between gap-4 lg:flex">
-            <p className="text-base font-bold text-slate-700">
-              {taskCount}
-              {runningLog ? ' · 1 timer running' : ''}
-            </p>
+    <PageBody>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {FILTERS.map(f => (
             <button
-              onClick={() => setShowTaskForm(true)}
-              className="flex h-11 items-center gap-2 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90"
+              key={f}
+              onClick={() => setFilter(f)}
+              aria-pressed={filter === f}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize ${
+                filter === f ? 'bg-accent text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
+              }`}
             >
-              <PlusIcon className="h-[18px] w-[18px]" />
-              New task
+              {f.replace('_', ' ')}
             </button>
+          ))}
+        </div>
+        <button onClick={() => setShowTaskForm(true)} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90">
+          + New Task
+        </button>
+      </div>
+
+      {error && (
+        <p role="alert" className="mb-4 rounded-lg bg-critical-bg px-3 py-2 text-sm text-critical-text">
+          {error}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px] lg:items-start">
+        <div className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="divide-y divide-slate-100 md:hidden">
+            {filtered.map(t => (
+              <div key={t.id} className={`p-4 ${runningLog?.task_id === t.id ? 'bg-accent/5' : ''}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">{taskBody(t)}</div>
+                  <div className="shrink-0">{statusCell(t)}</div>
+                </div>
+                <div className="mt-2 text-xs text-slate-500">
+                  {t.points} pts · Due {formatAdDate(t.due_date, system)}
+                </div>
+                <div className="mt-3">{actions(t)}</div>
+              </div>
+            ))}
+            {filtered.length === 0 && <p className="p-8 text-center text-sm text-slate-400">{emptyText}</p>}
           </div>
 
-          <div className="mx-4 mt-4 lg:mx-0 lg:mt-0">
-            <div className="mb-2.5 flex items-center justify-between lg:hidden">
-              <h2 className="text-base font-extrabold">Tasks</h2>
-              <button onClick={() => setShowTaskForm(true)} className="h-11 rounded-xl bg-brand px-4 text-[13px] font-extrabold text-white">
-                + New Task
-              </button>
-            </div>
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-5 py-3 font-medium">Task</th>
+                  <th className="w-20 px-5 py-3 font-medium">Points</th>
+                  <th className="w-28 px-5 py-3 font-medium">Due</th>
+                  <th className="w-36 px-5 py-3 font-medium">Status</th>
+                  <th className="w-56 px-5 py-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(t => (
+                  <tr key={t.id} className={`border-b border-slate-100 align-top last:border-0 ${runningLog?.task_id === t.id ? 'bg-accent/5' : ''}`}>
+                    <td className="px-5 py-3 text-slate-600">{taskBody(t)}</td>
+                    <td className="px-5 py-3 text-slate-600">{t.points}</td>
+                    <td className="px-5 py-3 text-slate-600">{formatAdDate(t.due_date, system)}</td>
+                    <td className="px-5 py-3">{statusCell(t)}</td>
+                    <td className="px-5 py-3">{actions(t)}</td>
+                  </tr>
+                ))}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
+                      {emptyText}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-            {error && (
-              <p role="alert" className="mb-3 rounded-xl bg-[#fee2e2] px-3.5 py-2.5 text-sm font-semibold text-[#b91c1c]">
-                {error}
-              </p>
-            )}
+        <PointsCard employeeId={employeeId} />
+      </div>
 
-            {tasks.length === 0 && <p className="py-6 text-center text-sm text-slate-500 lg:hidden">No tasks yet.</p>}
+      <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px] lg:items-start">
+        <TaskHoursChart logs={logs} tasks={tasks} />
 
-            <div className="flex flex-col gap-3 lg:grid lg:grid-cols-[repeat(auto-fit,minmax(230px,1fr))] lg:items-start lg:gap-4">
-              {COLUMNS.map(col => {
-                const items = tasks.filter(t => col.statuses.includes(t.status));
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <h2 className="mb-3 text-sm font-semibold text-ink">Hours by Task</h2>
+          {taskTotals.length === 0 ? (
+            <p className="text-sm text-slate-400">No time logged yet. Accept a task to start the timer.</p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {taskTotals.map(row => {
+                const task = tasks.find(t => t.id === row.task_id);
                 return (
-                  <section
-                    key={col.key}
-                    aria-label={col.title}
-                    className="contents lg:block lg:rounded-[20px] lg:bg-[#e8edf3] lg:p-3"
-                  >
-                    <div className="hidden h-10 items-center justify-between px-1.5 lg:flex">
-                      <h2 className="text-sm font-extrabold">{col.title}</h2>
-                      <span className="flex h-6 min-w-6 items-center justify-center rounded-xl bg-white px-2 text-xs font-extrabold text-slate-600">
-                        {items.length}
-                      </span>
+                  <div key={row.task_id} className="py-2 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate text-ink">{task?.title ?? 'Deleted task'}</span>
+                      <span className="shrink-0 font-semibold text-ink">{row.hours} hrs</span>
                     </div>
-                    <div className="contents lg:flex lg:flex-col lg:gap-2.5">
-                      {items.map(t => renderTask(t, col.key))}
-                      {items.length === 0 && <p className="hidden px-1.5 pb-3 pt-1 text-[13px] font-semibold text-slate-500 lg:block">Nothing here</p>}
+                    <div className="mt-1.5 h-1.5 rounded-full bg-slate-100">
+                      <div className="h-1.5 rounded-full bg-accent" style={{ width: `${maxHours > 0 ? (row.hours / maxHours) * 100 : 0}%` }} />
                     </div>
-                  </section>
+                  </div>
                 );
               })}
             </div>
-
-            <div className="mt-3 flex flex-col gap-3 lg:mt-6 lg:grid lg:grid-cols-[minmax(0,1fr)_420px] lg:items-start lg:gap-6">
-              <section aria-label="Hours" className="rounded-2xl border border-slate-200 bg-white p-3.5 lg:rounded-[20px] lg:p-6">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="text-base font-extrabold lg:text-lg lg:leading-6">Hours</h2>
-                  <div role="group" aria-label="Hours view" className="flex rounded-xl bg-slate-100 p-[3px]">
-                    {(
-                      [
-                        ['task', 'By task'],
-                        ['time', 'Over time'],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setHoursTab(key)}
-                        aria-pressed={hoursTab === key}
-                        className={`h-9 rounded-[9px] px-3.5 text-[13px] ${
-                          hoursTab === key ? 'bg-white font-extrabold text-brand shadow-[0_1px_2px_rgba(15,23,42,0.12)]' : 'font-bold text-slate-600 hover:text-ink'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {hoursTab === 'task' ? (
-                  taskTotals.length === 0 ? (
-                    <p className="py-6 text-center text-sm text-slate-600">No time logged yet. Accept a task to start the timer.</p>
-                  ) : (
-                    taskTotals.map(row => {
-                      const task = tasks.find(t => t.id === row.task_id);
-                      const pct = maxHours > 0 ? (row.hours / maxHours) * 100 : 0;
-                      return (
-                        <div key={row.task_id} className="mb-3 last:mb-0 lg:mb-0 lg:flex lg:h-[42px] lg:items-center lg:gap-5">
-                          <div className="flex justify-between text-xs font-semibold lg:block lg:w-[210px] lg:shrink-0 lg:text-sm">
-                            <span className="truncate">{task?.title ?? 'Deleted task'}</span>
-                            <span className="font-extrabold tabular-nums lg:hidden">{row.hours}</span>
-                          </div>
-                          <div className="mt-1 h-2.5 rounded-[5px] bg-slate-100 lg:mt-0 lg:flex-1">
-                            <div className="h-2.5 rounded-[5px] bg-brand" style={{ width: `${pct}%` }} />
-                          </div>
-                          <span className="hidden w-12 shrink-0 text-right text-sm font-extrabold tabular-nums lg:block">{row.hours} h</span>
-                        </div>
-                      );
-                    })
-                  )
-                ) : (
-                  <TaskHoursChart logs={logs} tasks={tasks} bare />
-                )}
-              </section>
-              <PointsCard employeeId={employeeId} />
-            </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {showTaskForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <form onSubmit={handleCreateTask} className="w-full max-w-md rounded-[20px] bg-white p-6 shadow-xl">
-            <h3 className="text-xl font-extrabold">New Task</h3>
-            <p className="mb-4 mt-1 text-[13px] font-medium text-slate-600">
-              Self-created tasks start with 0 points — HR can award points when they review it.
-            </p>
+        <FormDialog
+          title="New Task"
+          note="Self-created tasks start with 0 points — HR can award points when they review it."
+          onSubmit={handleCreateTask}
+          onClose={() => setShowTaskForm(false)}
+          saving={creatingTask}
+          savingLabel="Creating…"
+          submitLabel="Create task"
+          error={taskFormError}
+        >
+          <label htmlFor="new-task-title" className={LABEL}>
+            Title
+          </label>
+          <input id="new-task-title" required value={taskForm.title} onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))} className={`${INPUT} mb-3`} />
 
-            <label htmlFor="new-task-title" className="mb-1.5 block text-xs font-bold text-slate-600">
-              Title
-            </label>
-            <input
-              id="new-task-title"
-              required
-              value={taskForm.title}
-              onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))}
-              className="mb-3 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium"
-            />
+          <label htmlFor="new-task-description" className={LABEL}>
+            Description (optional)
+          </label>
+          <textarea
+            id="new-task-description"
+            value={taskForm.description}
+            onChange={e => setTaskForm(f => ({ ...f, description: e.target.value }))}
+            rows={3}
+            className={`${INPUT} mb-3`}
+          />
 
-            <label htmlFor="new-task-description" className="mb-1.5 block text-xs font-bold text-slate-600">
-              Description (optional)
-            </label>
-            <textarea
-              id="new-task-description"
-              value={taskForm.description}
-              onChange={e => setTaskForm(f => ({ ...f, description: e.target.value }))}
-              rows={3}
-              className="mb-3 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium"
-            />
-
-            <label className="mb-1.5 block text-xs font-bold text-slate-600">Due date (optional)</label>
-            <div className="mb-3">
-              <DatePicker value={taskForm.due_date} onChange={v => setTaskForm(f => ({ ...f, due_date: v }))} placeholder="Select due date" />
-            </div>
-
-            {taskFormError && <p className="mb-3 text-sm font-semibold text-[#b91c1c]">{taskFormError}</p>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowTaskForm(false)}
-                className="h-11 rounded-xl px-4 text-sm font-bold text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={creatingTask}
-                className="h-11 rounded-xl bg-brand px-5 text-sm font-extrabold text-white hover:bg-brand/90 disabled:opacity-60"
-              >
-                {creatingTask ? 'Creating…' : 'Create task'}
-              </button>
-            </div>
-          </form>
-        </div>
+          <label className={LABEL}>Due date (optional)</label>
+          <DatePicker value={taskForm.due_date} onChange={v => setTaskForm(f => ({ ...f, due_date: v }))} placeholder="Select due date" ariaLabel="Due date" />
+        </FormDialog>
       )}
-    </>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} className={className} aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m5 13 4 4L19 7" />
-    </svg>
-  );
-}
-
-function PlusIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} className={className} aria-hidden="true">
-      <path strokeLinecap="round" d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
-function PauseIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <rect x="6" y="5" width="4" height="14" rx="1" />
-      <rect x="14" y="5" width="4" height="14" rx="1" />
-    </svg>
-  );
-}
-
-function PlayIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-      <path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5Z" />
-    </svg>
+    </PageBody>
   );
 }

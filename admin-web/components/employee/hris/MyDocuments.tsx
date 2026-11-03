@@ -271,7 +271,7 @@ export default function MyDocuments({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="w-full rounded-xl border-2 border-dashed border-slate-300 px-3 py-5 text-sm font-bold text-slate-600 hover:border-brand hover:text-brand disabled:opacity-60"
+            className="w-full rounded-lg border-2 border-dashed border-slate-300 px-3 py-5 text-sm font-medium text-slate-600 hover:border-accent hover:text-accent disabled:opacity-60"
           >
             {picked.length === 0 ? 'Choose file(s)…' : 'Choose different file(s)…'}
           </button>
@@ -294,13 +294,13 @@ export default function MyDocuments({
           )}
           {picked.length === 1 && (
             <label className="mt-4 block">
-              <span className="mb-1.5 block text-xs font-bold text-slate-600">Label (optional)</span>
+              <span className="mb-1 block text-xs font-medium text-slate-600">Label (optional)</span>
               <input
                 value={label}
                 onChange={e => setLabel(e.target.value)}
                 maxLength={80}
                 placeholder="e.g. SEE certificate"
-                className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
             </label>
           )}

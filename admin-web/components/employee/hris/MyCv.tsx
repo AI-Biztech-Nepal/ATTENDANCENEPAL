@@ -16,8 +16,8 @@ const EMPTY_EDUCATION = { degree: '', institution: '', board_university: '', yea
 const EMPTY_TRAINING = { title: '', provider: '', start_date: '', end_date: '' };
 const EMPTY_EXPERIENCE = { employer: '', role: '', description: '', start_date: '', end_date: '' };
 
-const INPUT = 'h-11 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium';
-const LABEL = 'mb-1.5 block text-xs font-bold text-slate-600';
+const INPUT = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
+const LABEL = 'mb-1 block text-xs font-medium text-slate-600';
 
 type Dialog = { kind: 'education' | 'training' | 'experience' | 'skill'; id: string | null } | null;
 
@@ -454,7 +454,7 @@ export default function MyCv({ employee, onSaveSkills }: { employee: Employee; o
                 value={experienceForm.description}
                 onChange={e => setExperienceForm(f => ({ ...f, description: e.target.value }))}
                 rows={2}
-                className="mb-3 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium"
+                className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
               />
               <div className="grid grid-cols-2 gap-3">
                 <div>

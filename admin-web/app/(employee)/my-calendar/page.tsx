@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
 import EmployeeCalendarView from '@/components/EmployeeCalendarView';
+import { PageBody } from '@/components/employee/parts';
 
 export default function MyCalendarPage() {
   usePageTitle('Calendar');
@@ -22,15 +23,11 @@ export default function MyCalendarPage() {
     });
   }, []);
 
+  if (loading) return <p className="p-4 text-center text-sm text-slate-500">Loading…</p>;
+  if (!employeeId) return <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>;
   return (
-    <>
-      {loading ? (
-        <p className="p-4 text-center text-sm text-slate-500">Loading…</p>
-      ) : !employeeId ? (
-        <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>
-      ) : (
-        <EmployeeCalendarView employeeId={employeeId} variant="portal" />
-      )}
-    </>
+    <PageBody>
+      <EmployeeCalendarView employeeId={employeeId} />
+    </PageBody>
   );
 }

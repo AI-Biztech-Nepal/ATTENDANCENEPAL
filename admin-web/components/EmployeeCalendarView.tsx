@@ -7,7 +7,6 @@ import MonthCalendar from '@/components/MonthCalendar';
 import CalendarViewSwitch, { type CalendarView } from '@/components/CalendarViewSwitch';
 import Badge from '@/components/Badge';
 import AttendanceLogTable, { type LogRow } from '@/components/AttendanceLogTable';
-import PortalCalendar from '@/components/employee/PortalCalendar';
 import { formatAdDate, formatDdMmYyyy, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
@@ -59,16 +58,10 @@ const CARD_STYLES: Record<CardKey, { label: string; bg: string; text: string }> 
   absent: { label: 'Absent Days', bg: 'bg-slate-100', text: 'text-slate-600' },
 };
 
-/** `portal` is the employee pages' own layout (components/employee/PortalCalendar.tsx);
- * the default one is what the owner console's Attendance Calendar shows. Both read
- * the same figures computed here. */
-export default function EmployeeCalendarView({
-  employeeId,
-  variant = 'default',
-}: {
-  employeeId: string;
-  variant?: 'default' | 'portal';
-}) {
+/** One person's attendance calendar: the month grid, the picked day, the "This Month" tiles, the
+ * daily log and the hours trend. The owner console shows it for whoever is picked; an employee's
+ * own Calendar page shows it for themselves. */
+export default function EmployeeCalendarView({ employeeId }: { employeeId: string }) {
   const { system } = useCalendarSystem();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -419,28 +412,6 @@ export default function EmployeeCalendarView({
     if (key === 'overtime') return formatHoursMinutes(monthSummary.overtimeMinutes);
     const count = monthSummary.entries[key].length;
     return `${count} day${count === 1 ? '' : 's'}`;
-  }
-
-  if (variant === 'portal') {
-    return (
-      <PortalCalendar
-        dayStatus={dayStatus}
-        leaveDates={leaveDates}
-        weekOffDates={mergedWeekOffDates}
-        selectedDate={selectedDate}
-        onSelectDate={d => setSelectedDate(cur => (cur === d ? null : d))}
-        onMonthChange={setVisibleDates}
-        todayKey={todayKey}
-        summary={monthSummary}
-        tableRows={tableRows}
-        chartData={chartData}
-        selectedDaySummary={selectedDaySummary}
-        selectedLeave={selectedLeave}
-        dayLoading={dayLoading}
-        expandedCard={expandedCard}
-        onExpandCard={setExpandedCard}
-      />
-    );
   }
 
   return (

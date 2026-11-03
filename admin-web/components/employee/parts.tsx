@@ -1,38 +1,14 @@
 import type { ReactNode } from 'react';
 
-/** Small pieces shared by the employee pages (Check In/Out first). They follow
- * the mobile app's look: the green hero panel, flat uppercase status tags. */
+/** Small pieces shared by the employee pages: the page spacing and a few icons. */
 
-/** The green panel at the top of an employee page. On a phone it is a full-bleed
- * band that continues the green header; from `lg` up it is a rounded panel
- * inside the content column. `pad` leaves room for the card that overlaps its
- * bottom edge: 'check' for Check In/Out's stats card, 'inner' for the other pages. */
-export function HeroPanel({ children, pad = 'inner' }: { children: ReactNode; pad?: 'check' | 'inner' }) {
-  const padding = pad === 'check' ? 'pb-[88px] lg:pb-[92px]' : 'pb-[60px] lg:pb-[76px]';
+/** The outer spacing every employee page uses: the content column's side padding on a computer,
+ * a 16px gutter on a phone (the shell's <main> adds none of its own). */
+export function PageBody({ children }: { children: ReactNode }) {
   return (
-    <section className={`bg-brand px-5 pt-1 text-white lg:rounded-[20px] lg:px-8 lg:pt-7 ${padding}`}>{children}</section>
-  );
-}
-
-const TAG_TONES = {
-  good: 'bg-[#e2f3e8] text-[#14532d]',
-  warning: 'bg-[#ffedd5] text-[#c2410c]',
-  critical: 'bg-[#fee2e2] text-[#b91c1c]',
-  info: 'bg-[#dbeafe] text-[#1d4ed8]',
-  neutral: 'bg-slate-200 text-slate-600',
-  purple: 'bg-[#f3e8ff] text-[#7e22ce]',
-  brand: 'bg-brand-light text-brand',
-} as const;
-
-export type TagTone = keyof typeof TAG_TONES;
-
-export function StatusTag({ tone, children }: { tone: TagTone; children: ReactNode }) {
-  return (
-    <span
-      className={`inline-block shrink-0 rounded-md px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.3px] ${TAG_TONES[tone]}`}
-    >
-      {children}
-    </span>
+    <div className="lg:px-8 lg:pb-10 lg:pt-7">
+      <div className="mx-4 mt-4 lg:mx-0 lg:mt-0">{children}</div>
+    </div>
   );
 }
 
@@ -87,14 +63,6 @@ export function ChevronLeftIcon({ className }: IconProps) {
   return (
     <svg {...SVG} strokeWidth={2.4} className={className}>
       <path strokeLinecap="round" strokeLinejoin="round" d="m15 6-6 6 6 6" />
-    </svg>
-  );
-}
-export function CheckCircleIcon({ className }: IconProps) {
-  return (
-    <svg {...SVG} strokeWidth={2} className={className}>
-      <circle cx="12" cy="12" r="9" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="m8.5 12.5 2.5 2.5 5-5" />
     </svg>
   );
 }

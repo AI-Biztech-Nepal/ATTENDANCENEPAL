@@ -24,8 +24,8 @@ import { Card, SubHeading } from './ui';
 
 const returnWord = (s: ReturnStatus) => (s === 'returned' ? 'Returned' : s === 'not_applicable' ? 'Not applicable' : 'Pending');
 
-const INPUT = 'h-11 w-full rounded-xl border border-slate-300 px-3 text-sm font-medium';
-const LABEL = 'mb-1.5 block text-xs font-bold text-slate-600';
+const INPUT = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
+const LABEL = 'mb-1 block text-xs font-medium text-slate-600';
 
 /** Your exit. With nothing started you can hand in a resignation; while HR hasn't begun working
  * on one you handed in you can change or withdraw it; after that — or for an exit HR started —
@@ -100,16 +100,16 @@ function Resignation({ sep, onChanged }: { sep: EmployeeSeparation | null; onCha
           </FactGrid>
         )}
         {error && !open && (
-          <p role="alert" className="mt-3 text-[13px] font-bold text-[#b91c1c]">
+          <p role="alert" className="mt-3 text-xs font-semibold text-critical">
             {error}
           </p>
         )}
         <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" onClick={start} disabled={busy} className="h-11 rounded-xl bg-accent px-5 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60">
+          <button type="button" onClick={start} disabled={busy} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-60">
             {sep ? 'Change' : 'Hand in resignation'}
           </button>
           {sep && (
-            <button type="button" onClick={withdraw} disabled={busy} className="h-11 rounded-xl border border-slate-300 bg-white px-5 text-sm font-semibold text-[#b91c1c] hover:bg-slate-50 disabled:opacity-60">
+            <button type="button" onClick={withdraw} disabled={busy} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-critical hover:bg-slate-50 disabled:opacity-60">
               {busy ? 'Withdrawing…' : 'Withdraw'}
             </button>
           )}
@@ -206,7 +206,7 @@ function ExitDetails({ sep }: { sep: EmployeeSeparation }) {
             )}
           </FactGrid>
           {shortfall !== null && shortfall > 0 && (
-            <p role="status" className="mt-3 text-[13px] font-bold text-[#c2410c]">
+            <p role="status" className="mt-3 text-xs font-semibold text-warning-text">
               {shortfall} day{shortfall === 1 ? '' : 's'} short of the required notice.
             </p>
           )}
