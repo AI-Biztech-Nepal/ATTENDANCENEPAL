@@ -24,6 +24,7 @@ import { contractAlerts, startOfToday } from '../lib/hrAlerts';
 import type { Branch, Department, Employee } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
+import DocumentRing from '../components/DocumentRing';
 import { Choice, CollapsibleCard, DateField, Field, InfoRow, LinkText, Notice, Sheet, SubHeading, confirmAsync } from '../components/hr/HrKit';
 import HistoryCard from '../components/hr/HistoryCard';
 import SeparationCard from '../components/hr/SeparationCard';
@@ -587,15 +588,17 @@ export default function EmployeeDetailScreen({ route }: any) {
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
       <View style={styles.headerCard}>
         <View style={styles.headerTop}>
-          {employee.profile_photo_url && !photoFailed ? (
-            <TouchableOpacity onPress={() => setPhotoOpen(true)} accessibilityRole="button" accessibilityLabel={`View photo of ${employee.name}`}>
-              <Image source={{ uri: employee.profile_photo_url }} style={styles.avatar} onError={() => setPhotoFailed(true)} />
-            </TouchableOpacity>
-          ) : (
-            <View style={[styles.avatar, styles.avatarFallback]}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
-          )}
+          <DocumentRing have={haveDocs} total={DOCUMENT_TYPES.length} onOpen={() => setTab('docs')}>
+            {employee.profile_photo_url && !photoFailed ? (
+              <TouchableOpacity onPress={() => setPhotoOpen(true)} accessibilityRole="button" accessibilityLabel={`View photo of ${employee.name}`}>
+                <Image source={{ uri: employee.profile_photo_url }} style={styles.avatar} onError={() => setPhotoFailed(true)} />
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.avatar, styles.avatarFallback]}>
+                <Text style={styles.avatarText}>{initials}</Text>
+              </View>
+            )}
+          </DocumentRing>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.name}>{employee.name}</Text>
             <Text style={styles.subtitle}>

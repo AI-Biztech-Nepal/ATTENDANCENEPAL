@@ -9,6 +9,7 @@ import { DOCUMENT_TYPES, type EmployeeDocument } from '../lib/employeeDocuments'
 import { EMPLOYMENT_STATUS_LABEL, STATUS_TONE, effectiveStatus, employmentTypeLabel } from '../lib/employeeProfile';
 import type { EmployeeSeparation } from '../lib/employeeSeparation';
 import Badge from '../components/Badge';
+import DocumentRing from '../components/DocumentRing';
 import DocumentsCard from '../components/hr/DocumentsCard';
 import MyOverviewCards from '../components/employee/MyOverviewCards';
 import MyRecordsCards from '../components/employee/MyRecordsCards';
@@ -169,13 +170,15 @@ export default function MyProfileScreen() {
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
       <View style={styles.headerCard}>
         <View style={styles.headerTop}>
-          {employee.profile_photo_url && !photoFailed ? (
-            <Image source={{ uri: employee.profile_photo_url }} style={styles.avatar} onError={() => setPhotoFailed(true)} accessibilityLabel={`Photo of ${employee.name}`} />
-          ) : (
-            <View style={[styles.avatar, styles.avatarFallback]}>
-              <Text style={styles.avatarText}>{initials}</Text>
-            </View>
-          )}
+          <DocumentRing have={haveDocs} total={DOCUMENT_TYPES.length} onOpen={() => setTab('docs')}>
+            {employee.profile_photo_url && !photoFailed ? (
+              <Image source={{ uri: employee.profile_photo_url }} style={styles.avatar} onError={() => setPhotoFailed(true)} accessibilityLabel={`Photo of ${employee.name}`} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarFallback]}>
+                <Text style={styles.avatarText}>{initials}</Text>
+              </View>
+            )}
+          </DocumentRing>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.name}>{employee.name}</Text>
             <Text style={styles.subtitle}>
