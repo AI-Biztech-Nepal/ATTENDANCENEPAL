@@ -30,7 +30,7 @@ function statusTitle(s: TodayStatus) {
  * highlighted and kept scrolled into view. With `statusOf`, each row also
  * shows how that person's day is going. Hidden below lg, where pages fall
  * back to EmployeePicker. It takes the width and the height its parent gives
- * it (the page puts the Team today card under it and caps the column's height).
+ * it (the page stretches it to the column's height, with the Team today card under it).
  */
 export default function EmployeeListPanel({
   employees,
