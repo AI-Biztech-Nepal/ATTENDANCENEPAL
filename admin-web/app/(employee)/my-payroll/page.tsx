@@ -629,8 +629,7 @@ export default function MyPayrollPage() {
                           return (
                             <tr key={row.date} className="h-[46px] border-t border-slate-100">
                               <td className="pl-5 text-sm font-extrabold tabular-nums">
-                                {shortDate(row.date)}
-                                <span className="ml-2 font-semibold text-slate-600">{weekdayOf(row.date)}</span>
+                                {shortDate(row.date)} <span className="ml-1 font-semibold text-slate-600">{weekdayOf(row.date)}</span>
                                 {!row.checkIn && (row.status === 'Week Off' || row.status === 'Holiday') && (
                                   <span className="ml-2.5 align-middle">
                                     <StatusTag tone="neutral">{row.status === 'Holiday' ? 'Holiday' : 'Week off'}</StatusTag>

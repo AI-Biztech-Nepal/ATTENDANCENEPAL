@@ -746,7 +746,8 @@ export default function CheckInPage() {
                             <tr key={row.key} className="h-14 border-t border-slate-100">
                               <td className="pl-5 text-sm font-extrabold">
                                 {label}
-                                {row.isToday && <span className="ml-2 rounded-md bg-brand-light px-2 py-[3px] align-middle text-[11px] font-bold text-brand">Today</span>}
+                                {row.isToday && ' '}
+                                {row.isToday && <span className="ml-1 rounded-md bg-brand-light px-2 py-[3px] align-middle text-[11px] font-bold text-brand">Today</span>}
                               </td>
                               <td className="text-sm font-semibold tabular-nums">{row.inText ?? <span className="text-slate-400">–</span>}</td>
                               <td className="text-sm tabular-nums">
