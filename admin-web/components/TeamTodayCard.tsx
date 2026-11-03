@@ -3,8 +3,7 @@
 import { formatAdDate, type CalendarSystem } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso } from '@/lib/shift';
-import { useTeamToday, type NextHoliday } from '@/lib/teamToday';
-import type { Employee } from '@/lib/types';
+import type { NextHoliday, TeamToday } from '@/lib/teamToday';
 
 /** "22–26 Kartik", "28 Kartik – 2 Mangsir", "26 Kartik" — in whichever calendar is active. */
 function holidayDates(h: NextHoliday, system: CalendarSystem) {
@@ -20,11 +19,12 @@ function holidayDates(h: NextHoliday, system: CalendarSystem) {
 
 /**
  * Who is in, late, absent or on leave today, as one bar and four counts, with the next holiday under
- * it. The numbers follow the same rules as the dashboard's attendance bar (see lib/teamToday.ts).
+ * it. Compact, so the employee list above it keeps the height. The numbers come from useTeamToday()
+ * (lib/teamToday.ts), which follows the same rules as the dashboard's attendance bar; `summary` is
+ * null until they arrive.
  */
-export default function TeamTodayCard({ employees }: { employees: Employee[] }) {
+export default function TeamTodayCard({ summary, nextHoliday }: { summary: TeamToday | null; nextHoliday: NextHoliday | null }) {
   const { system } = useCalendarSystem();
-  const { summary, nextHoliday } = useTeamToday(employees);
   const today = nepalTodayIso();
 
   const parts = [
@@ -38,37 +38,38 @@ export default function TeamTodayCard({ employees }: { employees: Employee[] }) 
   const summaryText = summary ? parts.map(p => `${p.value} ${p.label.toLowerCase()}`).join(', ') : 'Loading';
 
   return (
-    <section aria-label="Team today" className="w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section aria-label="Team today" className="w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-extrabold text-ink">Team today</h2>
-        <span className="text-sm font-semibold text-slate-500">{summary ? `${people} ${people === 1 ? 'person' : 'people'}` : '…'}</span>
+        <h2 className="text-sm font-extrabold text-ink">Team today</h2>
+        <span className="text-xs font-semibold text-slate-500">{summary ? `${people} ${people === 1 ? 'person' : 'people'}` : '…'}</span>
       </div>
 
-      <div role="img" aria-label={summaryText} className="mt-4 flex h-3 gap-0.5 overflow-hidden rounded-full bg-slate-100">
+      <div role="img" aria-label={summaryText} className="mt-3 flex h-2 gap-0.5 overflow-hidden rounded-full bg-slate-100">
+        {/* Segments are sized by weight, like the dashboard's bar, so the gaps between them don't squeeze a small one
+            away. People who are off today (a week-off or a holiday) are in none of the four, so the bar leaves their share open. */}
         {summary &&
           people > 0 &&
           parts
             .filter(p => (p.value ?? 0) > 0)
             .map(p => <span key={p.key} className={p.bar} style={{ flex: p.value }} />)}
-        {/* Segments are sized by weight, like the dashboard's bar, so the gaps between them don't squeeze a small one away. People who are off today (a week-off or a holiday) are in none of the four, so the bar leaves their share open. */}
         {summary && people > 0 && counted < people && <span className="bg-slate-200" style={{ flex: people - counted }} />}
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-3">
+      <dl className="mt-3 grid grid-cols-2 gap-2">
         {parts.map(p => (
-          <div key={p.key} className="flex items-center justify-between gap-1.5 rounded-2xl bg-slate-50 px-3 py-3">
-            <dt className="flex items-center gap-2 whitespace-nowrap text-[13px] font-semibold text-slate-600">
-              <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-[3px] ${p.dot}`} />
+          <div key={p.key} className="flex items-center justify-between gap-1.5 rounded-xl bg-slate-50 px-2.5 py-2">
+            <dt className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-slate-600">
+              <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-[2px] ${p.dot}`} />
               {p.label}
             </dt>
-            <dd className="m-0 text-lg font-extrabold tabular-nums text-ink">{p.value ?? '–'}</dd>
+            <dd className="m-0 text-sm font-extrabold tabular-nums text-ink">{p.value ?? '–'}</dd>
           </div>
         ))}
       </dl>
 
-      <div className="mt-4 flex items-start gap-2.5 border-t border-slate-100 pt-4 text-sm">
-        <FlagIcon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-purple-600" />
-        <p className="min-w-0 leading-5">
+      <div className="mt-3 flex items-start gap-2 border-t border-slate-100 pt-3 text-xs">
+        <FlagIcon className="mt-px h-4 w-4 shrink-0 text-purple-600" />
+        <p className="min-w-0 leading-4">
           {nextHoliday ? (
             <>
               <span className="font-semibold text-slate-500">{nextHoliday.start <= today ? 'Holiday today' : 'Next holiday'} · </span>

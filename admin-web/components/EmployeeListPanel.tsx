@@ -2,12 +2,33 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Avatar from './Avatar';
+import type { TodayStatus } from '@/lib/teamToday';
 import type { Employee } from '@/lib/types';
+
+// How each person's day reads at the right of their row: a dot and a word (or, for someone who came in
+// on time, the time they came in).
+const STATUS_DOT: Record<TodayStatus['kind'], string> = {
+  in: 'bg-good',
+  late: 'bg-warning',
+  leave: 'bg-info',
+  absent: 'bg-critical',
+  off: 'bg-slate-400',
+};
+function statusText(s: TodayStatus) {
+  if (s.kind === 'in') return s.time ?? 'In';
+  return { late: 'Late', leave: 'Leave', absent: 'Absent', off: 'Off' }[s.kind];
+}
+function statusTitle(s: TodayStatus) {
+  if (s.kind === 'in') return s.time ? `Came in at ${s.time}` : 'In';
+  if (s.kind === 'late') return s.time ? `Late — came in at ${s.time}` : 'Late';
+  return { leave: 'On leave today', absent: 'Absent today', off: 'Week-off or holiday today' }[s.kind];
+}
 
 /**
  * Always-visible employee list for master/detail pages (Attendance
  * Calendar): search at the top, one row per employee, the selected one
- * highlighted and kept scrolled into view. Hidden below lg, where pages fall
+ * highlighted and kept scrolled into view. With `statusOf`, each row also
+ * shows how that person's day is going. Hidden below lg, where pages fall
  * back to EmployeePicker. It takes the width and the height its parent gives
  * it (the page puts the Team today card under it and caps the column's height).
  */
@@ -15,10 +36,13 @@ export default function EmployeeListPanel({
   employees,
   value,
   onChange,
+  statusOf,
 }: {
   employees: Employee[];
   value: string;
   onChange: (id: string) => void;
+  /** Today's status for a person, or null when there is nothing to show (yet). */
+  statusOf?: (employeeId: string) => TodayStatus | null;
 }) {
   const [query, setQuery] = useState('');
   const listRef = useRef<HTMLUListElement>(null);
@@ -63,6 +87,7 @@ export default function EmployeeListPanel({
         {filtered.map(emp => {
           const selected = emp.id === value;
           const sub = [emp.employee_code, emp.department].filter(Boolean).join(' · ');
+          const status = statusOf?.(emp.id) ?? null;
           return (
             <li key={emp.id} data-id={emp.id}>
               <button
@@ -78,6 +103,12 @@ export default function EmployeeListPanel({
                   <span className={`block truncate text-sm ${selected ? 'font-extrabold text-accent' : 'font-semibold text-ink'}`}>{emp.name}</span>
                   {sub && <span className="block truncate text-xs text-slate-500">{sub}</span>}
                 </span>
+                {status && (
+                  <span title={statusTitle(status)} className="flex shrink-0 items-center gap-1.5 text-xs font-semibold tabular-nums text-slate-600">
+                    <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status.kind]}`} />
+                    {statusText(status)}
+                  </span>
+                )}
               </button>
             </li>
           );

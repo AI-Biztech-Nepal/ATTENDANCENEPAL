@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabase';
 import { fetchAll } from './leaveBalance';
-import { dateKey, isLate, presentEmployeeIds } from './metrics';
+import { dateKey, firstCheckIn, isLate, presentEmployeeIds } from './metrics';
 import {
   buildWeeklyPatternByEmployee,
   isWeekOff,
@@ -16,6 +16,11 @@ import { ATTENDANCE_LOG_COLUMNS } from './types';
 /** How the active staff stand today. `onTime` and `late` are the people who have punched in, split by
  * whether they were late; the rest of the team is `absent`, `onLeave` or off (`weekOff`). */
 export type TeamToday = { people: number; onTime: number; late: number; absent: number; onLeave: number; weekOff: number };
+
+/** One person's day so far, for the employee list: in on time (with the time they came in), late, on
+ * approved leave, absent, or off (a week-off or holiday). Someone excused from attendance who has not
+ * punched has none. */
+export type TodayStatus = { kind: 'in' | 'late' | 'leave' | 'absent' | 'off'; time: string | null };
 
 /** A holiday (or a run of consecutive days with the same name) — `end` is the last day. */
 export type NextHoliday = { name: string; start: string; end: string };
@@ -36,7 +41,7 @@ type Inputs = {
  * punched, are not on approved leave, are not excused from attendance and do not have a Week Off
  * today — by the company's weekly day or a holiday that covers them, or by their own roster. Late is
  * judged against the shift each person is actually on. */
-export function computeTeamToday(i: Inputs): TeamToday {
+export function computeTeamToday(i: Inputs): { summary: TeamToday; statuses: Map<string, TodayStatus> } {
   const active = i.employees.filter(e => e.status === 'active');
   const todayLogs = i.logs.filter(l => dateKey(l.punch_time) === i.today);
   const presentIds = presentEmployeeIds(i.logs, i.today);
@@ -52,6 +57,7 @@ export function computeTeamToday(i: Inputs): TeamToday {
   const weeklyPattern = buildWeeklyPatternByEmployee(i.weeklyPatternRows);
   const offToday = (e: Employee) => isWeekOff(resolveShiftForDate(e, i.shifts, i.today, dailyShiftByDate, weekOffDatesFor(e.gender), weeklyPattern));
 
+  const statuses = new Map<string, TodayStatus>();
   let late = 0;
   let present = 0;
   let absent = 0;
@@ -59,16 +65,26 @@ export function computeTeamToday(i: Inputs): TeamToday {
   let weekOff = 0;
   for (const emp of active) {
     const isPresent = presentIds.has(emp.id);
+    const isOff = offToday(emp);
+    const isAbsent = !todayIsCompanyOff && !isPresent && !i.onLeaveIds.has(emp.id) && !emp.attendance_exempt && !isOff;
+    if (i.onLeaveIds.has(emp.id)) onLeave += 1;
+    if (isOff) weekOff += 1;
+    if (isAbsent) absent += 1;
     if (isPresent) {
       present += 1;
       const empLogs = todayLogs.filter(l => l.employee_id === emp.id);
-      if (empLogs.length > 0 && isLate(emp, i.shifts, empLogs, i.today, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern)) late += 1;
-    }
-    if (i.onLeaveIds.has(emp.id)) onLeave += 1;
-    if (offToday(emp)) weekOff += 1;
-    if (!todayIsCompanyOff && !isPresent && !i.onLeaveIds.has(emp.id) && !emp.attendance_exempt && !offToday(emp)) absent += 1;
+      const wasLate = empLogs.length > 0 && isLate(emp, i.shifts, empLogs, i.today, dailyShiftByDate, weekOffDatesFor(emp.gender), weeklyPattern);
+      if (wasLate) late += 1;
+      const first = firstCheckIn(empLogs);
+      statuses.set(emp.id, {
+        kind: wasLate ? 'late' : 'in',
+        time: first ? new Date(first.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : null,
+      });
+    } else if (i.onLeaveIds.has(emp.id)) statuses.set(emp.id, { kind: 'leave', time: null });
+    else if (isOff) statuses.set(emp.id, { kind: 'off', time: null });
+    else if (isAbsent) statuses.set(emp.id, { kind: 'absent', time: null });
   }
-  return { people: active.length, onTime: Math.max(0, present - late), late, absent, onLeave, weekOff };
+  return { summary: { people: active.length, onTime: Math.max(0, present - late), late, absent, onLeave, weekOff }, statuses };
 }
 
 /** The first holiday on or after `today`, widened to the whole run if it spans several days. */
@@ -94,9 +110,14 @@ export function nextHolidayFrom(holidays: Pick<CompanyHoliday, 'holiday_date' | 
 /** What this hook reads itself; `holidays` are today's and the ones still to come. */
 type Loaded = Omit<Inputs, 'employees' | 'today'>;
 
-/** Today's numbers for the whole team, and the next holiday. `employees` is whoever the page already
- * loaded (the active staff); everything else is read here, once. `summary` is null until it arrives. */
-export function useTeamToday(employees: Employee[]): { summary: TeamToday | null; nextHoliday: NextHoliday | null } {
+/** Today's numbers for the whole team, each person's status, and the next holiday. `employees` is whoever
+ * the page already loaded (the active staff); everything else is read here, once. `summary` is null
+ * (and `statusOf` returns null) until it arrives. */
+export function useTeamToday(employees: Employee[]): {
+  summary: TeamToday | null;
+  nextHoliday: NextHoliday | null;
+  statusOf: (employeeId: string) => TodayStatus | null;
+} {
   const [data, setData] = useState<Loaded | null>(null);
   const today = nepalTodayIso();
 
@@ -131,7 +152,8 @@ export function useTeamToday(employees: Employee[]): { summary: TeamToday | null
     };
   }, [today]);
 
-  const summary = useMemo(() => (data ? computeTeamToday({ ...data, employees, today }) : null), [data, employees, today]);
+  const computed = useMemo(() => (data ? computeTeamToday({ ...data, employees, today }) : null), [data, employees, today]);
   const nextHoliday = useMemo(() => (data ? nextHolidayFrom(data.holidays, today) : null), [data, today]);
-  return { summary, nextHoliday };
+  const statusOf = useMemo(() => (id: string) => computed?.statuses.get(id) ?? null, [computed]);
+  return { summary: computed?.summary ?? null, nextHoliday, statusOf };
 }
