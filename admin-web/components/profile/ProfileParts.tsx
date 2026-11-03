@@ -192,6 +192,59 @@ export function DocumentProgress({ have, total, missing, onOpen }: { have: numbe
   );
 }
 
+const RING_SIZE = 112;
+const RING_STROKE = 5;
+const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
+
+/** A ring around the profile photo showing how much of the document checklist is on file:
+ * teal and closed when every kind is there, orange and part-filled while some are missing.
+ * `have` is null until the count is known (or when it can't be read) — then there is no ring. */
+export function DocumentRing({ have, total, onOpen, children }: { have: number | null; total: number; onOpen: () => void; children: ReactNode }) {
+  const known = have !== null && total > 0;
+  const complete = known && have >= total;
+  const label = known ? (complete ? `All ${total} documents on file` : `${have} of ${total} documents on file — ${total - have} missing`) : undefined;
+  return (
+    <div className="relative flex shrink-0 items-center justify-center" style={{ width: RING_SIZE, height: RING_SIZE }} title={label}>
+      {known && (
+        <svg viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`} className="absolute inset-0 -rotate-90" aria-hidden="true">
+          <circle cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_RADIUS} fill="none" strokeWidth={RING_STROKE} className="stroke-slate-200" />
+          {have > 0 && (
+            <circle
+              cx={RING_SIZE / 2}
+              cy={RING_SIZE / 2}
+              r={RING_RADIUS}
+              fill="none"
+              strokeWidth={RING_STROKE}
+              strokeLinecap="round"
+              strokeDasharray={`${RING_LENGTH * Math.min(have / total, 1)} ${RING_LENGTH}`}
+              className={`transition-[stroke-dasharray] duration-500 ${complete ? 'stroke-good' : 'stroke-warning'}`}
+            />
+          )}
+        </svg>
+      )}
+      {children}
+      {known && (
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-label={`${label}. Open documents`}
+          className={`absolute -bottom-1 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full border-2 border-white px-2 py-0.5 text-[11px] font-extrabold leading-none hover:brightness-95 ${
+            complete ? 'bg-good-bg text-good-text' : 'bg-warning-bg text-warning-text'
+          }`}
+        >
+          {complete && (
+            <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={3.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m5 12.5 4.5 4.5L19 7.5" />
+            </svg>
+          )}
+          {have}/{total}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function ReportingLine({
   manager,
   directReports,

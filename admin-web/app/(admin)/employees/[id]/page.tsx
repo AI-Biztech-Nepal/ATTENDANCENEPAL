@@ -23,6 +23,7 @@ import {
   ProfileCard,
   ProfileTabs,
   ReportingLine,
+  DocumentRing,
   type AttentionItem,
   type ProfileTab,
 } from '@/components/profile/ProfileParts';
@@ -1138,24 +1139,26 @@ export default function EmployeeCvPage() {
 
       <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-center gap-5">
-          <button
-            type="button"
-            onClick={employee.profile_photo_url ? () => setViewingPhoto(true) : openPhotoPicker}
-            title={employee.profile_photo_url ? 'View photo' : 'Add photo'}
-            aria-label={employee.profile_photo_url ? `View ${employee.name}'s photo` : 'Add photo'}
-            className={`relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full text-2xl font-semibold text-accent ${
-              employee.profile_photo_url ? 'bg-accent/10' : 'border-2 border-dashed border-accent/40 bg-accent/5 hover:bg-accent/10'
-            }`}
-          >
-            {uploadingPhoto ? (
-              <span className="text-sm">…</span>
-            ) : employee.profile_photo_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
-            ) : (
-              <CameraIcon className="h-7 w-7" />
-            )}
-          </button>
+          <DocumentRing have={haveDocs} total={DOCUMENT_TYPES.length} onOpen={() => setTab('documents')}>
+            <button
+              type="button"
+              onClick={employee.profile_photo_url ? () => setViewingPhoto(true) : openPhotoPicker}
+              title={employee.profile_photo_url ? 'View photo' : 'Add photo'}
+              aria-label={employee.profile_photo_url ? `View ${employee.name}'s photo` : 'Add photo'}
+              className={`relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full text-2xl font-semibold text-accent ${
+                employee.profile_photo_url ? 'bg-accent/10' : 'border-2 border-dashed border-accent/40 bg-accent/5 hover:bg-accent/10'
+              }`}
+            >
+              {uploadingPhoto ? (
+                <span className="text-sm">…</span>
+              ) : employee.profile_photo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={employee.profile_photo_url} alt={employee.name} className="h-full w-full object-cover" />
+              ) : (
+                <CameraIcon className="h-7 w-7" />
+              )}
+            </button>
+          </DocumentRing>
           <div className="min-w-0 flex-1 basis-80">
             <h1 className="flex flex-wrap items-center gap-2 text-[28px] font-extrabold leading-tight tracking-tight text-ink">
               {employee.name}
