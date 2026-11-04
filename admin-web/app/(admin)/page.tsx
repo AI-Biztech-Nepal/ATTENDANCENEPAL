@@ -453,6 +453,24 @@ export default function DashboardPage() {
   const lastPunch = feed[0];
   const maxDept = Math.max(1, ...deptBreakdown.map(d => d.value));
 
+  // The three tiles under the weekly chart, all read off the same seven days it draws.
+  const weekTotal = trend.reduce((sum, d) => sum + d.present, 0);
+  const weekAverage = trend.length ? Math.round((weekTotal / trend.length) * 10) / 10 : 0;
+  const busiest = trend.reduce((best, d) => (d.present > best.present ? d : best), trend[0] ?? { day: '—', present: 0 });
+  const presentToday = trend[trend.length - 1]?.present ?? 0;
+  const presentYesterday = trend[trend.length - 2]?.present ?? 0;
+  const dayDelta = presentToday - presentYesterday;
+  const weekGlance = [
+    { label: 'Daily average', value: String(weekAverage), sub: 'staff present per day', ink: '#064e3b' },
+    { label: 'Busiest day', value: busiest.present > 0 ? busiest.day : '—', sub: busiest.present > 0 ? `${busiest.present} present` : 'No punches yet', ink: '#064e3b' },
+    {
+      label: 'Today vs yesterday',
+      value: dayDelta > 0 ? `+${dayDelta}` : String(dayDelta),
+      sub: `${presentToday} today · ${presentYesterday} yesterday`,
+      ink: dayDelta > 0 ? '#166534' : dayDelta < 0 ? '#b91c1c' : '#475569',
+    },
+  ];
+
   return (
     <>
       <p className="mb-5 text-[13px] font-bold text-[#586474]">{todayLine}</p>
@@ -590,13 +608,16 @@ export default function DashboardPage() {
       </div>
 
       <div className="mt-5 flex flex-wrap gap-5">
-        <section className="min-w-0 flex-[2_1_560px] rounded-[18px] border border-slate-200 bg-white px-6 py-5">
+        <section className="flex min-w-0 flex-[2_1_560px] flex-col rounded-[18px] border border-slate-200 bg-white px-6 py-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-base font-extrabold text-ink">Weekly attendance</h2>
             <span className="text-xs font-bold text-[#586474]">Present each day · last 7 days</span>
           </div>
-          <div className="mt-[18px]">
-            <ResponsiveContainer width="100%" height={230}>
+          {/* The Live activity card beside this one is taller, so the chart takes whatever height is left
+              (never less than 230px) and the three week-at-a-glance tiles sit under it — no empty gap. */}
+          <div className="relative mt-[18px] min-h-[230px] flex-1">
+            <div className="absolute inset-0">
+              <ResponsiveContainer width="100%" height="100%">
               <BarChart data={trend} margin={{ top: 22, right: 8, left: 8, bottom: 0 }} barCategoryGap="18%">
                 <CartesianGrid vertical={false} stroke="#e2e8f0" strokeDasharray="4 4" />
                 <XAxis dataKey="day" tick={{ fontSize: 12, fontWeight: 700, fill: '#586474' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
@@ -613,7 +634,19 @@ export default function DashboardPage() {
                   ))}
                 </Bar>
               </BarChart>
-            </ResponsiveContainer>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
+            {weekGlance.map(g => (
+              <div key={g.label} className="rounded-xl bg-slate-50 px-3.5 py-2.5">
+                <span className="block text-xs font-bold text-[#586474]">{g.label}</span>
+                <span className="mt-0.5 block text-xl font-extrabold leading-tight" style={{ color: g.ink }}>
+                  {g.value}
+                </span>
+                <span className="block text-xs font-semibold text-[#586474]">{g.sub}</span>
+              </div>
+            ))}
           </div>
         </section>
 
