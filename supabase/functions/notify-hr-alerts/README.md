@@ -57,7 +57,13 @@ A dry run shows what *would* be sent, without sending or marking anything:
 curl -X POST "https://<project-ref>.supabase.co/functions/v1/notify-hr-alerts?dry=1" \
   -H "Authorization: Bearer <service role key>" -H "x-cron-secret: <CRON_SECRET>"
 ```
-Without `?dry=1` it sends for real. Check the schedule with
+Without `?dry=1` it sends for real. To check the email setup on its own, send yourself one test email — it
+answers with what Resend said (for example "domain is not verified"):
+```
+curl -X POST "https://<project-ref>.supabase.co/functions/v1/notify-hr-alerts?test_email=you@example.com" \
+  -H "Authorization: Bearer <service role key>" -H "x-cron-secret: <CRON_SECRET>"
+```
+Check the schedule with
 `select * from cron.job where jobname = 'notify-hr-alerts-daily';` and past runs with
 `select status, return_message from cron.job_run_details order by start_time desc limit 5;`.
 

@@ -105,6 +105,7 @@ async function sendPush(
         if (ticket?.status === 'ok') pushed++;
         // The phone uninstalled the app or turned notifications off for good — stop trying it.
         else if (ticket?.details?.error === 'DeviceNotRegistered' && group[i]) dead.push(group[i].id);
+        else console.error('Expo rejected a push:', JSON.stringify(ticket));
       });
     } catch (e) {
       console.error('Expo push request failed:', e);
@@ -112,6 +113,24 @@ async function sendPush(
   }
   if (dead.length > 0) await supabase.from('push_tokens').delete().in('id', dead);
   return pushed;
+}
+
+/** One email through Resend, returning what Resend said, so a setup problem (an unverified sending domain, a
+ * wrong key) can be read instead of guessed at. */
+export async function sendEmail(
+  fetchFn: typeof fetch,
+  env: Env,
+  to: string,
+  subject: string,
+  text: string
+): Promise<{ ok: boolean; status: number; detail: string }> {
+  if (!env.resendKey || !env.emailFrom) return { ok: false, status: 0, detail: 'RESEND_API_KEY and ALERT_EMAIL_FROM are not both set' };
+  const res = await fetchFn(RESEND_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.resendKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: env.emailFrom, to: [to], subject, text }),
+  });
+  return { ok: res.ok, status: res.status, detail: res.ok ? '' : await res.text().catch(() => '') };
 }
 
 async function sendEmails(
@@ -130,12 +149,9 @@ async function sendEmails(
       const { data } = await supabase.auth.admin.getUserById(id);
       const to: string | undefined = data?.user?.email;
       if (!to) continue;
-      const res = await fetchFn(RESEND_URL, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${env.resendKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: env.emailFrom, to: [to], subject: title, text }),
-      });
-      if (res.ok) emailed++;
+      const sent = await sendEmail(fetchFn, env, to, title, text);
+      if (sent.ok) emailed++;
+      else console.error(`Resend rejected the alert email to ${to}:`, sent.status, sent.detail);
     } catch (e) {
       console.error('Alert email failed:', e);
     }

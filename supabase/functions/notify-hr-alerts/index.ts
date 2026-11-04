@@ -8,9 +8,11 @@
 // See supabase/functions/notify-hr-alerts/README.md for the one-time setup this needs.
 //
 // Add ?dry=1 to see what would be sent, without sending anything or marking it as announced.
+// Add ?test_email=you@example.com to send one test email to that address and see what Resend answered
+// (the quickest way to check the email secrets and the sending domain).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { run } from './run.ts';
+import { run, sendEmail } from './run.ts';
 
 Deno.serve(async req => {
   try {
@@ -21,20 +23,24 @@ Deno.serve(async req => {
       return new Response('Not authorized', { status: 401 });
     }
 
+    const env = {
+      appUrl: Deno.env.get('APP_URL') ?? undefined,
+      resendKey: Deno.env.get('RESEND_API_KEY') ?? undefined,
+      emailFrom: Deno.env.get('ALERT_EMAIL_FROM') ?? undefined,
+    };
+    const params = new URL(req.url).searchParams;
+    const headers = { 'Content-Type': 'application/json' };
+
+    const testEmail = params.get('test_email');
+    if (testEmail) {
+      const sent = await sendEmail(fetch, env, testEmail, 'Test from notify-hr-alerts', 'If you can read this, email alerts are set up correctly.');
+      return new Response(JSON.stringify(sent), { headers });
+    }
+
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const result = await run(supabase, { now: new Date(), dry: params.get('dry') === '1', env, fetchFn: fetch });
 
-    const result = await run(supabase, {
-      now: new Date(),
-      dry: new URL(req.url).searchParams.get('dry') === '1',
-      env: {
-        appUrl: Deno.env.get('APP_URL') ?? undefined,
-        resendKey: Deno.env.get('RESEND_API_KEY') ?? undefined,
-        emailFrom: Deno.env.get('ALERT_EMAIL_FROM') ?? undefined,
-      },
-      fetchFn: fetch,
-    });
-
-    return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(result), { headers });
   } catch (err) {
     console.error('notify-hr-alerts failed:', err);
     return new Response('Internal error', { status: 500 });
