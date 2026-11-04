@@ -10,6 +10,8 @@ import { formatTodayLine } from '@/lib/calendar';
 import { nepalTodayIso } from '@/lib/shift';
 import ConfigWarning from './ConfigWarning';
 import CalendarSystemSwitch from './CalendarSystemSwitch';
+import EmployeeBell from './EmployeeBell';
+import { useMyNotifications } from '@/lib/employeeNotifications';
 import BodyFontClass from './BodyFontClass';
 
 const TABS = [
@@ -53,6 +55,8 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
   const [designation, setDesignation] = useState<string | null>(null);
   const [linked, setLinked] = useState(true);
   const [isHr, setIsHr] = useState(false);
+  // One fetch for both headers (phone and computer); reloaded as the person moves around the portal.
+  const notifications = useMyNotifications(pathname);
 
   useEffect(() => {
     if (!supabaseConfigured) return;
@@ -145,6 +149,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
             <h1 className="min-w-0 flex-1 truncate text-xl font-extrabold text-white">{title}</h1>
           )}
           <CalendarSystemSwitch variant="onDark" />
+          <EmployeeBell notes={notifications} variant="onDark" />
           <AccountMenu variant="phone" {...account} />
         </div>
       </header>
@@ -164,6 +169,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
           <div className="flex shrink-0 items-center gap-3.5">
             <span className="hidden text-[13px] font-semibold tabular-nums text-slate-600 xl:inline">{formatTodayLine(nepalTodayIso())}</span>
             <CalendarSystemSwitch variant="portal" />
+            <EmployeeBell notes={notifications} variant="portal" />
             <span aria-hidden="true" className="h-8 w-px bg-slate-200" />
             <AccountMenu variant="desktop" {...account} />
           </div>

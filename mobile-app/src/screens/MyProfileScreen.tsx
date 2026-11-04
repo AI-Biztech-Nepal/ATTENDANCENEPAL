@@ -26,12 +26,18 @@ type ProfileDetails = Partial<
 /** The employee's own profile, laid out like the admin's employee screen: a header, then Overview /
  * Records / Docs / Exit. HR sets employment and pay; the employee edits their own details, CV,
  * documents and resignation (each in its own sheet). */
-export default function MyProfileScreen() {
+export default function MyProfileScreen({ route }: any) {
   const { system } = useCalendarSystem();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('overview');
+  // `tab` is set when the notification bell opens the Exit tab; `at` changes on every open so a repeat counts.
+  const startTab = route?.params?.tab as Tab | undefined;
+  const openedAt = route?.params?.at as number | undefined;
+  const [tab, setTab] = useState<Tab>(startTab ?? 'overview');
+  useEffect(() => {
+    if (startTab) setTab(startTab);
+  }, [startTab, openedAt]);
   const [photoFailed, setPhotoFailed] = useState(false);
 
   // The rest of what HR keeps on file. `undefined` = still loading, null = couldn't be read.

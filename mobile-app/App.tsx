@@ -62,7 +62,8 @@ export type EmployeeTabParamList = {
   Calendar: undefined;
   Payroll: undefined;
   Tasks: undefined;
-  Profile: undefined;
+  // `tab` opens the Profile on that tab (the notification bell sends 'exit'); `at` makes a repeat open count as new.
+  Profile: { tab?: 'overview' | 'records' | 'docs' | 'exit'; at?: number } | undefined;
 };
 const EmployeeTab = createBottomTabNavigator<EmployeeTabParamList>();
 

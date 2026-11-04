@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
 import { useCompanyName } from '@/lib/companyName';
@@ -39,6 +39,11 @@ export default function MyProfilePage() {
 
   // The rest of what HR keeps on file. `undefined` = still loading, null = couldn't be read.
   const [tab, setTab] = useState<'overview' | 'records' | 'documents' | 'exit'>('overview');
+  // "?tab=exit" — what the notification bell links to — opens that tab.
+  const wantedTab = useSearchParams().get('tab');
+  useEffect(() => {
+    if (wantedTab === 'overview' || wantedTab === 'records' || wantedTab === 'documents' || wantedTab === 'exit') setTab(wantedTab);
+  }, [wantedTab]);
   const [docs, setDocs] = useState<EmployeeDocument[] | null | undefined>(undefined);
   const [sep, setSep] = useState<EmployeeSeparation | null | undefined>(undefined);
   const [managerName, setManagerName] = useState<string | null>(null);
