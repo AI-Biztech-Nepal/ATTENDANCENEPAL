@@ -526,11 +526,11 @@ export default function CheckInPage() {
     <PageBody>
       {view === 'menu' && (
         <>
-          <section className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-gradient-to-r from-accent/10 via-accent/5 to-transparent p-4 shadow-sm sm:p-6">
+          <section className={`mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl p-4 shadow-sm ring-1 ring-inset sm:p-6 ${TILE_BOX}`}>
             <div className="min-w-0">
-              <h2 className="truncate text-xl font-bold text-ink">Namaste{firstName ? `, ${firstName}` : ''}</h2>
-              <p className="mt-0.5 text-sm text-slate-500">{todayLine}</p>
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
+              <h2 className="truncate text-xl font-bold text-emerald-900">Namaste{firstName ? `, ${firstName}` : ''}</h2>
+              <p className="mt-0.5 text-sm text-emerald-900/70">{todayLine}</p>
+              <p className="mt-2 flex items-center gap-1.5 text-xs text-emerald-900/60">
                 <PinIcon className="h-3.5 w-3.5 shrink-0" />
                 Uses your GPS location · approved by Admin/HR
               </p>
