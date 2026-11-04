@@ -166,6 +166,8 @@ export default function SeparationCard({ employee, onEmployeeChanged, defaultOpe
   const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null);
+  // When the last save finished — the button says "Saved" for a few seconds instead of just going dull.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [makingPdf, setMakingPdf] = useState(false);
 
   const hasLeft = employee.status === 'inactive';
@@ -189,10 +191,17 @@ export default function SeparationCard({ employee, onEmployeeChanged, defaultOpe
 
   const initial = useMemo(() => (sep ? toForm(sep, employee) : null), [sep, employee]);
   const dirty = !!form && !!initial && JSON.stringify(form) !== JSON.stringify(initial);
+  const justSaved = savedAt !== null && !dirty;
+  useEffect(() => {
+    if (savedAt === null) return;
+    const timer = setTimeout(() => setSavedAt(null), 4000);
+    return () => clearTimeout(timer);
+  }, [savedAt]);
 
   /** Update fields, filling in today's date for a step that has just been ticked off. */
   function change(patch: Partial<Form>) {
     setMessage(null);
+    setSavedAt(null);
     setForm(f => {
       if (!f) return f;
       const next = { ...f, ...patch };
@@ -253,6 +262,7 @@ export default function SeparationCard({ employee, onEmployeeChanged, defaultOpe
     setSep(data as EmployeeSeparation);
     setForm(toForm(data as EmployeeSeparation, { ...employee, resigned_at: hasLeft && form.last_working_on ? form.last_working_on : employee.resigned_at }));
     setMessage({ kind: 'ok', text: 'Saved.' });
+    setSavedAt(Date.now());
   }
 
   async function handleCancelSeparation() {
@@ -463,10 +473,15 @@ export default function SeparationCard({ employee, onEmployeeChanged, defaultOpe
             <Notice tone="warning">{`${openItems.length} checklist item${openItems.length === 1 ? ' is' : 's are'} still open: ${openItems.map(i => i.label).join(', ')}.`}</Notice>
           )}
 
-          {message && <Notice tone={message.kind === 'error' ? 'error' : 'ok'}>{message.text}</Notice>}
+          {message && <Notice tone={message.kind === 'error' ? 'error' : 'ok'}>{message.kind === 'ok' ? `✓ ${message.text} Your changes are stored.` : message.text}</Notice>}
 
           <View style={styles.buttons}>
-            <Button label={busy ? 'Saving…' : 'Save changes'} onPress={handleSave} disabled={busy || !dirty} />
+            {justSaved ? (
+              // Not greyed out: for a few seconds it reads as a clear "done" instead of a dead button.
+              <Button label="✓ Saved" tone="ghost" onPress={() => {}} />
+            ) : (
+              <Button label={busy ? 'Saving…' : 'Save changes'} onPress={handleSave} disabled={busy || !dirty} />
+            )}
             {dirty && (
               <Button
                 label="Discard changes"

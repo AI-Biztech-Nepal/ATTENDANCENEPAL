@@ -166,6 +166,8 @@ export default function EmployeeSeparation({ employee, onEmployeeChanged }: { em
   const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null);
+  // When the last save finished — the button says "Saved" for a few seconds instead of just going dull.
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
 
   const hasLeft = employee.status === 'inactive';
@@ -189,10 +191,17 @@ export default function EmployeeSeparation({ employee, onEmployeeChanged }: { em
 
   const initial = useMemo(() => (sep ? toForm(sep, employee) : null), [sep, employee]);
   const dirty = !!form && !!initial && JSON.stringify(form) !== JSON.stringify(initial);
+  const justSaved = savedAt !== null && !dirty;
+  useEffect(() => {
+    if (savedAt === null) return;
+    const timer = setTimeout(() => setSavedAt(null), 4000);
+    return () => clearTimeout(timer);
+  }, [savedAt]);
 
   /** Update fields, filling in today's date for a step that has just been ticked off. */
   function change(patch: Partial<Form>) {
     setMessage(null);
+    setSavedAt(null);
     setForm(f => {
       if (!f) return f;
       const next = { ...f, ...patch };
@@ -262,6 +271,7 @@ export default function EmployeeSeparation({ employee, onEmployeeChanged }: { em
     setSep(data as EmployeeSeparation);
     setForm(toForm(data as EmployeeSeparation, { ...employee, resigned_at: hasLeft && form.last_working_on ? form.last_working_on : employee.resigned_at }));
     setMessage({ kind: 'ok', text: 'Saved.' });
+    setSavedAt(Date.now());
   }
 
   async function handleCancelSeparation() {
@@ -664,8 +674,15 @@ export default function EmployeeSeparation({ employee, onEmployeeChanged }: { em
           </div>
 
           {message && (
-            <p className={`text-sm ${message.kind === 'error' ? 'text-critical' : 'text-good-text'}`} role={message.kind === 'error' ? 'alert' : 'status'}>
-              {message.text}
+            <p
+              className={
+                message.kind === 'error'
+                  ? 'text-sm text-critical'
+                  : 'rounded-lg border border-good/30 bg-good-bg px-3 py-2 text-sm font-semibold text-good-text'
+              }
+              role={message.kind === 'error' ? 'alert' : 'status'}
+            >
+              {message.kind === 'ok' ? `✓ ${message.text} Your changes are stored.` : message.text}
             </p>
           )}
 
@@ -674,9 +691,14 @@ export default function EmployeeSeparation({ employee, onEmployeeChanged }: { em
               type="button"
               onClick={handleSave}
               disabled={busy || !dirty}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+              title={!dirty && !justSaved ? 'Nothing to save yet — change something first' : undefined}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                justSaved
+                  ? 'border border-good/30 bg-good-bg text-good-text disabled:opacity-100'
+                  : 'bg-accent text-white hover:bg-accent/90 disabled:opacity-50'
+              }`}
             >
-              {busy ? 'Saving…' : 'Save changes'}
+              {busy ? 'Saving…' : justSaved ? '✓ Saved' : 'Save changes'}
             </button>
             {dirty && (
               <button
