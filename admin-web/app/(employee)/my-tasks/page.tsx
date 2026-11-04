@@ -292,8 +292,11 @@ export default function MyTasksPage() {
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px] lg:items-start">
-        <div className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm">
+      {/* One grid for the whole page: the long leaderboard on the right spans every row, so the chart and
+          hours card slot in under the tasks instead of leaving that column empty beside it. The last row
+          is the stretchy one, so the leaderboard's extra height doesn't open gaps between the left cards. */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[auto_auto_1fr] lg:items-start">
+        <div className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm lg:col-start-1 lg:row-start-1">
           <div className="divide-y divide-slate-100 md:hidden">
             {filtered.map(t => (
               <div key={t.id} className={`p-4 ${runningLog?.task_id === t.id ? 'bg-accent/5' : ''}`}>
@@ -343,13 +346,15 @@ export default function MyTasksPage() {
           </div>
         </div>
 
-        <PointsCard employeeId={employeeId} />
-      </div>
+        <div className="lg:col-start-2 lg:row-span-3 lg:row-start-1">
+          <PointsCard employeeId={employeeId} />
+        </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px] lg:items-start">
-        <TaskHoursChart logs={logs} tasks={tasks} />
+        <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+          <TaskHoursChart logs={logs} tasks={tasks} />
+        </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 lg:col-start-1 lg:row-start-3">
           <h2 className="mb-3 text-sm font-semibold text-ink">Hours by Task</h2>
           {taskTotals.length === 0 ? (
             <p className="text-sm text-slate-400">No time logged yet. Accept a task to start the timer.</p>
