@@ -411,12 +411,13 @@ export default function DashboardPage() {
   // Today's attendance bar: late arrivals are a subset of present, so on time
   // is the rest. Each count opens the same name list as before.
   const onTimeCount = Math.max(0, presentIds.size - lateCount);
-  const segments: { key: string; label: string; count: number; color: string; detail: DetailKey }[] = [
-    { key: 'onTime', label: 'On time', count: onTimeCount, color: '#15803d', detail: 'present' },
-    { key: 'late', label: 'Late', count: lateCount, color: '#d97706', detail: 'late' },
-    { key: 'leave', label: 'On leave', count: onLeaveIds.size, color: '#2563eb', detail: 'leave' },
-    { key: 'absent', label: 'Absent', count: absentCount, color: '#dc2626', detail: 'absent' },
-    { key: 'weekOff', label: 'Week-off', count: weekOffCount, color: '#94a3b8', detail: 'weekOff' },
+  // `color` fills the bar; `ink` is the same hue darkened so a number or icon on its own tint reads at 4.5:1.
+  const segments: { key: string; label: string; count: number; color: string; ink: string; icon: React.ReactNode; detail: DetailKey }[] = [
+    { key: 'onTime', label: 'On time', count: onTimeCount, color: '#15803d', ink: '#166534', icon: <CheckCircleGlyph />, detail: 'present' },
+    { key: 'late', label: 'Late', count: lateCount, color: '#d97706', ink: '#92400e', icon: <ClockGlyph />, detail: 'late' },
+    { key: 'leave', label: 'On leave', count: onLeaveIds.size, color: '#2563eb', ink: '#1d4ed8', icon: <UmbrellaGlyph />, detail: 'leave' },
+    { key: 'absent', label: 'Absent', count: absentCount, color: '#dc2626', ink: '#b91c1c', icon: <CrossCircleGlyph />, detail: 'absent' },
+    { key: 'weekOff', label: 'Week-off', count: weekOffCount, color: '#94a3b8', ink: '#475569', icon: <MoonGlyph />, detail: 'weekOff' },
   ];
   const shareOf = (n: number) => (activeEmployees.length ? Math.round((n / activeEmployees.length) * 100) : 0);
   const allOnline = devices.length > 0 && devices.every(d => d.status === 'online');
@@ -457,7 +458,7 @@ export default function DashboardPage() {
       <p className="mb-5 text-[13px] font-bold text-[#586474]">{todayLine}</p>
 
       <div className="flex flex-wrap gap-5">
-        <section className="min-w-0 flex-[2_1_560px] rounded-[18px] border border-slate-200 bg-white px-6 py-[22px]">
+        <section className="min-w-0 flex-[2_1_560px] rounded-[18px] border border-[#d5e6dc] bg-[linear-gradient(180deg,#eef8f2_0%,#ffffff_48%)] px-6 py-[22px] shadow-[0_1px_2px_rgba(6,78,59,0.04),0_8px_24px_-14px_rgba(6,78,59,0.22)]">
           <div className="flex flex-wrap items-center justify-between gap-2.5">
             <h2 className="text-[13px] font-extrabold tracking-[0.06em] text-[#586474]">TODAY&apos;S ATTENDANCE</h2>
             {devices.length > 0 && (
@@ -474,51 +475,71 @@ export default function DashboardPage() {
           <div className="mt-2.5 flex flex-wrap items-baseline gap-2.5">
             <button
               onClick={() => setDetailKey('present')}
-              className="text-[52px] font-extrabold leading-none tracking-[-0.03em] text-ink hover:text-brand"
+              className="text-[56px] font-extrabold leading-none tracking-[-0.03em] text-brand-deep hover:text-brand"
             >
               {presentIds.size}
             </button>
             <span className="text-lg font-bold text-[#586474]">of {activeEmployees.length} checked in</span>
-            <span className="rounded-full bg-brand-light px-2.5 py-1 text-[13px] font-extrabold text-brand">{attendancePct}%</span>
+            <span className="rounded-full bg-brand px-2.5 py-1 text-[13px] font-extrabold text-white">{attendancePct}%</span>
             {lastPunch && (
-              <span className="ml-auto text-[13px] font-semibold text-[#586474]">
-                Last punch · {lastPunch.employee_name} {PUNCH_VERB[lastPunch.punch_type] ?? 'punched'} at {timeOf(lastPunch.punch_time)}
+              <span className="ml-auto inline-flex items-center gap-2 self-center rounded-full bg-white px-3 py-1.5 text-[13px] font-semibold text-[#586474] shadow-[0_1px_2px_rgba(15,23,42,0.06)] ring-1 ring-slate-200">
+                <span className="relative flex h-2 w-2" aria-hidden="true">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-50 motion-reduce:animate-none" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-brand" />
+                </span>
+                <span>
+                  Last punch · <span className="font-extrabold text-ink">{lastPunch.employee_name}</span> {PUNCH_VERB[lastPunch.punch_type] ?? 'punched'} at {timeOf(lastPunch.punch_time)}
+                </span>
               </span>
             )}
           </div>
           <div
             role="img"
             aria-label={segments.filter(s => s.count > 0).map(s => `${s.label} ${s.count}`).join(', ')}
-            className="mt-[18px] flex h-3.5 gap-[3px] overflow-hidden rounded-md bg-slate-100"
+            className="mt-[18px] flex h-4 gap-[3px] overflow-hidden rounded-full bg-slate-100"
           >
             {segments
               .filter(s => s.count > 0)
-              .map(s => (
-                <span key={s.key} title={`${s.label} · ${s.count} (${shareOf(s.count)}%)`} style={{ flex: s.count, backgroundColor: s.color }} />
+              .map((s, i) => (
+                <span
+                  key={s.key}
+                  title={`${s.label} · ${s.count} (${shareOf(s.count)}%)`}
+                  className="att-seg rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.28)]"
+                  style={{ flex: s.count, backgroundColor: s.color, animationDelay: `${i * 80}ms` }}
+                />
               ))}
           </div>
-          {/* Each tile takes its status colour (a soft wash plus a coloured number); a status nobody is in
-              goes quiet and grey so the tiles that matter stand out. The small % is the share of active staff. */}
+          {/* Each tile wears its status: a tinted wash and hairline, a drawn icon (so the status is not
+              colour alone), and the count in a darkened shade of the same hue. A status nobody is in goes
+              quiet and grey so the tiles that matter stand out. The small % is the share of active staff. */}
           <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-3">
-            {segments.map(s => (
-              <button
-                key={s.key}
-                onClick={() => setDetailKey(s.detail)}
-                style={s.count > 0 ? { backgroundColor: `${s.color}14` } : undefined}
-                className={`rounded-xl px-3 py-2.5 text-left transition hover:brightness-95 ${s.count > 0 ? '' : 'bg-slate-50'}`}
-              >
-                <span className="flex items-baseline justify-between gap-2">
-                  <span className={`text-[22px] font-extrabold ${s.count > 0 ? '' : 'text-slate-300'}`} style={s.count > 0 ? { color: s.color } : undefined}>
+            {segments.map(s => {
+              const on = s.count > 0;
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => setDetailKey(s.detail)}
+                  style={on ? { backgroundColor: `${s.color}14`, borderColor: `${s.color}38` } : undefined}
+                  className={`rounded-xl border px-3 py-2.5 text-left transition duration-200 hover:-translate-y-px hover:shadow-[0_8px_16px_-10px_rgba(15,23,42,0.4)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
+                    on ? '' : 'border-slate-100 bg-slate-50'
+                  }`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg ${on ? '' : 'bg-slate-100 text-slate-400'}`}
+                      style={on ? { backgroundColor: `${s.color}22`, color: s.ink } : undefined}
+                    >
+                      {s.icon}
+                    </span>
+                    {on && <span className="text-[11px] font-bold text-[#586474]">{shareOf(s.count)}%</span>}
+                  </span>
+                  <span className={`mt-2 block text-[26px] font-extrabold leading-none ${on ? '' : 'text-[#7b8798]'}`} style={on ? { color: s.ink } : undefined}>
                     {s.count}
                   </span>
-                  {s.count > 0 && <span className="text-[11px] font-bold text-slate-400">{shareOf(s.count)}%</span>}
-                </span>
-                <span className={`flex items-center gap-1.5 text-xs font-bold ${s.count > 0 ? 'text-[#586474]' : 'text-slate-400'}`}>
-                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: s.count > 0 ? s.color : '#cbd5e1' }} />
-                  {s.label}
-                </span>
-              </button>
-            ))}
+                  <span className={`mt-1 block text-xs font-bold ${on ? 'text-[#586474]' : 'text-slate-500'}`}>{s.label}</span>
+                </button>
+              );
+            })}
           </div>
         </section>
 
@@ -740,6 +761,37 @@ function PencilGlyph() {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+function CheckCircleGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8.5 12.5 2.5 2.5 4.5-5" />
+    </svg>
+  );
+}
+function ClockGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7.5V12l3 2" />
+    </svg>
+  );
+}
+function CrossCircleGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m9 9 6 6m0-6-6 6" />
+    </svg>
+  );
+}
+function MoonGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
     </svg>
   );
 }
