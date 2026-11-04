@@ -121,8 +121,10 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
   const account = { name, designation, photoUrl, initials, isHr, onSignOut: handleSignOut };
 
   return (
-    <div className={`${manrope.className} flex min-h-screen flex-col bg-slate-100 text-ink lg:h-screen lg:flex-row lg:overflow-hidden`}>
-      <BodyFontClass className={manrope.className} />
+    // `theme-employee` (app/globals.css) is what makes the accent / good / info colours one green and slate
+    // for the whole portal; it is also put on <body> so dialogs and pickers rendered outside this div match.
+    <div className={`theme-employee ${manrope.className} flex min-h-screen flex-col bg-slate-100 text-ink lg:h-screen lg:flex-row lg:overflow-hidden`}>
+      <BodyFontClass className={`${manrope.className} theme-employee`} />
 
       {/* Computer: the sidebar, the owner console's look and behaviour */}
       <DesktopSidebar pathname={pathname} />

@@ -28,7 +28,7 @@ type Kind = 'present' | 'absent' | 'leave' | 'dayoff' | 'upcoming';
 const PILL: Record<Exclude<Kind, 'upcoming'>, { label: string; cls: string }> = {
   present: { label: 'Present', cls: 'bg-good-bg text-good-text' },
   absent: { label: 'Absent', cls: 'bg-critical-bg text-critical-text' },
-  leave: { label: 'On leave', cls: 'bg-purple-100 text-purple-700' },
+  leave: { label: 'On leave', cls: 'bg-purple-100 text-purple-700 [.theme-employee_&]:bg-slate-100 [.theme-employee_&]:text-slate-600' },
   dayoff: { label: 'Day off', cls: 'bg-slate-100 text-slate-600' },
 };
 

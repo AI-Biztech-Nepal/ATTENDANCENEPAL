@@ -559,10 +559,10 @@ export default function CheckInPage() {
               <div className={`mt-1 text-base font-bold ${statusTile.value}`}>{todaySummary.status.label}</div>
               <div className={`mt-0.5 text-[11px] ${statusTile.sub}`}>{todaySummary.inAt === '—' ? 'Not checked in yet' : `Since ${todaySummary.inAt}`}</div>
             </div>
-            <div className="rounded-xl bg-info-bg p-3 shadow-sm ring-1 ring-inset ring-info/10">
-              <span className="text-xs font-medium text-info-text/80">In at</span>
-              <div className="mt-1 text-base font-bold text-info-text">{todaySummary.inAt}</div>
-              <div className="mt-0.5 text-[11px] text-info-text/70">Today</div>
+            <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
+              <span className="text-xs font-medium text-good-text/80">In at</span>
+              <div className="mt-1 text-base font-bold text-good-text">{todaySummary.inAt}</div>
+              <div className="mt-0.5 text-[11px] text-good-text/70">Today</div>
             </div>
             <div className="col-span-2 rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10 sm:col-span-1">
               <span className="text-xs font-medium text-good-text/80">Worked</span>

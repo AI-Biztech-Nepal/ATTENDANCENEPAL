@@ -7,6 +7,33 @@ html, body {
   background-color: #f8fafc;
 }
 
+/* Theme colours (see tailwind.config.ts). The defaults are the owner console's teal and blue, as they
+   have always been. The employee portal adds `.theme-employee` (components/EmployeeShell.tsx, on the
+   shell and on <html> so dialogs rendered outside the shell follow it): ONE green — the phone app's
+   emerald — for everything primary, and slate in place of the blue "info" colour, so warm colours are
+   left for things that need attention (late, absent, rejected, missing). Values are space-separated
+   RGB channels. */
+:root {
+  --accent: 13 148 136; /* #0d9488 */
+  --accent-light: 204 251 241; /* #ccfbf1 */
+  --good: 13 148 136;
+  --good-bg: 204 251 241;
+  --good-text: 15 118 110; /* #0f766e */
+  --info: 37 99 235; /* #2563eb */
+  --info-bg: 219 234 254; /* #dbeafe */
+  --info-text: 29 78 216; /* #1d4ed8 */
+}
+.theme-employee {
+  --accent: 4 120 87; /* #047857, brand */
+  --accent-light: 227 244 236; /* #e3f4ec */
+  --good: 4 120 87;
+  --good-bg: 227 244 236;
+  --good-text: 6 95 70; /* #065f46 */
+  --info: 71 85 105; /* slate-600 */
+  --info-bg: 241 245 249; /* slate-100 */
+  --info-text: 51 65 85; /* slate-700 */
+}
+
 /* ── Custom Scrollbar Styles ────────────────────────────────────── */
 
 /* Slim, modern scrollbar for Webkit browsers (Chrome, Edge, Safari) */

@@ -154,12 +154,13 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
           const caption = cell.inMonth ? captionFor(flags) : undefined;
           // On Leave/Week Off gets its own yellow, distinct from Checked-in's
           // pink — those two used to both read as similar light pastels.
+          // In the employee portal (.theme-employee) the pale yellow / pink become a grey and a light green.
           const attendanceBg = onLeave || onWeekOff
-            ? 'bg-yellow-50'
+            ? 'bg-yellow-50 [.theme-employee_&]:bg-slate-100'
             : flags.present || flags.late || flags.early
               ? 'bg-good-bg'
               : flags.checkedInOnly
-                ? 'bg-pink-50'
+                ? 'bg-pink-50 [.theme-employee_&]:bg-good-bg/40 [.theme-employee_&]:ring-1 [.theme-employee_&]:ring-inset [.theme-employee_&]:ring-good/30'
                 : flags.absent
                   ? 'bg-critical-bg'
                   : '';
@@ -214,10 +215,10 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
           <span className="h-2.5 w-2.5 rounded-sm bg-good-bg" /> Present
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-pink-50" /> Checked in
+          <span className="h-2.5 w-2.5 rounded-sm bg-pink-50 [.theme-employee_&]:bg-good-bg/40 [.theme-employee_&]:ring-1 [.theme-employee_&]:ring-inset [.theme-employee_&]:ring-good/30" /> Checked in
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-yellow-50" /> On leave / Week Off
+          <span className="h-2.5 w-2.5 rounded-sm bg-yellow-50 [.theme-employee_&]:bg-slate-100" /> On leave / Week Off
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm bg-critical-bg" /> Absent

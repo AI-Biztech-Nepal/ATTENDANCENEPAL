@@ -1,5 +1,10 @@
 import type { Config } from 'tailwindcss';
 
+// accent / good / info read CSS variables (app/globals.css) so the employee portal — which wears the
+// `.theme-employee` class — can be one green with neutral greys, while the owner console keeps the
+// colours it has always had. `<alpha-value>` keeps `bg-accent/10` and friends working.
+const themed = (name: string) => `rgb(var(--${name}) / <alpha-value>)`;
+
 const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
   theme: {
@@ -9,8 +14,8 @@ const config: Config = {
         sidebar: '#0f172a',
         'sidebar-active': '#1e293b',
         accent: {
-          DEFAULT: '#0d9488',
-          light: '#ccfbf1',
+          DEFAULT: themed('accent'),
+          light: themed('accent-light'),
         },
         // The mobile app's emerald (mobile-app/src/theme.ts) — used by the
         // redesigned owner Dashboard and top bar.
@@ -21,10 +26,10 @@ const config: Config = {
           // The employee pages' sidebar (components/EmployeeShell.tsx).
           deep: '#064e3b',
         },
-        good: { DEFAULT: '#0d9488', bg: '#ccfbf1', text: '#0f766e' },
+        good: { DEFAULT: themed('good'), bg: themed('good-bg'), text: themed('good-text') },
         warning: { DEFAULT: '#f97316', bg: '#ffedd5', text: '#c2410c' },
         critical: { DEFAULT: '#ef4444', bg: '#fee2e2', text: '#b91c1c' },
-        info: { DEFAULT: '#2563eb', bg: '#dbeafe', text: '#1d4ed8' },
+        info: { DEFAULT: themed('info'), bg: themed('info-bg'), text: themed('info-text') },
         dept: {
           engineering: '#0d9488',
           operations: '#2563eb',

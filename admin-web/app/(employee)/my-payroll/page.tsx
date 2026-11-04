@@ -482,30 +482,31 @@ export default function MyPayrollPage() {
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <div className="rounded-xl bg-accent/10 p-3 shadow-sm ring-1 ring-inset ring-accent/10">
-          <span className="text-xs font-medium text-accent/80">Basic Salary</span>
-          <div className="mt-1 text-base font-bold text-accent">{money(breakdown?.basic)}</div>
-          <div className="mt-0.5 text-[11px] text-accent/70">{periodWorkingDays} working days</div>
+        {/* The five figures are one green; only Attendance changes colour, with how well the month went. */}
+        <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
+          <span className="text-xs font-medium text-good-text/80">Basic Salary</span>
+          <div className="mt-1 text-base font-bold text-good-text">{money(breakdown?.basic)}</div>
+          <div className="mt-0.5 text-[11px] text-good-text/70">{periodWorkingDays} working days</div>
         </div>
-        <div className="rounded-xl bg-warning-bg p-3 shadow-sm ring-1 ring-inset ring-warning/10">
-          <span className="text-xs font-medium text-warning-text/80">OT Salary</span>
-          <div className="mt-1 text-base font-bold text-warning-text">{money(breakdown?.ot)}</div>
-          <div className="mt-0.5 text-[11px] text-warning-text/70">This period</div>
+        <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
+          <span className="text-xs font-medium text-good-text/80">OT Salary</span>
+          <div className="mt-1 text-base font-bold text-good-text">{money(breakdown?.ot)}</div>
+          <div className="mt-0.5 text-[11px] text-good-text/70">This period</div>
         </div>
         <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
           <span className="text-xs font-medium text-good-text/80">Net Pay</span>
           <div className="mt-1 text-base font-bold text-good-text">{money(breakdown?.totalSalary)}</div>
           <div className="mt-0.5 text-[11px] text-good-text/70">After deductions</div>
         </div>
-        <div className="rounded-xl bg-purple-50 p-3 shadow-sm ring-1 ring-inset ring-purple-200">
-          <span className="text-xs font-medium text-purple-700/80">Overtime</span>
-          <div className="mt-1 text-base font-bold text-purple-700">{fmtHrs(totals.overtimeHours)}</div>
-          <div className="mt-0.5 text-[11px] text-purple-700/70">This period</div>
+        <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
+          <span className="text-xs font-medium text-good-text/80">Overtime</span>
+          <div className="mt-1 text-base font-bold text-good-text">{fmtHrs(totals.overtimeHours)}</div>
+          <div className="mt-0.5 text-[11px] text-good-text/70">This period</div>
         </div>
-        <div className="rounded-xl bg-info-bg p-3 shadow-sm ring-1 ring-inset ring-info/10">
-          <span className="text-xs font-medium text-info-text/80">Total Hours</span>
-          <div className="mt-1 text-base font-bold text-info-text">{fmtHrs(totals.totalHours)}</div>
-          <div className="mt-0.5 text-[11px] text-info-text/70">This period</div>
+        <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
+          <span className="text-xs font-medium text-good-text/80">Total Hours</span>
+          <div className="mt-1 text-base font-bold text-good-text">{fmtHrs(totals.totalHours)}</div>
+          <div className="mt-0.5 text-[11px] text-good-text/70">This period</div>
         </div>
         <div className={`rounded-xl p-3 shadow-sm ring-1 ring-inset ${ATTENDANCE_TILE[attendanceTone].box}`}>
           <span className={`text-xs font-medium ${ATTENDANCE_TILE[attendanceTone].label}`}>Attendance</span>
@@ -722,14 +723,15 @@ export default function MyPayrollPage() {
           <p className="py-8 text-center text-sm text-slate-400">No data to chart yet.</p>
         ) : (
           <div className="overflow-x-auto">
-            <div className="h-44 w-[var(--chart-w)] lg:w-full" style={{ ['--chart-w' as string]: `${Math.max(chartData.length * 30, 320)}px` }}>
+            {/* text-accent so the line and fill (currentColor) are the theme green */}
+            <div className="h-44 w-[var(--chart-w)] text-accent lg:w-full" style={{ ['--chart-w' as string]: `${Math.max(chartData.length * 30, 320)}px` }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartData} margin={{ top: 6, right: 10, left: 0, bottom: 0 }}>
                   <CartesianGrid vertical={false} stroke="#e2e8f0" />
                   <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} interval="preserveStartEnd" minTickGap={6} />
                   <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} width={40} />
                   <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }} formatter={(v: number) => [v.toLocaleString(), 'Earning']} />
-                  <Area type="monotone" dataKey="earning" name="earning" stroke="#0d9488" strokeWidth={2} fill="#0d9488" fillOpacity={0.1} dot={false} activeDot={{ r: 4 }} />
+                  <Area type="monotone" dataKey="earning" name="earning" stroke="currentColor" strokeWidth={2} fill="currentColor" fillOpacity={0.1} dot={false} activeDot={{ r: 4 }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

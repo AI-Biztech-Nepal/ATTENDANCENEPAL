@@ -59,6 +59,8 @@ export default function TaskHoursChart({ logs, tasks, bare = false }: { logs: Ta
       {tasks.length === 0 ? (
         <p className="py-8 text-center text-sm text-slate-400">No tasks to show hours for yet.</p>
       ) : (
+        // text-accent / text-brand: the bars are currentColor, i.e. the theme's green in the employee portal
+        <div className={bare ? 'text-brand' : 'text-accent'}>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid vertical={false} stroke="#e2e8f0" />
@@ -74,9 +76,10 @@ export default function TaskHoursChart({ logs, tasks, bare = false }: { logs: Ta
               strokeDasharray="4 4"
               label={{ value: referenceLabel(granularity), position: 'insideTopRight', fontSize: 11, fill: '#94a3b8' }}
             />
-            <Bar dataKey="hours" name="Hours worked" fill={bare ? '#047857' : '#0d9488'} radius={[4, 4, 0, 0]} maxBarSize={32} />
+            <Bar dataKey="hours" name="Hours worked" fill="currentColor" radius={[4, 4, 0, 0]} maxBarSize={32} />
           </BarChart>
         </ResponsiveContainer>
+        </div>
       )}
     </div>
   );
