@@ -88,8 +88,9 @@ begin
 end;
 $$ language plpgsql security definer set search_path = public;
 
-revoke all on function register_push_token(text) from public;
-revoke all on function unregister_push_token(text) from public;
+-- `anon` is named too: Supabase grants new functions to it directly, so revoking from `public` alone leaves it.
+revoke all on function register_push_token(text) from public, anon;
+revoke all on function unregister_push_token(text) from public, anon;
 grant execute on function register_push_token(text) to authenticated;
 grant execute on function unregister_push_token(text) to authenticated;
 
