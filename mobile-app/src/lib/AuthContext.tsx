@@ -93,14 +93,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [session?.user.id]);
 
-  // Best-effort — registers this device for Week-off (and future) push
-  // notifications once we know which employee is logged in. No-ops quietly
-  // on simulators or before a real EAS projectId is configured (see
-  // lib/pushNotifications.ts), so it never blocks login on an incomplete
+  // Best-effort — registers this device for push notifications (Week-off
+  // changes for employees, HR alerts such as a contract ending for admin and
+  // HR, who often have no employee record) once we know who is logged in.
+  // No-ops quietly on simulators or before a real EAS projectId is configured
+  // (see lib/pushNotifications.ts), so it never blocks login on an incomplete
   // push setup.
   useEffect(() => {
-    if (profile?.employee_id) registerForPushNotifications(profile.employee_id).catch(() => {});
-  }, [profile?.employee_id]);
+    if (profile?.id) registerForPushNotifications(profile.employee_id).catch(() => {});
+  }, [profile?.id, profile?.employee_id]);
 
   return (
     <AuthContext.Provider

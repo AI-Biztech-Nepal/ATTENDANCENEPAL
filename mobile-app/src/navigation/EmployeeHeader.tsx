@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, Pressable, Stat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { supabase } from '../lib/supabase';
+import { signOutAndUnregisterPush } from '../lib/pushNotifications';
 import CalendarSystemSwitch from '../components/CalendarSystemSwitch';
 import HeaderBackButton from './HeaderBackButton';
 
@@ -37,7 +38,7 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
 
   async function handleSignOut() {
     setMenuOpen(false);
-    await supabase.auth.signOut();
+    await signOutAndUnregisterPush();
   }
 
   function toggleMenu() {
