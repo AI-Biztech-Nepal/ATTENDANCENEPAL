@@ -23,7 +23,7 @@ const STATUS_TONE: Record<TaskStatus, 'warning' | 'info' | 'neutral' | 'good' | 
   rejected: 'critical',
 };
 
-const FILTERS = ['pending', 'in_progress', 'submitted', 'approved', 'rejected', 'All'] as const;
+const FILTERS = ['All', 'pending', 'in_progress', 'submitted', 'approved', 'rejected'] as const;
 type Filter = (typeof FILTERS)[number];
 
 const EMPTY_TASK_FORM = { title: '', description: '', due_date: '' };

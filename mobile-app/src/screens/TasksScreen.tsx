@@ -16,7 +16,7 @@ const STATUS_TONE: Record<TaskStatus, 'good' | 'warning' | 'critical' | 'info' |
   approved: 'good',
   rejected: 'critical',
 };
-const FILTERS: (TaskStatus | 'All')[] = ['pending', 'in_progress', 'submitted', 'approved', 'rejected', 'All'];
+const FILTERS: (TaskStatus | 'All')[] = ['All', 'pending', 'in_progress', 'submitted', 'approved', 'rejected'];
 
 const EMPTY_FORM = { employee_id: '', title: '', description: '', points: '10', due_date: '' };
 

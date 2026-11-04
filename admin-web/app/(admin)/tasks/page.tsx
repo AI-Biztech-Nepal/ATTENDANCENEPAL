@@ -197,7 +197,7 @@ export default function TasksPage() {
     <>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {(['pending', 'in_progress', 'submitted', 'approved', 'rejected', 'All'] as const).map(f => (
+          {(['All', 'pending', 'in_progress', 'submitted', 'approved', 'rejected'] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
