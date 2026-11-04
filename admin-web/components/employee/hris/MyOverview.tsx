@@ -97,6 +97,7 @@ function addressesMatch(f: Record<string, string>) {
  * contact are the employee's own, each edited in its own pop-up. */
 export default function MyOverview({
   employee,
+  companyName,
   branchName,
   managerName,
   docs,
@@ -107,6 +108,8 @@ export default function MyOverview({
   onSaved,
 }: {
   employee: Employee;
+  /** '' until it loads. */
+  companyName: string;
   branchName: string | null;
   managerName: string | null;
   /** undefined while loading, null when it couldn't be read. */
@@ -258,6 +261,7 @@ export default function MyOverview({
         <div className="flex min-w-0 flex-[2_1_520px] flex-col gap-5">
           <ProfileCard title="Employment">
             <FactGrid>
+              <Fact label="Company">{companyName}</Fact>
               <Fact label="Employee code">{employee.employee_code}</Fact>
               <Fact label="Username">{employee.username}</Fact>
               <Fact label="Biometric / Registration ID">{employee.fingerprint_id}</Fact>

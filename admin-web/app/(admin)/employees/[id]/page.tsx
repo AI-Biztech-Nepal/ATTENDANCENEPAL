@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
+import { useCompanyName } from '@/lib/companyName';
 import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
@@ -236,6 +237,7 @@ type PersonOption = Pick<Employee, 'id' | 'name' | 'employee_code' | 'status'>;
 export default function EmployeeCvPage() {
   usePageTitle('Employee CV');
   const { system } = useCalendarSystem();
+  const companyName = useCompanyName();
   const confirm = useConfirm();
   const params = useParams<{ id: string }>();
   const employeeId = params.id;
@@ -764,6 +766,7 @@ export default function EmployeeCvPage() {
       const status = effectiveStatus(emp);
 
       section('Employment', [
+        companyName ? `Company: ${companyName}` : null,
         `Employee code: ${emp.employee_code}`,
         emp.fingerprint_id ? `Biometric / Registration ID: ${emp.fingerprint_id}` : null,
         emp.employment_type ? `Employment type: ${employmentTypeLabel(emp.employment_type)}` : null,
@@ -1202,6 +1205,7 @@ export default function EmployeeCvPage() {
         </div>
         <dl className="mt-5 grid gap-x-5 gap-y-4 border-t border-slate-200 pt-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
           <Fact label="Employee ID">{employee.employee_code}</Fact>
+          <Fact label="Company">{companyName}</Fact>
           <Fact label="Joined">{employee.date_of_joining ? formatAdDate(employee.date_of_joining, system) : null}</Fact>
           <Fact label={employee.resigned_at ? 'Time with the company' : 'With the company'}>{days !== null ? formatDuration(days) : null}</Fact>
           <Fact label="Reports to">
@@ -1242,6 +1246,7 @@ export default function EmployeeCvPage() {
               <div className="flex min-w-0 flex-[2_1_520px] flex-col gap-5">
               <ProfileCard title="Employment" action="Edit" onAction={() => openSection('employment')}>
                 <FactGrid>
+                  <Fact label="Company">{companyName}</Fact>
                   <Fact label="Employee code">{employee.employee_code}</Fact>
                   <Fact label="Username">{employee.username}</Fact>
                   <Fact label="Biometric / Registration ID">{employee.fingerprint_id}</Fact>

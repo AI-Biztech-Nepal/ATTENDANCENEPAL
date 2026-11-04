@@ -15,6 +15,7 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { Employee, Shift, Profile, Branch, Department } from '@/lib/types';
 import { resolveShift, formatShiftHours } from '@/lib/shift';
 import { usePageTitle } from '@/lib/pageTitle';
+import { useCompanyName } from '@/lib/companyName';
 import { fetchAll } from '@/lib/leaveBalance';
 import { downloadExcel } from '@/components/TableExportBar';
 import { DOCUMENTS_BUCKET } from '@/lib/employeeDocuments';
@@ -137,7 +138,8 @@ function EmployeesView() {
   const [designationFilter, setDesignationFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [companyName, setCompanyName] = useState('');
+  // Heads the list, and the Excel / PDF export.
+  const companyName = useCompanyName();
   // Where each leaver (or person serving notice) stands on their final settlement.
   const [separations, setSeparations] = useState<Record<string, SettlementStatus>>({});
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -248,8 +250,6 @@ function EmployeesView() {
     supabase.from('profiles').select('id, employee_id, role').then(({ data }) => setProfiles(data ?? []));
     supabase.from('branches').select('*').order('name').then(({ data }) => setBranches(data ?? []));
     supabase.from('departments').select('*').order('name').then(({ data }) => setDepartmentOptions(data ?? []));
-    // Heads the Excel / PDF export. An admin sees only their own company.
-    supabase.from('companies').select('name').limit(1).then(({ data }) => setCompanyName(data?.[0]?.name ?? ''));
     // Empty (not an error) until the separation migration has been run.
     supabase
       .from('employee_separations')
@@ -1388,6 +1388,7 @@ function EmployeesView() {
             </button>
           )}
           <span aria-live="polite" className="ml-auto text-[13px] font-bold text-slate-600">
+            {companyName && <span className="font-extrabold text-ink">{companyName} · </span>}
             {resultSummary}
           </span>
         </div>

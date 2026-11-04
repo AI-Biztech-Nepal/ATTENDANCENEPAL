@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
+import { useCompanyName } from '@/lib/companyName';
 import Badge from '@/components/Badge';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import { DocumentRing, Fact, ProfileTabs, type ProfileTab } from '@/components/profile/ProfileParts';
@@ -30,6 +31,7 @@ type ProfileDetails = Partial<
 export default function MyProfilePage() {
   usePageTitle('Profile');
   const { system } = useCalendarSystem();
+  const companyName = useCompanyName();
   const router = useRouter();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -250,6 +252,7 @@ export default function MyProfilePage() {
             </div>
             <dl className="mt-5 grid gap-x-5 gap-y-4 border-t border-slate-200 pt-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
               <Fact label="Employee ID">{employee.employee_code}</Fact>
+              <Fact label="Company">{companyName}</Fact>
               <Fact label="Joined">{employee.date_of_joining ? formatAdDate(employee.date_of_joining, system) : null}</Fact>
               <Fact label={employee.resigned_at ? 'Time with the company' : 'With the company'}>{days !== null ? formatDuration(days) : null}</Fact>
               <Fact label="Reports to">{managerName}</Fact>
@@ -266,6 +269,7 @@ export default function MyProfilePage() {
           <div hidden={tab !== 'overview'}>
             <MyOverview
               employee={employee}
+              companyName={companyName}
               branchName={branchName}
               managerName={managerName}
               docs={docs}

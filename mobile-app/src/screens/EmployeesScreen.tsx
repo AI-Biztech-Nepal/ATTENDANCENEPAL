@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import type { Branch, Department, Employee, Gender, Profile, Shift } from '../types';
 import { resolveShift, formatShiftHours } from '../lib/shift';
 import { fetchAll } from '../lib/leaveBalance';
+import { useCompanyName } from '../lib/useCompanyName';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
 import DatePicker from '../components/DatePicker';
@@ -101,6 +102,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
   const [uploadingPhotoId, setUploadingPhotoId] = useState<string | null>(null);
 
   const { system } = useCalendarSystem();
+  const companyName = useCompanyName();
   const [moreFilters, setMoreFilters] = useState(NO_FILTERS);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   // Where each leaver (or person serving notice) stands on their final settlement.
@@ -516,6 +518,11 @@ export default function EmployeesScreen({ route, navigation }: any) {
 
   return (
     <View style={styles.container}>
+      {!!companyName && (
+        <Text style={styles.companyLine} numberOfLines={1}>
+          {companyName}
+        </Text>
+      )}
       <View style={styles.filterRow}>
         <TouchableOpacity style={[styles.filterBtn, { flex: 1 }]} onPress={() => setFilterOpen(true)}>
           <Text style={styles.filterBtnText} numberOfLines={1}>
@@ -1057,6 +1064,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.slate50 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.slate50 },
+  companyLine: { fontSize: 12, fontWeight: '700', color: colors.slate500, paddingHorizontal: 16, paddingTop: 12 },
   filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 16 },
   addBtn: { backgroundColor: colors.accent, borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center' },
   addBtnText: { color: colors.white, fontSize: 13, fontWeight: '700' },

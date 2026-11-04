@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useCalendarSystem } from '../../lib/CalendarSystemContext';
+import { useCompanyName } from '../../lib/useCompanyName';
 import { formatAdDate } from '../../lib/calendar';
 import { DOCUMENT_TYPES, type EmployeeDocument } from '../../lib/employeeDocuments';
 import {
@@ -103,6 +104,7 @@ export default function MyOverviewCards({
   onSaved: () => void;
 }) {
   const { system } = useCalendarSystem();
+  const companyName = useCompanyName();
   const date = (d: string | null | undefined) => (d ? formatAdDate(d, system) : null);
   const status = effectiveStatus(employee);
   const isContract = employee.employment_type === 'contract';
@@ -274,6 +276,7 @@ export default function MyOverviewCards({
         summary={[employee.employment_type ? employmentTypeLabel(employee.employment_type) : '', employee.designation, managerName ? `Reports to ${managerName}` : ''].filter(Boolean).join(' · ') || undefined}
         defaultOpen
       >
+        <InfoRow label="Company" value={companyName} />
         <InfoRow label="Employee code" value={employee.employee_code} />
         <InfoRow label="Username" value={employee.username} />
         <InfoRow label="Biometric / Registration ID" value={employee.fingerprint_id} />

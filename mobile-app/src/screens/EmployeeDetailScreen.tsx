@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Image, Linking, Modal } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
+import { useCompanyName } from '../lib/useCompanyName';
 import { formatAdDate } from '../lib/calendar';
 import {
   BLOOD_GROUPS,
@@ -177,6 +178,7 @@ type PersonOption = Pick<Employee, 'id' | 'name' | 'employee_code' | 'status'>;
 export default function EmployeeDetailScreen({ route }: any) {
   const { employeeId } = route.params as { employeeId: string };
   const { system } = useCalendarSystem();
+  const companyName = useCompanyName();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -717,6 +719,7 @@ export default function EmployeeDetailScreen({ route }: any) {
         summary={[info.employment_type ? employmentTypeLabel(info.employment_type) : '', info.designation, savedManager ? `Reports to ${savedManager.name}` : ''].filter(Boolean).join(' · ') || undefined}
         defaultOpen
       >
+        <InfoRow label="Company" value={companyName} />
         <InfoRow label="Employee code" value={employee.employee_code} />
         <InfoRow label="Full name" value={employee.name} />
         <InfoRow label="Employment type" value={info.employment_type ? employmentTypeLabel(info.employment_type) : ''} />
