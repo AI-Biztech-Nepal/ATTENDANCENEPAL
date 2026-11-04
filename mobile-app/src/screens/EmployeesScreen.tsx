@@ -67,6 +67,9 @@ export default function EmployeesScreen({ route, navigation }: any) {
   const [addDepartment, setAddDepartment] = useState<string | null>(null);
   const [addBranchId, setAddBranchId] = useState<string | null>(null);
   const [addGender, setAddGender] = useState<Gender | null>(null);
+  const [addManagerId, setAddManagerId] = useState<string | null>(null);
+  const [pickingManager, setPickingManager] = useState(false);
+  const [managerSearch, setManagerSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -190,6 +193,15 @@ export default function EmployeesScreen({ route, navigation }: any) {
     return [...list].sort((a, b) => (b as any).created_at?.localeCompare((a as any).created_at ?? '') ?? 0);
   }, [employees, filter, search, moreFilters, separations]);
 
+  // Who a new employee can report to: people still working here, matching the picker's search.
+  const addManager = employees.find(e => e.id === addManagerId);
+  const managerChoices = useMemo(() => {
+    const q = managerSearch.trim().toLowerCase();
+    return employees
+      .filter(e => e.status === 'active' && (!q || e.name.toLowerCase().includes(q) || e.employee_code.toLowerCase().includes(q)))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [employees, managerSearch]);
+
   /** Switching between current and former staff changes which statuses make sense, so that filter starts over. */
   function chooseFilter(next: string) {
     if ((next === 'Resigned') !== (filter === 'Resigned')) setMoreFilters(m => ({ ...m, status: 'All' }));
@@ -258,6 +270,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
         employment_type: addForm.employment_type || null,
         contract_start: isContract ? addForm.contract_start || null : null,
         contract_end: isContract ? addForm.contract_end || null : null,
+        reporting_to: addManagerId,
         official_phone: addForm.official_phone || null,
         personal_email: addForm.personal_email || null,
       }),
@@ -278,6 +291,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
     setAddDepartment(null);
     setAddBranchId(null);
     setAddGender(null);
+    setAddManagerId(null);
     setShowAddForm(false);
     reload();
   }
@@ -756,6 +770,36 @@ export default function EmployeesScreen({ route, navigation }: any) {
                   </>
                 )}
 
+                <Text style={styles.label}>Reporting to</Text>
+                <TouchableOpacity style={styles.pickerBtn} onPress={() => { setManagerSearch(''); setPickingManager(true); }} accessibilityRole="button" accessibilityLabel="Reporting to">
+                  <Text style={[styles.pickerText, !addManager && { color: colors.slate400, fontWeight: '400' }]} numberOfLines={1}>
+                    {addManager ? `${addManager.name} (${addManager.employee_code})` : 'No one'}
+                  </Text>
+                  <Text style={styles.chevron}>▾</Text>
+                </TouchableOpacity>
+
+                {/* Inside this form, so the phone puts it on top of it instead of failing to present a second pop-up. */}
+                <Sheet visible={pickingManager} title="Reporting to" onClose={() => setPickingManager(false)}>
+                  <TextInput
+                    style={styles.pickerSearch}
+                    value={managerSearch}
+                    onChangeText={setManagerSearch}
+                    placeholder="Search by name or code"
+                    placeholderTextColor={colors.slate400}
+                    accessibilityLabel="Search people"
+                  />
+                  <PersonRow label="No one" active={!addManagerId} onPress={() => { setAddManagerId(null); setPickingManager(false); }} />
+                  {managerChoices.slice(0, 60).map(p => (
+                    <PersonRow
+                      key={p.id}
+                      label={`${p.name} (${p.employee_code})`}
+                      active={addManagerId === p.id}
+                      onPress={() => { setAddManagerId(p.id); setPickingManager(false); }}
+                    />
+                  ))}
+                  {managerChoices.length > 60 && <Text style={styles.hint}>Showing the first 60 — type to narrow it down.</Text>}
+                </Sheet>
+
                 <Text style={styles.label}>Gender</Text>
                 <View style={styles.chipsRow}>
                   <TouchableOpacity style={[styles.pickChip, addGender === null && styles.pickChipActive]} onPress={() => setAddGender(null)}>
@@ -1061,6 +1105,14 @@ export default function EmployeesScreen({ route, navigation }: any) {
   );
 }
 
+function PersonRow({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <TouchableOpacity onPress={onPress} style={[styles.personRow, active && styles.personRowActive]} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: active }}>
+      <Text style={[styles.personText, active && { color: colors.accent }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.slate50 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.slate50 },
@@ -1131,6 +1183,13 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, fontWeight: '600', color: colors.slate500, marginBottom: 4, marginTop: 8 },
   input: { borderWidth: 1, borderColor: colors.slate200, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: colors.ink },
   hint: { fontSize: 11, color: colors.slate400, marginTop: 4, marginBottom: 8, lineHeight: 16 },
+  pickerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.slate200, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10 },
+  pickerText: { fontSize: 14, fontWeight: '600', color: colors.ink, flexShrink: 1 },
+  chevron: { fontSize: 14, color: colors.slate400 },
+  pickerSearch: { borderWidth: 1, borderColor: colors.slate200, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: colors.ink, marginTop: 10, marginBottom: 6 },
+  personRow: { paddingVertical: 11, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: colors.slate100, borderRadius: 8 },
+  personRowActive: { backgroundColor: colors.accentLight },
+  personText: { fontSize: 14, fontWeight: '600', color: colors.ink },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   pickChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.slate200, backgroundColor: colors.white },
   pickChipActive: { backgroundColor: colors.accent, borderColor: colors.accent },
