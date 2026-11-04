@@ -418,6 +418,7 @@ export default function DashboardPage() {
     { key: 'absent', label: 'Absent', count: absentCount, color: '#dc2626', detail: 'absent' },
     { key: 'weekOff', label: 'Week-off', count: weekOffCount, color: '#94a3b8', detail: 'weekOff' },
   ];
+  const shareOf = (n: number) => (activeEmployees.length ? Math.round((n / activeEmployees.length) * 100) : 0);
   const allOnline = devices.length > 0 && devices.every(d => d.status === 'online');
   const onlineDevices = devices.filter(d => d.status === 'online').length;
   const branchName = (id: string | null) => branches.find(b => b.id === id)?.name ?? null;
@@ -481,27 +482,39 @@ export default function DashboardPage() {
             <span className="rounded-full bg-brand-light px-2.5 py-1 text-[13px] font-extrabold text-brand">{attendancePct}%</span>
             {lastPunch && (
               <span className="ml-auto text-[13px] font-semibold text-[#586474]">
-                Last punch {timeOf(lastPunch.punch_time)} · {lastPunch.employee_name}
+                Last punch · {lastPunch.employee_name} {PUNCH_VERB[lastPunch.punch_type] ?? 'punched'} at {timeOf(lastPunch.punch_time)}
               </span>
             )}
           </div>
-          <div className="mt-[18px] flex h-3 gap-[3px] overflow-hidden rounded-md bg-slate-100">
+          <div
+            role="img"
+            aria-label={segments.filter(s => s.count > 0).map(s => `${s.label} ${s.count}`).join(', ')}
+            className="mt-[18px] flex h-3.5 gap-[3px] overflow-hidden rounded-md bg-slate-100"
+          >
             {segments
               .filter(s => s.count > 0)
               .map(s => (
-                <span key={s.key} style={{ flex: s.count, backgroundColor: s.color }} />
+                <span key={s.key} title={`${s.label} · ${s.count} (${shareOf(s.count)}%)`} style={{ flex: s.count, backgroundColor: s.color }} />
               ))}
           </div>
+          {/* Each tile takes its status colour (a soft wash plus a coloured number); a status nobody is in
+              goes quiet and grey so the tiles that matter stand out. The small % is the share of active staff. */}
           <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-3">
             {segments.map(s => (
               <button
                 key={s.key}
                 onClick={() => setDetailKey(s.detail)}
-                className="rounded-xl bg-slate-50 px-3 py-2.5 text-left transition-colors hover:bg-slate-100"
+                style={s.count > 0 ? { backgroundColor: `${s.color}14` } : undefined}
+                className={`rounded-xl px-3 py-2.5 text-left transition hover:brightness-95 ${s.count > 0 ? '' : 'bg-slate-50'}`}
               >
-                <span className="block text-[22px] font-extrabold text-ink">{s.count}</span>
-                <span className="flex items-center gap-1.5 text-xs font-bold text-[#586474]">
-                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: s.color }} />
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className={`text-[22px] font-extrabold ${s.count > 0 ? '' : 'text-slate-300'}`} style={s.count > 0 ? { color: s.color } : undefined}>
+                    {s.count}
+                  </span>
+                  {s.count > 0 && <span className="text-[11px] font-bold text-slate-400">{shareOf(s.count)}%</span>}
+                </span>
+                <span className={`flex items-center gap-1.5 text-xs font-bold ${s.count > 0 ? 'text-[#586474]' : 'text-slate-400'}`}>
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: s.count > 0 ? s.color : '#cbd5e1' }} />
                   {s.label}
                 </span>
               </button>
