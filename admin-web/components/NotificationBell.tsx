@@ -6,24 +6,33 @@ import { usePathname } from 'next/navigation';
 import Avatar from './Avatar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { usePendingApprovals, timeAgo } from '@/lib/pendingApprovals';
-import { BIRTHDAY_LOOKAHEAD_DAYS, formatDayMonth, useHrAlerts } from '@/lib/hrAlerts';
+import { BIRTHDAY_LOOKAHEAD_DAYS, exitLabel, formatDayMonth, useHrAlerts } from '@/lib/hrAlerts';
 import { formatAdDate } from '@/lib/calendar';
 
 const BIRTHDAYS_SHOWN = 8;
 
+const EXIT_TONES = {
+  bad: 'bg-critical-bg text-critical-text',
+  warn: 'bg-warning-bg text-warning-text',
+  info: 'bg-info-bg text-info-text',
+  neutral: 'bg-slate-100 text-slate-600',
+} as const;
+
 /** The top bar's bell. Its badge counts what needs doing — approvals waiting,
- * contracts ending or already ended, and birthdays that are today; the panel
- * also lists the birthdays coming up this month. */
+ * contracts ending or already ended, resignations HR has not started on, and
+ * birthdays that are today; the panel also lists everyone with an exit under
+ * way and the birthdays coming up this month. */
 export default function NotificationBell() {
   const pathname = usePathname();
   const { system } = useCalendarSystem();
   const pending = usePendingApprovals();
-  const { contracts, birthdays } = useHrAlerts(system, pathname);
+  const { contracts, birthdays, exits } = useHrAlerts(system, pathname);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const birthdaysToday = birthdays.filter(b => b.daysAway === 0).length;
-  const badge = pending.total + contracts.length + birthdaysToday;
+  const newResignations = exits.filter(e => e.kind === 'handed_in').length;
+  const badge = pending.total + contracts.length + newResignations + birthdaysToday;
 
   useEffect(() => {
     if (!open) return;
@@ -49,7 +58,7 @@ export default function NotificationBell() {
     { label: 'Missed-punch corrections', href: '/corrections', queue: pending.corrections },
     { label: 'Leave requests', href: '/leave', queue: pending.leave },
   ].filter(a => a.queue.count > 0);
-  const nothing = approvals.length === 0 && contracts.length === 0 && birthdays.length === 0;
+  const nothing = approvals.length === 0 && contracts.length === 0 && exits.length === 0 && birthdays.length === 0;
 
   return (
     <div ref={wrapRef} className="relative">
@@ -83,7 +92,7 @@ export default function NotificationBell() {
           {nothing && (
             <div className="px-4 py-10 text-center">
               <p className="text-sm font-semibold text-ink">You&apos;re all caught up</p>
-              <p className="mt-1 text-xs text-slate-500">No approvals waiting, no contracts ending and no birthdays coming up.</p>
+              <p className="mt-1 text-xs text-slate-500">No approvals waiting, no resignations, no contracts ending and no birthdays coming up.</p>
             </div>
           )}
 
@@ -103,6 +112,28 @@ export default function NotificationBell() {
                   <Chevron />
                 </Row>
               ))}
+            </Section>
+          )}
+
+          {exits.length > 0 && (
+            <Section title="Resignations & exits" count={exits.length}>
+              {exits.map(e => {
+                const label = exitLabel(e);
+                const when = e.lastWorkingOn ? `Last day ${formatAdDate(e.lastWorkingOn, system)}` : e.handedInOn ? `Handed in ${formatAdDate(e.handedInOn, system)}` : '';
+                return (
+                  <Row key={e.id} href={`/employees/${e.id}?tab=exit`} onNavigate={() => setOpen(false)}>
+                    <Avatar name={e.name} photoUrl={e.photoUrl} className="h-8 w-8 text-xs" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-ink">{e.name}</span>
+                      <span className="block truncate text-xs text-slate-500">{e.designation ?? 'Employee'}</span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-extrabold ${EXIT_TONES[label.tone]}`}>{label.text}</span>
+                      {when && <span className="mt-0.5 block text-[11px] text-slate-500">{when}</span>}
+                    </span>
+                  </Row>
+                );
+              })}
             </Section>
           )}
 

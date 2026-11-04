@@ -176,7 +176,8 @@ type Tab = 'overview' | 'records' | 'docs' | 'exit';
 type PersonOption = Pick<Employee, 'id' | 'name' | 'employee_code' | 'status'>;
 
 export default function EmployeeDetailScreen({ route }: any) {
-  const { employeeId } = route.params as { employeeId: string };
+  // `tab` is set when the notification bell opens someone straight on their Exit tab.
+  const { employeeId, tab: startTab } = route.params as { employeeId: string; tab?: Tab };
   const { system } = useCalendarSystem();
   const companyName = useCompanyName();
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -195,7 +196,10 @@ export default function EmployeeDetailScreen({ route }: any) {
   // Bumped after a save so the history card re-reads what the database just logged.
   const [historyVersion, setHistoryVersion] = useState(0);
   // Which section is showing, plus the small facts the tab labels and the overview need.
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>(startTab ?? 'overview');
+  useEffect(() => {
+    if (startTab) setTab(startTab);
+  }, [startTab, employeeId]);
   const [docTypes, setDocTypes] = useState<string[] | null>(null);
   const [openConduct, setOpenConduct] = useState<number | null>(null);
   const [exitStatus, setExitStatus] = useState<string | null>(null);

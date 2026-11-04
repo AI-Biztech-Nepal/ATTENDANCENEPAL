@@ -31,9 +31,9 @@ export default function AdminHeader({ navigation, options, route }: NativeStackH
     setBellOpen(false);
     navigation.getParent()?.navigate('ApprovalsTab', { screen: 'Approvals', params: { segment } });
   }
-  function openEmployee(employeeId: string) {
+  function openEmployee(employeeId: string, tab?: 'exit') {
     setBellOpen(false);
-    navigation.getParent()?.navigate('EmployeesTab', { screen: 'EmployeeDetail', initial: false, params: { employeeId } });
+    navigation.getParent()?.navigate('EmployeesTab', { screen: 'EmployeeDetail', initial: false, params: { employeeId, tab } });
   }
 
   const adminName = profile?.full_name || 'Admin';

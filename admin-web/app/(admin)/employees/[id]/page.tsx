@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
@@ -285,6 +285,11 @@ export default function EmployeeCvPage() {
   const [historyVersion, setHistoryVersion] = useState(0);
   // Which section of the profile is showing, plus the small facts the side cards need.
   const [tab, setTab] = useState<'overview' | 'records' | 'documents' | 'exit'>('overview');
+  // "?tab=exit" — what the notification bell links to — opens that tab.
+  const wantedTab = useSearchParams().get('tab');
+  useEffect(() => {
+    if (wantedTab === 'overview' || wantedTab === 'records' || wantedTab === 'documents' || wantedTab === 'exit') setTab(wantedTab);
+  }, [wantedTab, employeeId]);
   const [viewingPhoto, setViewingPhoto] = useState(false);
   const [docTypes, setDocTypes] = useState<string[] | null>(null);
   const [openConduct, setOpenConduct] = useState<number | null>(null);

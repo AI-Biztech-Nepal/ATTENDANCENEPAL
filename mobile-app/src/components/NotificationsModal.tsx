@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { formatAdDate } from '../lib/calendar';
-import { BIRTHDAY_LOOKAHEAD_DAYS, formatDayMonth } from '../lib/hrAlerts';
+import { BIRTHDAY_LOOKAHEAD_DAYS, exitLabel, formatDayMonth } from '../lib/hrAlerts';
 import { useSharedHrAlerts } from '../lib/HrAlertsProvider';
 import { usePendingApprovals } from '../lib/PendingApprovals';
 import { colors } from '../theme';
@@ -15,8 +15,10 @@ export type ApprovalSegment = 'gps' | 'correction' | 'leave';
 /** How many things need the owner's attention — what the bell's badge shows. */
 export function useNotificationBadge() {
   const { total } = usePendingApprovals();
-  const { contracts, birthdays } = useSharedHrAlerts();
-  return total + contracts.length + birthdays.filter(b => b.daysAway === 0).length;
+  const { contracts, birthdays, exits } = useSharedHrAlerts();
+  // A resignation an employee handed in and HR has not started on needs a first move; the other exits are listed, not counted.
+  const newResignations = exits.filter(e => e.kind === 'handed_in').length;
+  return total + contracts.length + newResignations + birthdays.filter(b => b.daysAway === 0).length;
 }
 
 function contractLabel(daysLeft: number): string {
@@ -35,8 +37,9 @@ function birthdayLabel(daysAway: number): string {
   return `In ${daysAway} days`;
 }
 
-/** The bell's panel: approvals waiting, contracts ending or already ended, and birthdays
- * coming up. Tapping a row opens that approvals queue or that employee. */
+/** The bell's panel: approvals waiting, resignations and exits under way, contracts ending or
+ * already ended, and birthdays coming up. Tapping a row opens that approvals queue or that
+ * employee (an exit opens on their Exit tab). */
 export default function NotificationsModal({
   visible,
   onClose,
@@ -46,11 +49,11 @@ export default function NotificationsModal({
   visible: boolean;
   onClose: () => void;
   onOpenApprovals: (segment: ApprovalSegment) => void;
-  onOpenEmployee: (employeeId: string) => void;
+  onOpenEmployee: (employeeId: string, tab?: 'exit') => void;
 }) {
   const { system } = useCalendarSystem();
   const { counts } = usePendingApprovals();
-  const { contracts, birthdays } = useSharedHrAlerts();
+  const { contracts, birthdays, exits } = useSharedHrAlerts();
   const badge = useNotificationBadge();
 
   const approvals = [
@@ -59,14 +62,14 @@ export default function NotificationsModal({
     { label: 'Leave requests', segment: 'leave' as const, count: counts.leave },
   ].filter(a => a.count > 0);
   const approvalTotal = counts.gps + counts.corrections + counts.leave;
-  const nothing = approvals.length === 0 && contracts.length === 0 && birthdays.length === 0;
+  const nothing = approvals.length === 0 && contracts.length === 0 && exits.length === 0 && birthdays.length === 0;
 
   return (
     <Sheet visible={visible} title="Notifications" subtitle={badge > 0 ? `${badge} need attention` : undefined} onClose={onClose} closeLabel="Close">
       {nothing && (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>You're all caught up</Text>
-          <Text style={styles.emptyText}>No approvals waiting, no contracts ending and no birthdays coming up.</Text>
+          <Text style={styles.emptyText}>No approvals waiting, no resignations, no contracts ending and no birthdays coming up.</Text>
         </View>
       )}
 
@@ -83,6 +86,34 @@ export default function NotificationsModal({
               <Text style={styles.chevron}>›</Text>
             </Row>
           ))}
+        </Section>
+      )}
+
+      {exits.length > 0 && (
+        <Section title="Resignations & exits" count={exits.length}>
+          {exits.map(e => {
+            const label = exitLabel(e);
+            const when = e.lastWorkingOn ? `Last day ${formatAdDate(e.lastWorkingOn, system)}` : e.handedInOn ? `Handed in ${formatAdDate(e.handedInOn, system)}` : '';
+            return (
+              <Row key={e.id} label={`${e.name}, ${label.text.toLowerCase()}`} onPress={() => onOpenEmployee(e.id, 'exit')}>
+                <View style={styles.initial}>
+                  <Text style={styles.initialText}>{e.name.slice(0, 1).toUpperCase()}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {e.name}
+                  </Text>
+                  <Text style={styles.rowSub} numberOfLines={1}>
+                    {e.designation ?? 'Employee'}
+                  </Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={[styles.pill, styles[EXIT_PILLS[label.tone]]]}>{label.text}</Text>
+                  {!!when && <Text style={styles.rowSub}>{when}</Text>}
+                </View>
+              </Row>
+            );
+          })}
         </Section>
       )}
 
@@ -140,6 +171,9 @@ export default function NotificationsModal({
   );
 }
 
+/** The chip colour for each tone exitLabel() can return. */
+const EXIT_PILLS = { bad: 'pillBad', warn: 'pillWarn', info: 'pillInfo', neutral: 'pillNeutral' } as const;
+
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
@@ -181,5 +215,6 @@ const styles = StyleSheet.create({
   pillWarn: { backgroundColor: colors.warningBg, color: colors.warningText },
   pillGood: { backgroundColor: colors.goodBg, color: colors.goodText },
   pillNeutral: { backgroundColor: colors.slate100, color: colors.slate500 },
+  pillInfo: { backgroundColor: colors.infoBg, color: colors.infoText },
   more: { fontSize: 12, color: colors.slate500, paddingTop: 6 },
 });
