@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import DatePicker from './DatePicker';
 import { useConfirm } from './ConfirmDialog';
@@ -21,6 +21,8 @@ import {
   type SeparationType,
   type SettlementStatus,
 } from '@/lib/employeeSeparation';
+import { estimateLeaveEncashment, type LeaveEncashmentEstimate } from '@/lib/leaveEncashment';
+import { formatLeaveDays } from '@/lib/leaveBalance';
 import type { Employee } from '@/lib/types';
 
 // Everything on the form is a string; toPayload() turns it back into numbers / nulls.
@@ -590,7 +592,15 @@ export default function EmployeeSeparation({ employee, onEmployeeChanged }: { em
               <div className="space-y-3">
                 <p className="text-xs font-semibold text-good-text">Payments to the employee</p>
                 <MoneyInput label="Final salary" field="final_salary" form={form} change={change} />
-                <MoneyInput label="Leave encashment" field="leave_encashment" form={form} change={change} />
+                <div>
+                  <MoneyInput label="Leave encashment" field="leave_encashment" form={form} change={change} />
+                  <LeaveEncashmentHelper
+                    employee={employee}
+                    lastWorkingOn={form.last_working_on}
+                    current={form.leave_encashment}
+                    onUse={amount => change({ leave_encashment: amount === 0 ? '' : String(amount) })}
+                  />
+                </div>
                 <MoneyInput label="Incentive settlement" field="incentive_settlement" form={form} change={change} />
                 <MoneyInput label="Other payments" field="other_payments" form={form} change={change} />
               </div>
@@ -742,6 +752,85 @@ function NumberField({ label, value, onChange, step = '0.01' }: { label: string;
 
 function MoneyInput({ label, field, form, change }: { label: string; field: MoneyField; form: Form; change: (p: Partial<Form>) => void }) {
   return <NumberField label={label} value={form[field]} onChange={v => change({ [field]: v } as Partial<Form>)} />;
+}
+
+/** Under "Leave encashment": works the figure out from the person's unused paid leave (lib/leaveEncashment.ts)
+ * and lets HR drop it into the field. Only runs when asked — it reads a year of their attendance. */
+function LeaveEncashmentHelper({
+  employee,
+  lastWorkingOn,
+  current,
+  onUse,
+}: {
+  employee: Employee;
+  lastWorkingOn: string;
+  current: string;
+  onUse: (amount: number) => void;
+}) {
+  const { system } = useCalendarSystem();
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'loading' } | { kind: 'failed' } | { kind: 'done'; estimate: LeaveEncashmentEstimate }>({ kind: 'idle' });
+  const latest = useRef(0);
+
+  // A different last working day makes an earlier answer out of date.
+  useEffect(() => {
+    latest.current += 1;
+    setState({ kind: 'idle' });
+  }, [lastWorkingOn, employee.id]);
+
+  async function calculate() {
+    const mine = ++latest.current;
+    setState({ kind: 'loading' });
+    try {
+      const estimate = await estimateLeaveEncashment(employee, lastWorkingOn || null);
+      if (mine === latest.current) setState({ kind: 'done', estimate });
+    } catch {
+      if (mine === latest.current) setState({ kind: 'failed' });
+    }
+  }
+
+  const link = (label: string) => (
+    <button type="button" onClick={calculate} className="text-xs font-semibold text-accent hover:underline">
+      {label}
+    </button>
+  );
+
+  if (state.kind === 'idle') return <div className="mt-1">{link('Calculate from leave balance')}</div>;
+  if (state.kind === 'loading') return <p className="mt-1 text-xs text-slate-500" role="status">Working out unused leave…</p>;
+  if (state.kind === 'failed') {
+    return (
+      <p className="mt-1 text-xs text-critical-text" role="alert">
+        Couldn’t work it out right now. {link('Try again')}
+      </p>
+    );
+  }
+  const est = state.estimate;
+  if (est.kind === 'unavailable') return <p className="mt-1 text-xs text-slate-500" role="status">{est.reason}</p>;
+
+  const alreadyThere = Number(current || 0) === est.amount;
+  const stillAhead = !!lastWorkingOn && est.countedThrough < lastWorkingOn;
+  return (
+    <div className="mt-1.5 space-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600" role="status">
+      <p>
+        <strong className="text-ink">{formatLeaveDays(est.days)} unused leave days</strong> — leave year {est.leaveYear}: {formatLeaveDays(est.entitlement)} given
+        {est.earned > 0 ? ` + ${formatLeaveDays(est.earned)} earned` : ''} − {formatLeaveDays(est.used)} used, counted to {formatAdDate(est.countedThrough, system)}.
+      </p>
+      <p>
+        × Rs {formatAmount(est.dayRate)} a day (Basic {formatAmount(est.basic)} ÷ {est.workingDays} working days in {est.monthLabel}).
+      </p>
+      {stillAhead && <p className="text-warning-text">The last working day hasn’t finished yet — calculate again once it has.</p>}
+      <div className="flex flex-wrap items-center gap-3 pt-0.5">
+        <span className="text-sm font-bold text-ink">= Rs {formatAmount(est.amount)}</span>
+        {alreadyThere ? (
+          <span className="font-semibold text-good-text">✓ Already in the field</span>
+        ) : (
+          <button type="button" onClick={() => onUse(est.amount)} className="rounded-md border border-accent px-2.5 py-1 font-semibold text-accent hover:bg-accent/5">
+            Use this amount
+          </button>
+        )}
+        {link('Recalculate')}
+      </div>
+    </div>
+  );
 }
 
 function ChecklistRow({ label, done, children }: { label: string; done: boolean; children: React.ReactNode }) {

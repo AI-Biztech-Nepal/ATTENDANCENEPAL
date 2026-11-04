@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -20,6 +20,8 @@ import {
   type SeparationType,
   type SettlementStatus,
 } from '../../lib/employeeSeparation';
+import { estimateLeaveEncashment, type LeaveEncashmentEstimate } from '../../lib/leaveEncashment';
+import { formatLeaveDays } from '../../lib/leaveBalance';
 import type { Employee } from '../../types';
 import { colors } from '../../theme';
 import { Button, Choice, CollapsibleCard, DateField, Field, LinkText, Notice, SubHeading, confirmAsync, notify } from './HrKit';
@@ -430,6 +432,12 @@ export default function SeparationCard({ employee, onEmployeeChanged, defaultOpe
           <Text style={styles.groupGood}>Payments to the employee</Text>
           <Field label="Final salary" value={form.final_salary} onChangeText={v => change({ final_salary: v })} keyboardType="decimal-pad" placeholder="0" />
           <Field label="Leave encashment" value={form.leave_encashment} onChangeText={v => change({ leave_encashment: v })} keyboardType="decimal-pad" placeholder="0" />
+          <LeaveEncashmentHelper
+            employee={employee}
+            lastWorkingOn={form.last_working_on}
+            current={form.leave_encashment}
+            onUse={amount => change({ leave_encashment: amount === 0 ? '' : String(amount) })}
+          />
           <Field label="Incentive settlement" value={form.incentive_settlement} onChangeText={v => change({ incentive_settlement: v })} keyboardType="decimal-pad" placeholder="0" />
           <Field label="Other payments" value={form.other_payments} onChangeText={v => change({ other_payments: v })} keyboardType="decimal-pad" placeholder="0" />
           <Text style={styles.groupBad}>Deductions</Text>
@@ -482,6 +490,80 @@ export default function SeparationCard({ employee, onEmployeeChanged, defaultOpe
   );
 }
 
+/** Under "Leave encashment": works the figure out from the person's unused paid leave (lib/leaveEncashment.ts)
+ * and lets HR drop it into the field. Only runs when asked — it reads a year of their attendance. */
+function LeaveEncashmentHelper({
+  employee,
+  lastWorkingOn,
+  current,
+  onUse,
+}: {
+  employee: Employee;
+  lastWorkingOn: string;
+  current: string;
+  onUse: (amount: number) => void;
+}) {
+  const { system } = useCalendarSystem();
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'loading' } | { kind: 'failed' } | { kind: 'done'; estimate: LeaveEncashmentEstimate }>({ kind: 'idle' });
+  const latest = useRef(0);
+
+  // A different last working day makes an earlier answer out of date.
+  useEffect(() => {
+    latest.current += 1;
+    setState({ kind: 'idle' });
+  }, [lastWorkingOn, employee.id]);
+
+  async function calculate() {
+    const mine = ++latest.current;
+    setState({ kind: 'loading' });
+    try {
+      const estimate = await estimateLeaveEncashment(employee, lastWorkingOn || null);
+      if (mine === latest.current) setState({ kind: 'done', estimate });
+    } catch {
+      if (mine === latest.current) setState({ kind: 'failed' });
+    }
+  }
+
+  if (state.kind === 'idle') {
+    return (
+      <View style={styles.calcWrap}>
+        <LinkText label="Calculate from leave balance" onPress={calculate} />
+      </View>
+    );
+  }
+  if (state.kind === 'loading') return <Text style={styles.calcMuted}>Working out unused leave…</Text>;
+  if (state.kind === 'failed') {
+    return (
+      <View style={styles.calcWrap}>
+        <Text style={styles.calcError}>Couldn’t work it out right now.</Text>
+        <LinkText label="Try again" onPress={calculate} />
+      </View>
+    );
+  }
+  const est = state.estimate;
+  if (est.kind === 'unavailable') return <Text style={styles.calcMuted}>{est.reason}</Text>;
+
+  const alreadyThere = Number(current || 0) === est.amount;
+  const stillAhead = !!lastWorkingOn && est.countedThrough < lastWorkingOn;
+  return (
+    <View style={styles.calcBox}>
+      <Text style={styles.calcLine}>
+        <Text style={styles.calcStrong}>{formatLeaveDays(est.days)} unused leave days</Text> — leave year {est.leaveYear}: {formatLeaveDays(est.entitlement)} given
+        {est.earned > 0 ? ` + ${formatLeaveDays(est.earned)} earned` : ''} − {formatLeaveDays(est.used)} used, counted to {formatAdDate(est.countedThrough, system)}.
+      </Text>
+      <Text style={styles.calcLine}>
+        × Rs {formatAmount(est.dayRate)} a day (Basic {formatAmount(est.basic)} ÷ {est.workingDays} working days in {est.monthLabel}).
+      </Text>
+      {stillAhead && <Text style={styles.calcWarn}>The last working day hasn’t finished yet — calculate again once it has.</Text>}
+      <View style={styles.calcRow}>
+        <Text style={styles.calcTotal}>= Rs {formatAmount(est.amount)}</Text>
+        {alreadyThere ? <Text style={styles.calcDone}>✓ Already in the field</Text> : <Button label="Use this amount" small onPress={() => onUse(est.amount)} />}
+        <LinkText label="Recalculate" onPress={calculate} />
+      </View>
+    </View>
+  );
+}
+
 function ChecklistItem({ label, done, children }: { label: string; done: boolean; children: React.ReactNode }) {
   return (
     <View style={styles.checkItem}>
@@ -510,6 +592,16 @@ const styles = StyleSheet.create({
   start: { marginTop: 10, backgroundColor: colors.slate50, borderRadius: 10, padding: 12, gap: 10 },
   startText: { fontSize: 13, color: colors.slate500, lineHeight: 18 },
   useRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 4 },
+  calcWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 },
+  calcMuted: { fontSize: 12, color: colors.slate500, marginTop: 6, lineHeight: 17 },
+  calcError: { fontSize: 12, color: colors.criticalText },
+  calcBox: { marginTop: 8, backgroundColor: colors.slate50, borderRadius: 10, padding: 10, gap: 4 },
+  calcLine: { fontSize: 12, color: colors.slate500, lineHeight: 17 },
+  calcStrong: { fontWeight: '700', color: colors.ink },
+  calcWarn: { fontSize: 12, fontWeight: '600', color: colors.warningText, lineHeight: 17 },
+  calcRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 4 },
+  calcTotal: { fontSize: 14, fontWeight: '800', color: colors.ink },
+  calcDone: { fontSize: 12, fontWeight: '700', color: colors.goodText },
   hint: { fontSize: 11, color: colors.slate400, marginTop: 6, flexShrink: 1 },
   checkItem: { marginTop: 8, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.slate100 },
   checkHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
