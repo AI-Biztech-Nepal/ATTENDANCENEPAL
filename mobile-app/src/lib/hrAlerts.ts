@@ -10,6 +10,13 @@ import type { CalendarSystem } from './calendar';
 export const CONTRACT_WARNING_MONTHS = 1;
 /** Birthdays are listed this many days ahead. */
 export const BIRTHDAY_LOOKAHEAD_DAYS = 30;
+/** A birthday today or within this many days raises the bell's badge and is highlighted in the list. */
+export const BIRTHDAY_NOTIFY_DAYS = 7;
+
+/** The birthdays that need noticing now: today and the coming week. */
+export function birthdaysToNotify<T extends { daysAway: number }>(birthdays: T[]): T[] {
+  return birthdays.filter(b => b.daysAway <= BIRTHDAY_NOTIFY_DAYS);
+}
 
 type HrRow = {
   id: string;

@@ -34,7 +34,7 @@ import { formatAdDate, formatBothCalendars, otherCalendarHint } from '@/lib/cale
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { SKILL_CATEGORIES } from '@/lib/skillCategories';
 import { DOCUMENT_TYPES } from '@/lib/employeeDocuments';
-import { contractAlerts, startOfToday } from '@/lib/hrAlerts';
+import { contractAlerts, refreshHrAlerts, startOfToday } from '@/lib/hrAlerts';
 import {
   BLOOD_GROUPS,
   EMPLOYMENT_STATUS_LABEL,
@@ -513,6 +513,8 @@ export default function EmployeeCvPage() {
     reload();
     // The database may just have logged a transfer / promotion / pay change.
     setHistoryVersion(v => v + 1);
+    // A date of birth or contract date saved here may be one the bell reports on — don't wait for the next page change.
+    refreshHrAlerts();
   }
 
   // A standing per-person exemption (e.g. for someone "in charge") — never

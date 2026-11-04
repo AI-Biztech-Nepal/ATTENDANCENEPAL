@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { formatAdDate } from '../lib/calendar';
-import { BIRTHDAY_LOOKAHEAD_DAYS, exitLabel, formatDayMonth } from '../lib/hrAlerts';
+import { BIRTHDAY_LOOKAHEAD_DAYS, BIRTHDAY_NOTIFY_DAYS, birthdaysToNotify, exitLabel, formatDayMonth } from '../lib/hrAlerts';
 import { useSharedHrAlerts } from '../lib/HrAlertsProvider';
 import { usePendingApprovals } from '../lib/PendingApprovals';
 import { colors } from '../theme';
@@ -18,7 +18,7 @@ export function useNotificationBadge() {
   const { contracts, birthdays, exits } = useSharedHrAlerts();
   // A resignation an employee handed in and HR has not started on needs a first move; the other exits are listed, not counted.
   const newResignations = exits.filter(e => e.kind === 'handed_in').length;
-  return total + contracts.length + newResignations + birthdays.filter(b => b.daysAway === 0).length;
+  return total + contracts.length + newResignations + birthdaysToNotify(birthdays).length;
 }
 
 function contractLabel(daysLeft: number): string {
@@ -155,7 +155,7 @@ export default function NotificationsModal({
                 <Text style={styles.rowSub}>Turns {b.turning}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={[styles.pill, b.daysAway === 0 ? styles.pillGood : styles.pillNeutral]}>{birthdayLabel(b.daysAway)}</Text>
+                <Text style={[styles.pill, b.daysAway <= BIRTHDAY_NOTIFY_DAYS ? styles.pillGood : styles.pillNeutral]}>{birthdayLabel(b.daysAway)}</Text>
                 <Text style={styles.rowSub}>{formatDayMonth(b.dateKey, system)}</Text>
               </View>
             </Row>

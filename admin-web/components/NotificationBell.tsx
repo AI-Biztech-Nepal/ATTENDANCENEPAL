@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import Avatar from './Avatar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { usePendingApprovals, timeAgo } from '@/lib/pendingApprovals';
-import { BIRTHDAY_LOOKAHEAD_DAYS, exitLabel, formatDayMonth, useHrAlerts } from '@/lib/hrAlerts';
+import { BIRTHDAY_LOOKAHEAD_DAYS, BIRTHDAY_NOTIFY_DAYS, birthdaysToNotify, exitLabel, formatDayMonth, useHrAlerts } from '@/lib/hrAlerts';
 import { formatAdDate } from '@/lib/calendar';
 
 const BIRTHDAYS_SHOWN = 8;
@@ -20,8 +20,8 @@ const EXIT_TONES = {
 
 /** The top bar's bell. Its badge counts what needs doing — approvals waiting,
  * contracts ending or already ended, resignations HR has not started on, and
- * birthdays that are today; the panel also lists everyone with an exit under
- * way and the birthdays coming up this month. */
+ * birthdays today or in the coming week; the panel also lists everyone with an
+ * exit under way and the birthdays coming up this month. */
 export default function NotificationBell() {
   const pathname = usePathname();
   const { system } = useCalendarSystem();
@@ -30,9 +30,9 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const birthdaysToday = birthdays.filter(b => b.daysAway === 0).length;
+  const birthdaysSoon = birthdaysToNotify(birthdays).length;
   const newResignations = exits.filter(e => e.kind === 'handed_in').length;
-  const badge = pending.total + contracts.length + newResignations + birthdaysToday;
+  const badge = pending.total + contracts.length + newResignations + birthdaysSoon;
 
   useEffect(() => {
     if (!open) return;
@@ -176,7 +176,7 @@ export default function NotificationBell() {
                   <span className="shrink-0 text-right">
                     <span
                       className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-extrabold ${
-                        b.daysAway === 0 ? 'bg-good-bg text-good-text' : 'bg-slate-100 text-slate-600'
+                        b.daysAway <= BIRTHDAY_NOTIFY_DAYS ? 'bg-good-bg text-good-text' : 'bg-slate-100 text-slate-600'
                       }`}
                     >
                       {birthdayLabel(b.daysAway)}

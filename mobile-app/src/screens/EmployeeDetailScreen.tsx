@@ -22,6 +22,7 @@ import {
 } from '../lib/employeeProfile';
 import { DOCUMENT_TYPES } from '../lib/employeeDocuments';
 import { contractAlerts, startOfToday } from '../lib/hrAlerts';
+import { useSharedHrAlerts } from '../lib/HrAlertsProvider';
 import type { Branch, Department, Employee } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
@@ -180,6 +181,8 @@ export default function EmployeeDetailScreen({ route }: any) {
   const { employeeId, tab: startTab } = route.params as { employeeId: string; tab?: Tab };
   const { system } = useCalendarSystem();
   const companyName = useCompanyName();
+  // The owner's bell: asked to re-read after a save, so a new date of birth shows up at once.
+  const { refresh: refreshAlerts } = useSharedHrAlerts();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -356,6 +359,8 @@ export default function EmployeeDetailScreen({ route }: any) {
     reload();
     // The database may just have logged a transfer / promotion / pay change.
     setHistoryVersion(v => v + 1);
+    // A date of birth or contract date saved here may be one the bell reports on.
+    refreshAlerts();
   }
 
   if (loading) {
