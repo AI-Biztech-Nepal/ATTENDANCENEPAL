@@ -15,7 +15,7 @@ import {
   type AttentionItem,
 } from '@/components/profile/ProfileParts';
 import { supabase } from '@/lib/supabase';
-import { formatAdDate } from '@/lib/calendar';
+import { formatAdDate, formatBothCalendars, otherCalendarHint } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { DOCUMENT_TYPES, type EmployeeDocument } from '@/lib/employeeDocuments';
 import {
@@ -289,7 +289,7 @@ export default function MyOverview({
           <ProfileCard title="Personal" action="Edit" onAction={() => open('personal')}>
             <FactGrid>
               <Fact label="Gender">{capitalize(employee.gender)}</Fact>
-              <Fact label="Date of birth">{date(employee.date_of_birth)}</Fact>
+              <Fact label="Date of birth">{employee.date_of_birth ? formatBothCalendars(employee.date_of_birth, system) : null}</Fact>
               <Fact label="Nationality">{employee.nationality}</Fact>
               <Fact label="Marital status">{capitalize(employee.marital_status)}</Fact>
               <Fact label="Blood group">{employee.blood_group}</Fact>
@@ -379,7 +379,13 @@ export default function MyOverview({
                   { value: 'male', label: 'Male' },
                 ]}
               />
-              <DateField label="Date of birth" value={form.date_of_birth ?? ''} onChange={setField('date_of_birth')} edited={isEdited('date_of_birth')} />
+              <DateField
+                label="Date of birth"
+                value={form.date_of_birth ?? ''}
+                onChange={setField('date_of_birth')}
+                edited={isEdited('date_of_birth')}
+                hint={otherCalendarHint(form.date_of_birth, system)}
+              />
               <TextField label="Nationality" placeholder="Nepali" value={form.nationality ?? ''} onChange={setField('nationality')} edited={isEdited('nationality')} />
               <SegmentField
                 label="Marital status"

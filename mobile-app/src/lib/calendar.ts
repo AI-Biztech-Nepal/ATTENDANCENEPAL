@@ -197,6 +197,32 @@ export function formatAdDate(adKey: string | null | undefined, system: CalendarS
   return NepaliDate.fromAD(new Date(Number(y), Number(mo) - 1, Number(d))).format('D MMMM YYYY');
 }
 
+/** A date in BOTH calendars at once, the active one first — "12 Baisakh 2050 BS · 24 Apr 1993 AD". For dates
+ * where either calendar matters (a date of birth); everything else follows the AD/BS switch. Only one date is
+ * ever stored (AD): the other is computed from it, so the two can never disagree. A date the Nepali calendar
+ * can't convert still shows, in AD only. (Same as admin-web/lib/calendar.ts.) */
+export function formatBothCalendars(adKey: string | null | undefined, system: CalendarSystem): string {
+  if (!adKey) return '—';
+  const ad = `${formatAdDate(adKey, 'AD')} AD`;
+  try {
+    const bs = `${formatAdDate(adKey, 'BS')} BS`;
+    return system === 'BS' ? `${bs} · ${ad}` : `${ad} · ${bs}`;
+  } catch {
+    return ad;
+  }
+}
+
+/** The same date in the calendar that is NOT showing, for a line under a date picker — "Nepali (BS): 12 Baisakh
+ * 2050" while the picker is in AD, "English (AD): 24 Apr 1993" while it is in BS. Empty when there is no date. */
+export function otherCalendarHint(adKey: string | null | undefined, system: CalendarSystem): string {
+  if (!adKey || !/^\d{4}-\d{2}-\d{2}/.test(adKey)) return '';
+  try {
+    return system === 'AD' ? `Nepali (BS): ${formatAdDate(adKey, 'BS')}` : `English (AD): ${formatAdDate(adKey, 'AD')}`;
+  } catch {
+    return '';
+  }
+}
+
 /** "Thu, 30 Oct 2026  ·  13 Kartik 2083" — both calendars at once, for the
  * greeting bands on the employee and owner home screens. */
 export function formatTodayLine(adKey: string): string {

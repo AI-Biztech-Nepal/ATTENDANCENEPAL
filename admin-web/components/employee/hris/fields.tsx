@@ -92,7 +92,20 @@ export function SelectField({ label, value, onChange, edited, children }: { labe
   );
 }
 
-export function DateField({ label, value, onChange, edited }: { label: string; value: string; onChange: (value: string) => void; edited?: boolean }) {
+export function DateField({
+  label,
+  value,
+  onChange,
+  edited,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  edited?: boolean;
+  /** A line under the picker, e.g. the same date in the other calendar. */
+  hint?: string;
+}) {
   return (
     <div className="min-w-0">
       <span className={FIELD_LABEL}>
@@ -100,6 +113,7 @@ export function DateField({ label, value, onChange, edited }: { label: string; v
         {edited && <EditedTag />}
       </span>
       <DatePicker value={value} onChange={onChange} ariaLabel={label} className={edited ? 'ring-2 ring-accent' : ''} />
+      {hint && <span className="mt-1.5 block text-xs font-semibold text-slate-500">{hint}</span>}
     </div>
   );
 }

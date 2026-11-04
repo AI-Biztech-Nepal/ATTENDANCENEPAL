@@ -3,7 +3,7 @@ import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { supabase } from '../../lib/supabase';
 import { useCalendarSystem } from '../../lib/CalendarSystemContext';
 import { useCompanyName } from '../../lib/useCompanyName';
-import { formatAdDate } from '../../lib/calendar';
+import { formatAdDate, formatBothCalendars, otherCalendarHint } from '../../lib/calendar';
 import { DOCUMENT_TYPES, type EmployeeDocument } from '../../lib/employeeDocuments';
 import {
   ADDRESS_PARTS,
@@ -300,7 +300,7 @@ export default function MyOverviewCards({
 
       <CollapsibleCard title="Personal" right={edit('personal')}>
         <InfoRow label="Gender" value={capitalised(employee.gender)} />
-        <InfoRow label="Date of birth" value={date(employee.date_of_birth)} />
+        <InfoRow label="Date of birth" value={employee.date_of_birth ? formatBothCalendars(employee.date_of_birth, system) : null} />
         <InfoRow label="Nationality" value={employee.nationality} />
         <InfoRow label="Marital status" value={MARITAL_STATUSES.find(m => m.value === employee.marital_status)?.label ?? capitalised(employee.marital_status)} />
         <InfoRow label="Blood group" value={employee.blood_group} />
@@ -350,7 +350,7 @@ export default function MyOverviewCards({
           <>
             <Field label="Full name" value={form.name ?? ''} onChangeText={set('name')} edited={isEdited('name')} />
             <Choice label="Gender" options={[{ label: 'Female', value: 'female' }, { label: 'Male', value: 'male' }]} value={form.gender} onChange={v => set('gender')(v ?? '')} edited={isEdited('gender')} allowNone />
-            <DateField label="Date of birth" value={form.date_of_birth ?? ''} onChange={set('date_of_birth')} edited={isEdited('date_of_birth')} />
+            <DateField label="Date of birth" value={form.date_of_birth ?? ''} onChange={set('date_of_birth')} edited={isEdited('date_of_birth')} hint={otherCalendarHint(form.date_of_birth, system)} />
             <Field label="Nationality" value={form.nationality ?? ''} onChangeText={set('nationality')} edited={isEdited('nationality')} placeholder="Nepali" />
             <Choice label="Marital status" options={MARITAL_STATUSES.map(m => ({ label: m.label, value: m.value }))} value={form.marital_status} onChange={v => set('marital_status')(v ?? '')} edited={isEdited('marital_status')} allowNone />
             <Choice label="Blood group" options={BLOOD_GROUPS.map(b => ({ label: b, value: b }))} value={form.blood_group} onChange={v => set('blood_group')(v ?? '')} edited={isEdited('blood_group')} tone="danger" allowNone />

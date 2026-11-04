@@ -3,7 +3,7 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Activi
 import { supabase } from '../lib/supabase';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { useCompanyName } from '../lib/useCompanyName';
-import { formatAdDate } from '../lib/calendar';
+import { formatAdDate, formatBothCalendars, otherCalendarHint } from '../lib/calendar';
 import {
   BLOOD_GROUPS,
   EMPLOYMENT_STATUS_LABEL,
@@ -531,7 +531,7 @@ export default function EmployeeDetailScreen({ route }: any) {
         return (
           <>
             <Choice label="Gender" options={[{ label: 'Female', value: 'female' }, { label: 'Male', value: 'male' }]} value={form.gender} onChange={v => set('gender')(v ?? '')} edited={isEdited('gender')} allowNone />
-            <DateField label="Date of birth" value={form.date_of_birth} onChange={set('date_of_birth')} edited={isEdited('date_of_birth')} />
+            <DateField label="Date of birth" value={form.date_of_birth} onChange={set('date_of_birth')} edited={isEdited('date_of_birth')} hint={otherCalendarHint(form.date_of_birth, system)} />
             <Field label="Nationality" value={form.nationality} onChangeText={set('nationality')} edited={isEdited('nationality')} placeholder="Nepali" />
             <Choice label="Marital status" options={MARITAL_STATUSES.map(m => ({ label: m.label, value: m.value }))} value={form.marital_status} onChange={v => set('marital_status')(v ?? '')} edited={isEdited('marital_status')} allowNone />
             <Choice label="Blood group" options={BLOOD_GROUPS.map(b => ({ label: b, value: b }))} value={form.blood_group} onChange={v => set('blood_group')(v ?? '')} edited={isEdited('blood_group')} tone="danger" allowNone />
@@ -740,7 +740,7 @@ export default function EmployeeDetailScreen({ route }: any) {
 
       <CollapsibleCard title="Personal" right={sectionHeaderRight('personal')}>
         <InfoRow label="Gender" value={capitalised(info.gender)} />
-        <InfoRow label="Date of birth" value={when(info.date_of_birth)} />
+        <InfoRow label="Date of birth" value={info.date_of_birth ? formatBothCalendars(info.date_of_birth, system) : ''} />
         <InfoRow label="Nationality" value={info.nationality} />
         <InfoRow label="Marital status" value={MARITAL_STATUSES.find(m => m.value === info.marital_status)?.label ?? capitalised(info.marital_status)} />
         <InfoRow label="Blood group" value={info.blood_group} />

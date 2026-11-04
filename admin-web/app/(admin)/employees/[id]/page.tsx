@@ -30,7 +30,7 @@ import {
 } from '@/components/profile/ProfileParts';
 import SectionDialog from '@/components/profile/SectionDialog';
 import { useConfirm } from '@/components/ConfirmDialog';
-import { formatAdDate } from '@/lib/calendar';
+import { formatAdDate, formatBothCalendars, otherCalendarHint } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { SKILL_CATEGORIES } from '@/lib/skillCategories';
 import { DOCUMENT_TYPES } from '@/lib/employeeDocuments';
@@ -781,7 +781,7 @@ export default function EmployeeCvPage() {
 
       section('Personal', [
         emp.gender ? `Gender: ${emp.gender}` : null,
-        emp.date_of_birth ? `Date of birth: ${emp.date_of_birth}` : null,
+        emp.date_of_birth ? `Date of birth: ${formatBothCalendars(emp.date_of_birth, system)}` : null,
         emp.nationality ? `Nationality: ${emp.nationality}` : null,
         emp.marital_status ? `Marital status: ${emp.marital_status}` : null,
         emp.blood_group ? `Blood group: ${emp.blood_group}` : null,
@@ -1021,7 +1021,13 @@ export default function EmployeeCvPage() {
                     { value: 'male', label: 'Male' },
                   ]}
                 />
-                <DateField label="Date of birth" value={coreForm.date_of_birth} onChange={setField('date_of_birth')} edited={isEdited('date_of_birth')} />
+                <DateField
+                  label="Date of birth"
+                  value={coreForm.date_of_birth}
+                  onChange={setField('date_of_birth')}
+                  edited={isEdited('date_of_birth')}
+                  hint={otherCalendarHint(coreForm.date_of_birth, system)}
+                />
                 <TextField label="Nationality" placeholder="Nepali" value={coreForm.nationality} onChange={setField('nationality')} edited={isEdited('nationality')} />
                 <SegmentField
                   label="Marital status"
@@ -1279,7 +1285,7 @@ export default function EmployeeCvPage() {
               <ProfileCard title="Personal" action="Edit" onAction={() => openSection('personal')}>
                 <FactGrid>
                   <Fact label="Gender">{employee.gender ? <span className="capitalize">{employee.gender}</span> : null}</Fact>
-                  <Fact label="Date of birth">{employee.date_of_birth ? formatAdDate(employee.date_of_birth, system) : null}</Fact>
+                  <Fact label="Date of birth">{employee.date_of_birth ? formatBothCalendars(employee.date_of_birth, system) : null}</Fact>
                   <Fact label="Nationality">{employee.nationality}</Fact>
                   <Fact label="Marital status">{employee.marital_status ? <span className="capitalize">{employee.marital_status}</span> : null}</Fact>
                   <Fact label="Blood group">{employee.blood_group}</Fact>
