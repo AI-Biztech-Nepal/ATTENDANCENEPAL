@@ -588,11 +588,11 @@ export default function EmployeesScreen({ route, navigation }: any) {
                     </Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={styles.cardId}>#{item.fingerprint_id ?? '—'}</Text>
+                <Text style={styles.cardId} accessibilityLabel={`Employee ID ${item.employee_code}`}>ID {item.employee_code}</Text>
               </View>
 
               <View style={styles.badgeRow}>
-                <Badge tone={item.fingerprint_id ? 'good' : 'neutral'}>{item.fingerprint_id ? 'Biometric Enrolled' : 'Not Enrolled'}</Badge>
+                <Badge tone={item.fingerprint_id ? 'good' : 'neutral'}>{item.fingerprint_id ? `Biometric ID ${item.fingerprint_id}` : 'Not Enrolled'}</Badge>
                 {hasLogin && <Badge tone="good">Login Active</Badge>}
                 {renderEmploymentBadges(item)}
               </View>

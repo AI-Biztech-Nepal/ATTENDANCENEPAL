@@ -1517,8 +1517,8 @@ function EmployeesView() {
 
                 <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
                   <div>
-                    <dt className="text-xs text-slate-400">ID</dt>
-                    <dd className="font-semibold text-ink">{emp.fingerprint_id ?? '—'}</dd>
+                    <dt className="text-xs text-slate-400">Employee ID</dt>
+                    <dd className="font-semibold text-ink">{emp.employee_code}</dd>
                   </div>
                   <div>
                     <dt className="text-xs text-slate-400">Date of Joining</dt>
@@ -1680,7 +1680,7 @@ function EmployeesView() {
             <thead>
               <tr className="sticky top-0 z-10 border-b border-slate-200/80 bg-slate-50/90 backdrop-blur-sm text-[11px] uppercase tracking-wider text-slate-500">
                 <th className="sticky left-0 z-20 rounded-tl-2xl bg-slate-50 py-3.5 pl-4 pr-1 text-left font-bold">S.N.</th>
-                <th className="sticky left-11 z-20 bg-slate-50 py-3.5 pl-2 pr-3 text-left font-bold">Employee</th>
+                <th className="sticky left-11 z-20 bg-slate-50 py-3.5 pl-2 pr-3 text-left font-bold">Employee / ID</th>
                 <th className="px-3 py-3.5 text-left font-bold">Login</th>
                 <th className="px-3 py-3.5 text-left font-bold">Joined</th>
                 <th className="px-3 py-3.5 text-left font-bold">Branch</th>
@@ -1728,8 +1728,9 @@ function EmployeesView() {
                             </Link>
                             {renderNameBadges(emp)}
                           </div>
-                          <div className="mt-0.5 truncate text-xs text-slate-500" title={contact}>
-                            {contact || '—'}
+                          <div className="mt-0.5 truncate text-xs text-slate-500" title={`Employee ID ${emp.employee_code}${contact ? ' · ' + contact : ''}`}>
+                            <span className="font-bold tabular-nums text-slate-700">{emp.employee_code}</span>
+                            {contact ? ` · ${contact}` : ''}
                           </div>
                         </div>
                       </div>
