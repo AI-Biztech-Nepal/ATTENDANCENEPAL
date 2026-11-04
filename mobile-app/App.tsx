@@ -11,6 +11,7 @@ import { useFonts } from 'expo-font';
 import { MANROPE_FONTS, applyManropeGlobally } from './src/lib/fonts';
 import { AuthProvider, useAuth } from './src/lib/AuthContext';
 import { CalendarSystemProvider } from './src/lib/CalendarSystemContext';
+import { ToastProvider } from './src/components/Toast';
 import LoginScreen from './src/screens/LoginScreen';
 import CheckInScreen from './src/screens/CheckInScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
@@ -395,11 +396,13 @@ export default function App() {
       {/* Needed by the owner tab bar, which reads insets at the top level
           (outside any navigator's own provider) to clear the gesture bar. */}
       <SafeAreaProvider>
-        <AuthProvider>
-          <CalendarSystemProvider>
-            <AppInner />
-          </CalendarSystemProvider>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <CalendarSystemProvider>
+              <AppInner />
+            </CalendarSystemProvider>
+          </AuthProvider>
+        </ToastProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

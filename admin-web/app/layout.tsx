@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { CalendarSystemProvider } from '@/lib/calendarSystem';
 import { ConfirmProvider } from '@/components/ConfirmDialog';
+import { ToastProvider } from '@/components/Toast';
 import ChunkErrorReload from '@/components/ChunkErrorReload';
 
 export const metadata: Metadata = {
@@ -15,7 +16,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ChunkErrorReload />
         <CalendarSystemProvider>
-          <ConfirmProvider>{children}</ConfirmProvider>
+          <ConfirmProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </ConfirmProvider>
         </CalendarSystemProvider>
       </body>
     </html>
