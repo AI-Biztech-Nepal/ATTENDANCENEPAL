@@ -8,6 +8,7 @@ import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import PhotoCropModal from '@/components/PhotoCropModal';
 import { useConfirm } from '@/components/ConfirmDialog';
+import { useToast } from '@/components/Toast';
 import HorizontalScrollButtons from '@/components/HorizontalScrollButtons';
 import AnchoredPopover from '@/components/AnchoredPopover';
 import { formatAdDate } from '@/lib/calendar';
@@ -118,6 +119,7 @@ export default function EmployeesPage() {
 
 function EmployeesView() {
   const confirm = useConfirm();
+  const toast = useToast();
   const { system } = useCalendarSystem();
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -211,6 +213,8 @@ function EmployeesView() {
   // since it erases attendance/payroll/task/leave history with no undo.
   const [forceDeleteEmployee, setForceDeleteEmployee] = useState<Employee | null>(null);
   const [forceDeleteConfirmText, setForceDeleteConfirmText] = useState('');
+  // Why the confirmation opened, when it was not a former employee being removed (see handleDelete).
+  const [forceDeleteNote, setForceDeleteNote] = useState<string | null>(null);
   const [forceDeleting, setForceDeleting] = useState(false);
   const [forceDeleteError, setForceDeleteError] = useState<string | null>(null);
 
@@ -592,6 +596,13 @@ function EmployeesView() {
   }
 
   async function handleDelete(id: string) {
+    const person = employees.find(e => e.id === id);
+    // Someone who has already left: removing them means erasing everything tied to them, which a plain delete is
+    // refused for whenever they have any history. So it goes straight to the type-the-name confirmation.
+    if (person && person.status !== 'active') {
+      openForceDelete(person);
+      return;
+    }
     const paths = await documentPaths(id);
     const message =
       paths.length > 0
@@ -600,19 +611,22 @@ function EmployeesView() {
     if (!(await confirm(message, { title: 'Remove employee?', confirmLabel: 'Remove', tone: 'danger' }))) return;
     const { error } = await supabase.from('employees').delete().eq('id', id);
     if (error) {
-      if (error.code === '23503') {
-        alert(
-          'Could not remove: this employee already has attendance, tasks, shifts, leave, or other records tied to them, ' +
-            'so deleting would break that history. Use "Mark Resigned" instead — it keeps their history but removes them ' +
-            'from active views. If you specifically want their history erased too, mark them resigned first, then use ' +
-            '"Permanently Delete" under Former staff.'
+      if (error.code === '23503' && person) {
+        // Still working here, with history: offer to erase it all behind the same confirmation, not a dead end.
+        openForceDelete(
+          person,
+          `${person.name} still works here and has attendance, tasks, shifts, leave or other records tied to them. ` +
+            'If they have left, "Mark Resigned" keeps that history instead of erasing it.'
         );
+      } else if (error.code === '23503') {
+        alert('Could not remove: this employee has attendance, tasks, shifts, leave, or other records tied to them.');
       } else {
         alert(`Could not remove: ${error.message}`);
       }
       return;
     }
     await removeDocumentFiles(paths);
+    toast.show('Employee removed');
     reload();
   }
 
@@ -668,8 +682,9 @@ function EmployeesView() {
     reload();
   }
 
-  function openForceDelete(emp: Employee) {
+  function openForceDelete(emp: Employee, note: string | null = null) {
     setForceDeleteEmployee(emp);
+    setForceDeleteNote(note);
     setForceDeleteConfirmText('');
     setForceDeleteError(null);
   }
@@ -689,6 +704,7 @@ function EmployeesView() {
     await removeDocumentFiles(paths);
     setForceDeleting(false);
     setForceDeleteEmployee(null);
+    toast.show('Employee removed');
     reload();
   }
 
@@ -1643,12 +1659,6 @@ function EmployeesView() {
                         tone="accent"
                         onClick={() => handleRestore(emp)}
                       />
-                      <ActionTile
-                        icon={<TrashIcon className="h-4 w-4" />}
-                        label="Permanently Delete"
-                        tone="critical"
-                        onClick={() => openForceDelete(emp)}
-                      />
                     </>
                   )}
                 </div>
@@ -1930,17 +1940,6 @@ function EmployeesView() {
                               >
                                 <RestoreIcon className="h-4 w-4" />
                                 Restore
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  openForceDelete(emp);
-                                  setActiveMenuId(null);
-                                }}
-                                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-critical transition-colors hover:bg-critical/10"
-                              >
-                                <TrashIcon className="h-4 w-4" />
-                                Delete Forever
                               </button>
                             </>
                           )}
@@ -2338,10 +2337,16 @@ function EmployeesView() {
               <AlertIcon className="h-5 w-5 shrink-0 text-critical" />
               <h3 className="text-lg font-semibold text-ink">Permanently delete {forceDeleteEmployee.name}?</h3>
             </div>
+            {forceDeleteNote && (
+              <p className="mb-3 rounded-lg border border-warning/30 bg-warning-bg px-3 py-2 text-sm text-warning-text" role="status">
+                {forceDeleteNote}
+              </p>
+            )}
             <p className="mb-4 text-sm text-slate-600">
-              This erases their attendance logs, payroll history, tasks, leave requests, corrections, CV entries, and
-              uploaded documents — everything, not just their profile. <span className="font-semibold text-critical">There is no undo.</span>{' '}
-              Their sign-in account (if any) is kept but unlinked, not deleted.
+              This erases their attendance logs, payroll history, tasks, leave requests, corrections, shifts and roster, CV entries, exit
+              records, and uploaded documents — everything, not just their profile.{' '}
+              <span className="font-semibold text-critical">There is no undo.</span> Their sign-in account (if any) is kept but unlinked,
+              not deleted.
             </p>
             <label className="mb-1 block text-xs font-medium text-slate-600">
               Type <span className="font-mono font-semibold text-ink">{forceDeleteEmployee.name}</span> to confirm

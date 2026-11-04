@@ -7,6 +7,7 @@ import type { Branch, Department, Employee, Gender, Profile, Shift } from '../ty
 import { resolveShift, formatShiftHours } from '../lib/shift';
 import { fetchAll } from '../lib/leaveBalance';
 import { useCompanyName } from '../lib/useCompanyName';
+import { useToast } from '../components/Toast';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
 import DatePicker from '../components/DatePicker';
@@ -92,6 +93,8 @@ export default function EmployeesScreen({ route, navigation }: any) {
   const [resetResult, setResetResult] = useState<string | null>(null);
 
   const [forceDeleteEmployee, setForceDeleteEmployee] = useState<Employee | null>(null);
+  // Why the confirmation opened, when it was not a former employee being removed (see handleRemove).
+  const [forceDeleteNote, setForceDeleteNote] = useState<string | null>(null);
   const [forceDeleteConfirmText, setForceDeleteConfirmText] = useState('');
   const [forceDeleting, setForceDeleting] = useState(false);
   const [forceDeleteError, setForceDeleteError] = useState<string | null>(null);
@@ -106,6 +109,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
 
   const { system } = useCalendarSystem();
   const companyName = useCompanyName();
+  const toast = useToast();
   const [moreFilters, setMoreFilters] = useState(NO_FILTERS);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   // Where each leaver (or person serving notice) stands on their final settlement.
@@ -360,6 +364,12 @@ export default function EmployeesScreen({ route, navigation }: any) {
   }
 
   async function handleRemove(emp: Employee) {
+    // Someone who has already left: removing them means erasing everything tied to them, which a plain delete is
+    // refused for whenever they have any history. So it goes straight to the type-the-name confirmation.
+    if (emp.status !== 'active') {
+      openForceDelete(emp);
+      return;
+    }
     const paths = await documentPaths(emp.id);
     const message =
       paths.length > 0
@@ -368,15 +378,19 @@ export default function EmployeesScreen({ route, navigation }: any) {
     if (!(await confirmAsync('Remove employee', message, 'Remove', true))) return;
     const { error } = await supabase.from('employees').delete().eq('id', emp.id);
     if (error) {
-      notify(
-        'Could not remove',
-        error.code === '23503'
-          ? 'This employee already has attendance, tasks, or other records tied to them. Use "Mark Resigned" instead.'
-          : error.message
-      );
+      if (error.code === '23503') {
+        // Still working here, with history: offer to erase it all behind the same confirmation, not a dead end.
+        openForceDelete(
+          emp,
+          `${emp.name} still works here and has attendance, tasks, shifts, leave or other records tied to them. If they have left, "Mark Resigned" keeps that history instead of erasing it.`
+        );
+      } else {
+        notify('Could not remove', error.message);
+      }
       return;
     }
     await removeDocumentFiles(paths);
+    toast.show('Employee removed');
     reload();
   }
 
@@ -499,8 +513,9 @@ export default function EmployeesScreen({ route, navigation }: any) {
     setResetResult(resetPasswordValue);
   }
 
-  function openForceDelete(emp: Employee) {
+  function openForceDelete(emp: Employee, note: string | null = null) {
     setForceDeleteEmployee(emp);
+    setForceDeleteNote(note);
     setForceDeleteConfirmText('');
     setForceDeleteError(null);
   }
@@ -519,6 +534,7 @@ export default function EmployeesScreen({ route, navigation }: any) {
     await removeDocumentFiles(paths);
     setForceDeleting(false);
     setForceDeleteEmployee(null);
+    toast.show('Employee removed');
     reload();
   }
 
@@ -708,9 +724,6 @@ export default function EmployeesScreen({ route, navigation }: any) {
                   <>
                     <TouchableOpacity style={[styles.actionTile, styles.actionWarning]} onPress={() => openResignModal(item)}>
                       <Text style={[styles.actionText, { color: colors.warningText }]}>Edit date</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionTile, styles.actionCritical]} onPress={() => openForceDelete(item)}>
-                      <Text style={[styles.actionText, { color: colors.criticalText }]}>Delete forever</Text>
                     </TouchableOpacity>
                   </>
                 )}
@@ -991,9 +1004,10 @@ export default function EmployeesScreen({ route, navigation }: any) {
         <TouchableOpacity style={styles.modalBackdropCenter} activeOpacity={1} onPress={() => setForceDeleteEmployee(null)}>
           <TouchableOpacity activeOpacity={1} style={[styles.formSheet, { borderWidth: 2, borderColor: colors.criticalBg }]}>
             <Text style={[styles.formTitle, { color: colors.criticalText }]}>Permanently delete {forceDeleteEmployee?.name}?</Text>
+            {!!forceDeleteNote && <Text style={[styles.hint, { color: colors.warningText, fontWeight: '600' }]}>{forceDeleteNote}</Text>}
             <Text style={styles.hint}>
-              This erases their attendance logs, payroll history, tasks, leave requests, corrections, and CV entries — everything, not just their profile. There is no undo. Their
-              sign-in account (if any) is kept but unlinked, not deleted.
+              This erases their attendance logs, payroll history, tasks, leave requests, corrections, shifts and roster, CV entries, exit records and documents — everything, not just
+              their profile. There is no undo. Their sign-in account (if any) is kept but unlinked, not deleted.
             </Text>
             <Text style={styles.label}>
               Type <Text style={{ fontWeight: '700', color: colors.ink }}>{forceDeleteEmployee?.name}</Text> to confirm
