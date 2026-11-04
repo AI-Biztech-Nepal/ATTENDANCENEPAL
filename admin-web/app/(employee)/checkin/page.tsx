@@ -559,15 +559,15 @@ export default function CheckInPage() {
               <div className={`mt-1 text-base font-bold ${statusTile.value}`}>{todaySummary.status.label}</div>
               <div className={`mt-0.5 text-[11px] ${statusTile.sub}`}>{todaySummary.inAt === '—' ? 'Not checked in yet' : `Since ${todaySummary.inAt}`}</div>
             </div>
-            <div className="rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10">
-              <span className="text-xs font-medium text-good-text/80">In at</span>
-              <div className="mt-1 text-base font-bold text-good-text">{todaySummary.inAt}</div>
-              <div className="mt-0.5 text-[11px] text-good-text/70">Today</div>
+            <div className={`rounded-xl p-3 shadow-sm ring-1 ring-inset ${TILE_BOX}`}>
+              <span className="text-xs font-medium text-emerald-900/80">In at</span>
+              <div className="mt-1 text-base font-bold text-emerald-900">{todaySummary.inAt}</div>
+              <div className="mt-0.5 text-[11px] text-emerald-900/70">Today</div>
             </div>
-            <div className="col-span-2 rounded-xl bg-good-bg p-3 shadow-sm ring-1 ring-inset ring-good/10 sm:col-span-1">
-              <span className="text-xs font-medium text-good-text/80">Worked</span>
-              <div className="mt-1 text-base font-bold text-good-text">{todaySummary.worked}</div>
-              <div className="mt-0.5 text-[11px] text-good-text/70">Today so far</div>
+            <div className={`col-span-2 rounded-xl p-3 shadow-sm ring-1 ring-inset sm:col-span-1 ${TILE_BOX}`}>
+              <span className="text-xs font-medium text-emerald-900/80">Worked</span>
+              <div className="mt-1 text-base font-bold text-emerald-900">{todaySummary.worked}</div>
+              <div className="mt-0.5 text-[11px] text-emerald-900/70">Today so far</div>
             </div>
           </div>
 
@@ -971,10 +971,12 @@ export default function CheckInPage() {
   );
 }
 
+const TILE_BOX = 'bg-emerald-100/80 ring-emerald-300/40';
 const STATUS_TILE = {
-  good: { box: 'bg-good-bg ring-good/10', label: 'text-good-text/80', value: 'text-good-text', sub: 'text-good-text/70' },
-  warning: { box: 'bg-warning-bg ring-warning/10', label: 'text-warning-text/80', value: 'text-warning-text', sub: 'text-warning-text/70' },
-  neutral: { box: 'bg-slate-50 ring-slate-200', label: 'text-slate-500', value: 'text-ink', sub: 'text-slate-400' },
+  good: { box: TILE_BOX, label: 'text-emerald-900/80', value: 'text-emerald-900', sub: 'text-emerald-900/70' },
+  // Same green tile as the other two, but the words stay orange so "Not in" still reads as needing attention.
+  warning: { box: TILE_BOX, label: 'text-emerald-900/80', value: 'text-warning-text', sub: 'text-emerald-900/70' },
+  neutral: { box: TILE_BOX, label: 'text-emerald-900/80', value: 'text-ink', sub: 'text-emerald-900/70' },
 } as const;
 
 /** Check In / Check Out. */
