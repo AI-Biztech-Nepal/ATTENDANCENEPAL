@@ -318,7 +318,7 @@ export default function CheckInPage() {
           )
         )
       : 0;
-    return { status, inAt: punches ? formatTime(punches.checkIn.punch_time) : '—', worked: formatHoursMinutes(workedMinutes) };
+    return { status, inAt: punches ? formatTime(punches.checkIn.punch_time) : '—', worked: formatHoursMinutes(workedMinutes), workedMinutes };
   }, [history, pendingGpsRequests, today, now]);
 
   // One row per day for the table, newest first: the punches that count, plus
@@ -520,17 +520,21 @@ export default function CheckInPage() {
       ? inclusiveDays(leaveForm.start_date, leaveForm.end_date)
       : null;
 
+  // Each tile's colour follows what it says: green once there is something to show, orange when
+  // the employee still needs to check in, grey when it is empty or finished.
   const statusTile = STATUS_TILE[todaySummary.status.tone];
+  const inAtTile = STATUS_TILE[todaySummary.inAt === '—' ? 'neutral' : 'good'];
+  const workedTile = STATUS_TILE[todaySummary.workedMinutes > 0 ? 'good' : 'neutral'];
 
   return (
     <PageBody>
       {view === 'menu' && (
         <>
-          <section className={`mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl p-4 shadow-sm ring-1 ring-inset sm:p-6 ${TILE_BOX}`}>
+          <section className="mb-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-gradient-to-r from-accent/10 via-accent/5 to-transparent p-4 shadow-sm sm:p-6">
             <div className="min-w-0">
-              <h2 className="truncate text-xl font-bold text-emerald-900">Namaste{firstName ? `, ${firstName}` : ''}</h2>
-              <p className="mt-0.5 text-sm text-emerald-900/70">{todayLine}</p>
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-emerald-900/60">
+              <h2 className="truncate text-xl font-bold text-ink">Namaste{firstName ? `, ${firstName}` : ''}</h2>
+              <p className="mt-0.5 text-sm text-slate-500">{todayLine}</p>
+              <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
                 <PinIcon className="h-3.5 w-3.5 shrink-0" />
                 Uses your GPS location · approved by Admin/HR
               </p>
@@ -559,15 +563,15 @@ export default function CheckInPage() {
               <div className={`mt-1 text-base font-bold ${statusTile.value}`}>{todaySummary.status.label}</div>
               <div className={`mt-0.5 text-[11px] ${statusTile.sub}`}>{todaySummary.inAt === '—' ? 'Not checked in yet' : `Since ${todaySummary.inAt}`}</div>
             </div>
-            <div className={`rounded-xl p-3 shadow-sm ring-1 ring-inset ${TILE_BOX}`}>
-              <span className="text-xs font-medium text-emerald-900/80">In at</span>
-              <div className="mt-1 text-base font-bold text-emerald-900">{todaySummary.inAt}</div>
-              <div className="mt-0.5 text-[11px] text-emerald-900/70">Today</div>
+            <div className={`rounded-xl p-3 shadow-sm ring-1 ring-inset ${inAtTile.box}`}>
+              <span className={`text-xs font-medium ${inAtTile.label}`}>In at</span>
+              <div className={`mt-1 text-base font-bold ${inAtTile.value}`}>{todaySummary.inAt}</div>
+              <div className={`mt-0.5 text-[11px] ${inAtTile.sub}`}>Today</div>
             </div>
-            <div className={`col-span-2 rounded-xl p-3 shadow-sm ring-1 ring-inset sm:col-span-1 ${TILE_BOX}`}>
-              <span className="text-xs font-medium text-emerald-900/80">Worked</span>
-              <div className="mt-1 text-base font-bold text-emerald-900">{todaySummary.worked}</div>
-              <div className="mt-0.5 text-[11px] text-emerald-900/70">Today so far</div>
+            <div className={`col-span-2 rounded-xl p-3 shadow-sm ring-1 ring-inset sm:col-span-1 ${workedTile.box}`}>
+              <span className={`text-xs font-medium ${workedTile.label}`}>Worked</span>
+              <div className={`mt-1 text-base font-bold ${workedTile.value}`}>{todaySummary.worked}</div>
+              <div className={`mt-0.5 text-[11px] ${workedTile.sub}`}>Today so far</div>
             </div>
           </div>
 
@@ -971,12 +975,10 @@ export default function CheckInPage() {
   );
 }
 
-const TILE_BOX = 'bg-emerald-100/80 ring-emerald-300/40';
 const STATUS_TILE = {
-  good: { box: TILE_BOX, label: 'text-emerald-900/80', value: 'text-emerald-900', sub: 'text-emerald-900/70' },
-  // Same green tile as the other two, but the words stay orange so "Not in" still reads as needing attention.
-  warning: { box: TILE_BOX, label: 'text-emerald-900/80', value: 'text-warning-text', sub: 'text-emerald-900/70' },
-  neutral: { box: TILE_BOX, label: 'text-emerald-900/80', value: 'text-ink', sub: 'text-emerald-900/70' },
+  good: { box: 'bg-emerald-100/80 ring-emerald-300/40', label: 'text-emerald-900/80', value: 'text-emerald-900', sub: 'text-emerald-900/70' },
+  warning: { box: 'bg-warning-bg ring-warning/10', label: 'text-warning-text/80', value: 'text-warning-text', sub: 'text-warning-text/70' },
+  neutral: { box: 'bg-slate-50 ring-slate-200', label: 'text-slate-500', value: 'text-ink', sub: 'text-slate-400' },
 } as const;
 
 /** Check In / Check Out. */
