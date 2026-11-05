@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
+import { useCompanyName } from '@/lib/companyName';
 import { timeAgo, usePendingApprovals, type PendingQueue } from '@/lib/pendingApprovals';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -78,11 +79,10 @@ export default function DashboardPage() {
   const [detailKey, setDetailKey] = useState<DetailKey | null>(null);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
-  const [ownerName, setOwnerName] = useState<string | null>(null);
   const pending = usePendingApprovals();
-  // Top bar reads "DASHBOARD" over "Namaste, <first name>".
-  const firstName = ownerName?.trim().split(/\s+/)[0];
-  usePageTitle(`Namaste${firstName ? `, ${firstName}` : ''}`, 'Dashboard');
+  // Top bar reads "DASHBOARD" over the company's name (just "Dashboard" until the name has loaded).
+  const companyName = useCompanyName();
+  usePageTitle(companyName || 'Dashboard', companyName ? 'Dashboard' : '');
 
   useEffect(() => {
     if (!supabaseConfigured) {
@@ -144,11 +144,6 @@ export default function DashboardPage() {
     supabase.from('company_holidays').select('*').eq('holiday_date', today).maybeSingle().then(({ data }) => setTodayHoliday(data ?? null));
     // Branch names for the live activity and device rows.
     supabase.from('branches').select('id, name').then(({ data }) => setBranches(data ?? []));
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) return;
-      const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', data.user.id).single();
-      setOwnerName(profile?.full_name ?? null);
-    });
     // A week of punches for a busy/large company can pass PostgREST's
     // default 1000-row cap on a plain select(), which silently truncates
     // rather than erroring — quietly wrong present/late/absent KPIs and a
