@@ -25,12 +25,8 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
   // What HR has done about them. Reloaded as the person moves between screens.
   const { items, unread, markAllRead } = useMyNotifications(route?.name ?? '');
   const [bellOpen, setBellOpen] = useState(false);
-  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
 
   function openBell() {
-    // The ones that are new now stay highlighted while the panel is open; everything is marked read at once.
-    setFreshIds(new Set(items.filter(n => !n.read_at).map(n => n.id)));
-    if (unread > 0) markAllRead();
     setBellOpen(true);
   }
   function openExit() {
@@ -118,7 +114,7 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
         </View>
       </View>
 
-      <EmployeeNotificationsModal visible={bellOpen} onClose={() => setBellOpen(false)} items={items} freshIds={freshIds} onOpen={openExit} />
+      <EmployeeNotificationsModal visible={bellOpen} onClose={() => setBellOpen(false)} items={items} unread={unread} onMarkAllRead={markAllRead} onOpen={openExit} />
 
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuOpen(false)}>

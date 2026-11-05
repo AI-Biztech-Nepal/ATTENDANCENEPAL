@@ -10,21 +10,16 @@ import { notificationLines, notificationTitle, type EmployeeNotification } from 
 type Notifications = { items: EmployeeNotification[]; unread: number; markAllRead: () => Promise<void> };
 
 /** The employee portal's bell: what HR has done about them — today, changes to their exit. The badge counts what
- * they have not seen; opening the panel marks it all read, but the ones that were new stay highlighted while the
- * panel is open. `notes` comes from the shell so the phone and computer headers share one fetch. */
+ * they have not read; the unread ones are highlighted, and "Mark all as read" clears both. `notes` comes from the
+ * shell so the phone and computer headers share one fetch. */
 export default function EmployeeBell({ notes, variant }: { notes: Notifications; variant: 'onDark' | 'portal' }) {
   const pathname = usePathname();
   const { system } = useCalendarSystem();
   const [open, setOpen] = useState(false);
-  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
   const wrapRef = useRef<HTMLDivElement>(null);
   const { items, unread, markAllRead } = notes;
 
   function toggle() {
-    if (!open) {
-      setFreshIds(new Set(items.filter(n => !n.read_at).map(n => n.id)));
-      if (unread > 0) markAllRead();
-    }
     setOpen(o => !o);
   }
 
@@ -76,8 +71,16 @@ export default function EmployeeBell({ notes, variant }: { notes: Notifications;
           aria-label="Notifications"
           className="fixed inset-x-3 top-[72px] z-40 max-h-[calc(100vh-88px)] overflow-y-auto rounded-2xl border border-slate-200 bg-white text-ink shadow-[0_16px_48px_rgba(15,23,42,0.18)] sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[390px] sm:max-h-[min(640px,calc(100vh-110px))]"
         >
-          <div className="sticky top-0 z-10 border-b border-slate-100 bg-white px-4 py-3">
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-slate-100 bg-white px-4 py-3">
             <h2 className="text-sm font-extrabold text-ink">Notifications</h2>
+            {unread > 0 && (
+              <span className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-slate-500">{unread} new</span>
+                <button type="button" onClick={() => markAllRead()} className="text-xs font-extrabold text-accent hover:underline">
+                  Mark all as read
+                </button>
+              </span>
+            )}
           </div>
 
           {items.length === 0 ? (
@@ -89,7 +92,7 @@ export default function EmployeeBell({ notes, variant }: { notes: Notifications;
             <ul>
               {items.map(n => {
                 const lines = notificationLines(n, system);
-                const fresh = freshIds.has(n.id);
+                const fresh = !n.read_at;
                 return (
                   <li key={n.id} className="border-b border-slate-100 last:border-b-0">
                     <Link href="/my-profile?tab=exit" onClick={() => setOpen(false)} className={`block px-4 py-3 hover:bg-slate-50 ${fresh ? 'bg-accent/5' : ''}`}>

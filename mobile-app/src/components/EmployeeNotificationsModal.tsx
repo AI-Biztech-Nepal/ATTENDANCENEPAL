@@ -5,25 +5,31 @@ import { notificationLines, notificationTitle, timeAgo, type EmployeeNotificatio
 import { colors } from '../theme';
 import { Sheet } from './hr/HrKit';
 
-/** The employee's bell panel: what HR has done about them — today, changes to their exit. `freshIds` are the ones
- * that were new when the panel was opened (they are marked read at once, but stay highlighted while it is open).
- * Tapping one opens their Exit tab. */
+/** The employee's bell panel: what HR has done about them — today, changes to their exit. The unread ones are
+ * highlighted until "Mark all as read" is tapped. Tapping one opens their Exit tab. */
 export default function EmployeeNotificationsModal({
   visible,
   onClose,
   items,
-  freshIds,
+  unread,
+  onMarkAllRead,
   onOpen,
 }: {
   visible: boolean;
   onClose: () => void;
   items: EmployeeNotification[];
-  freshIds: Set<string>;
+  unread: number;
+  onMarkAllRead: () => void;
   onOpen: () => void;
 }) {
   const { system } = useCalendarSystem();
   return (
-    <Sheet visible={visible} title="Notifications" onClose={onClose} closeLabel="Close">
+    <Sheet visible={visible} title="Notifications" subtitle={unread > 0 ? `${unread} new` : undefined} onClose={onClose} closeLabel="Close">
+      {unread > 0 && (
+        <TouchableOpacity style={styles.markRead} onPress={onMarkAllRead} accessibilityRole="button" accessibilityLabel="Mark all as read">
+          <Text style={styles.markReadText}>Mark all as read</Text>
+        </TouchableOpacity>
+      )}
       {items.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>Nothing new</Text>
@@ -32,7 +38,7 @@ export default function EmployeeNotificationsModal({
       ) : (
         items.map(n => {
           const lines = notificationLines(n, system);
-          const fresh = freshIds.has(n.id);
+          const fresh = !n.read_at;
           return (
             <TouchableOpacity
               key={n.id}
@@ -62,6 +68,8 @@ export default function EmployeeNotificationsModal({
 }
 
 const styles = StyleSheet.create({
+  markRead: { alignSelf: 'flex-end', paddingVertical: 4, paddingHorizontal: 2 },
+  markReadText: { fontSize: 13, fontWeight: '800', color: colors.accent },
   empty: { alignItems: 'center', paddingVertical: 28 },
   emptyTitle: { fontSize: 14, fontWeight: '700', color: colors.ink },
   emptyText: { fontSize: 12, color: colors.slate500, marginTop: 4, textAlign: 'center' },
