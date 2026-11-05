@@ -5,8 +5,8 @@ import { notificationLines, notificationTitle, timeAgo, type EmployeeNotificatio
 import { colors } from '../theme';
 import { Sheet } from './hr/HrKit';
 
-/** The employee's bell panel: what HR has done about them — today, changes to their exit. The unread ones are
- * highlighted until "Mark all as read" is tapped. Tapping one opens their Exit tab. */
+/** The employee's bell panel: what HR has done about them — today, changes to their exit. It lists only the unread
+ * ones, so "Mark all as read" empties it. Tapping one opens their Exit tab. */
 export default function EmployeeNotificationsModal({
   visible,
   onClose,
@@ -23,6 +23,7 @@ export default function EmployeeNotificationsModal({
   onOpen: () => void;
 }) {
   const { system } = useCalendarSystem();
+  const shown = items.filter(n => !n.read_at);
   return (
     <Sheet visible={visible} title="Notifications" subtitle={unread > 0 ? `${unread} new` : undefined} onClose={onClose} closeLabel="Close">
       {unread > 0 && (
@@ -30,24 +31,23 @@ export default function EmployeeNotificationsModal({
           <Text style={styles.markReadText}>Mark all as read</Text>
         </TouchableOpacity>
       )}
-      {items.length === 0 ? (
+      {shown.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>Nothing new</Text>
           <Text style={styles.emptyText}>When HR updates something about you, it shows up here.</Text>
         </View>
       ) : (
-        items.map(n => {
+        shown.map(n => {
           const lines = notificationLines(n, system);
-          const fresh = !n.read_at;
           return (
             <TouchableOpacity
               key={n.id}
-              style={[styles.row, fresh && styles.rowFresh]}
+              style={[styles.row, styles.rowFresh]}
               onPress={onOpen}
               accessibilityRole="button"
               accessibilityLabel={`${notificationTitle(n)}. ${lines.join('. ')}`}
             >
-              <View style={[styles.dot, fresh && styles.dotFresh]} />
+              <View style={[styles.dot, styles.dotFresh]} />
               <View style={{ flex: 1 }}>
                 <View style={styles.titleRow}>
                   <Text style={styles.title}>{notificationTitle(n)}</Text>

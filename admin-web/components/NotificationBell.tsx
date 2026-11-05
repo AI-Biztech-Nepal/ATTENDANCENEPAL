@@ -8,7 +8,7 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import { usePendingApprovals, timeAgo } from '@/lib/pendingApprovals';
 import { BIRTHDAY_LOOKAHEAD_DAYS, BIRTHDAY_NOTIFY_DAYS, birthdaysToNotify, exitLabel, formatDayMonth, useHrAlerts } from '@/lib/hrAlerts';
 import { formatAdDate } from '@/lib/calendar';
-import { useNotificationReads, type NotificationItems } from '@/lib/notificationReads';
+import { birthdayKey, contractKey, exitKey, useNotificationReads, type NotificationItems } from '@/lib/notificationReads';
 
 const BIRTHDAYS_SHOWN = 8;
 
@@ -27,22 +27,28 @@ export default function NotificationBell() {
   const pathname = usePathname();
   const { system } = useCalendarSystem();
   const pending = usePendingApprovals();
-  const { contracts, birthdays, exits } = useHrAlerts(system, pathname);
+  const { contracts: allContracts, birthdays: allBirthdays, exits: allExits } = useHrAlerts(system, pathname);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  // What the badge counts, as plain data — so "Mark all as read" can remember it and later changes show as new.
-  const items = useMemo<NotificationItems>(
-    () => ({
+  // Everything the panel lists, as plain data — so "Mark all as read" can remember it and later changes show as new.
+  // `counts` is what also raises the badge: a resignation HR has not started on, a birthday within the week.
+  const items = useMemo<NotificationItems>(() => {
+    const soon = new Set(birthdaysToNotify(allBirthdays).map(b => b.id));
+    return {
       approvals: { gps: pending.gps.count, corrections: pending.corrections.count, leave: pending.leave.count },
-      contracts: contracts.map(c => ({ id: c.id, endKey: c.endKey })),
-      resignations: exits.filter(e => e.kind === 'handed_in').map(e => ({ id: e.id, handedInOn: e.handedInOn })),
-      birthdays: birthdaysToNotify(birthdays).map(b => ({ id: b.id, dateKey: b.dateKey })),
-    }),
-    [pending.gps.count, pending.corrections.count, pending.leave.count, contracts, exits, birthdays]
-  );
-  const { unread, markAllRead } = useNotificationReads(items, pending.loaded);
+      contracts: allContracts.map(c => ({ id: c.id, endKey: c.endKey })),
+      exits: allExits.map(e => ({ id: e.id, kind: e.kind, handedInOn: e.handedInOn, lastWorkingOn: e.lastWorkingOn, counts: e.kind === 'handed_in' })),
+      birthdays: allBirthdays.map(b => ({ id: b.id, dateKey: b.dateKey, counts: soon.has(b.id) })),
+    };
+  }, [pending.gps.count, pending.corrections.count, pending.leave.count, allContracts, allExits, allBirthdays]);
+  const { unread, isRead, queueUnread, markAllRead } = useNotificationReads(items, pending.loaded);
   const badge = unread.total;
+
+  // The panel lists only what has not been read, so "Mark all as read" empties it.
+  const contracts = allContracts.filter(c => !isRead(contractKey(c)));
+  const exits = allExits.filter(e => !isRead(exitKey(e)));
+  const birthdays = allBirthdays.filter(b => !isRead(birthdayKey(b)));
 
   useEffect(() => {
     if (!open) return;
@@ -64,10 +70,11 @@ export default function NotificationBell() {
   useEffect(() => setOpen(false), [pathname]);
 
   const approvals = [
-    { label: 'GPS check-ins', href: '/corrections', queue: pending.gps },
-    { label: 'Missed-punch corrections', href: '/corrections', queue: pending.corrections },
-    { label: 'Leave requests', href: '/leave', queue: pending.leave },
-  ].filter(a => a.queue.count > 0);
+    { label: 'GPS check-ins', href: '/corrections', queue: pending.gps, unread: queueUnread('gps') },
+    { label: 'Missed-punch corrections', href: '/corrections', queue: pending.corrections, unread: queueUnread('corrections') },
+    { label: 'Leave requests', href: '/leave', queue: pending.leave, unread: queueUnread('leave') },
+  ].filter(a => a.unread > 0);
+  const approvalTotal = approvals.reduce((sum, a) => sum + a.queue.count, 0);
   const nothing = approvals.length === 0 && contracts.length === 0 && exits.length === 0 && birthdays.length === 0;
 
   return (
@@ -96,9 +103,9 @@ export default function NotificationBell() {
         >
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3">
             <h2 className="text-sm font-extrabold text-ink">Notifications</h2>
-            {badge > 0 && (
+            {unread.listed > 0 && (
               <span className="flex items-center gap-3">
-                <span className="text-xs font-semibold text-slate-500">{badge} need attention</span>
+                {badge > 0 && <span className="text-xs font-semibold text-slate-500">{badge} need attention</span>}
                 <button type="button" onClick={markAllRead} className="text-xs font-extrabold text-brand hover:underline">
                   Mark all as read
                 </button>
@@ -109,12 +116,12 @@ export default function NotificationBell() {
           {nothing && (
             <div className="px-4 py-10 text-center">
               <p className="text-sm font-semibold text-ink">You&apos;re all caught up</p>
-              <p className="mt-1 text-xs text-slate-500">No approvals waiting, no resignations, no contracts ending and no birthdays coming up.</p>
+              <p className="mt-1 text-xs text-slate-500">New approvals, resignations, contracts ending and birthdays will show up here.</p>
             </div>
           )}
 
           {approvals.length > 0 && (
-            <Section title="Needs your approval" count={pending.total}>
+            <Section title="Needs your approval" count={approvalTotal}>
               {approvals.map(a => (
                 <Row key={a.label} href={a.href} onNavigate={() => setOpen(false)}>
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-warning-bg text-sm font-extrabold text-warning-text">

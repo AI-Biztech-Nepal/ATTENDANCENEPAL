@@ -7,42 +7,61 @@ import { usePendingApprovals } from './PendingApprovals';
 const STORAGE_KEY = 'attendance-nepal-notification-reads';
 
 export type ApprovalCounts = { gps: number; corrections: number; leave: number };
+export type ApprovalQueue = keyof ApprovalCounts;
 
 /** What the owner has already read in the bell, kept on this phone. Approvals are counted, not listed, so
  * they are remembered as "how many were waiting"; every other item is remembered by a key that changes when
- * the item does (a renewed contract, a new resignation, next year's birthday), so a change shows up as new. */
+ * the item does (a renewed contract, an exit moving to its next stage, next year's birthday), so a change
+ * shows up as new. */
 export type ReadMarks = { keys: string[]; seen: ApprovalCounts };
 
 export const NO_MARKS: ReadMarks = { keys: [], seen: { gps: 0, corrections: 0, leave: 0 } };
 
-/** Everything the bell's badge counts, as plain data. */
+/** Everything the bell lists, as plain data. `counts` marks the ones that also raise the badge. */
 export type NotificationItems = {
   approvals: ApprovalCounts;
   contracts: { id: string; endKey: string }[];
-  resignations: { id: string; handedInOn: string | null }[];
-  birthdays: { id: string; dateKey: string }[];
+  exits: { id: string; kind: string; handedInOn: string | null; lastWorkingOn: string | null; counts: boolean }[];
+  birthdays: { id: string; dateKey: string; counts: boolean }[];
 };
 
-const NO_ITEMS: NotificationItems = { approvals: { gps: 0, corrections: 0, leave: 0 }, contracts: [], resignations: [], birthdays: [] };
+const NO_ITEMS: NotificationItems = { approvals: { gps: 0, corrections: 0, leave: 0 }, contracts: [], exits: [], birthdays: [] };
 
-export type Unread = { approvals: number; contracts: number; resignations: number; birthdays: number; total: number };
+/** What is still unread: the badge's total with its parts, and everything unread whether or not it raises the badge. */
+export type Unread = { approvals: number; contracts: number; resignations: number; birthdays: number; total: number; listed: number };
 
-const contractKey = (c: { id: string; endKey: string }) => `contract:${c.id}:${c.endKey}`;
-const resignationKey = (r: { id: string; handedInOn: string | null }) => `exit:${r.id}:${r.handedInOn ?? ''}`;
-const birthdayKey = (b: { id: string; dateKey: string }) => `bday:${b.id}:${b.dateKey}`;
+export const contractKey = (c: { id: string; endKey: string }) => `contract:${c.id}:${c.endKey}`;
+export const exitKey = (e: { id: string; kind: string; handedInOn: string | null; lastWorkingOn: string | null }) =>
+  `exit:${e.id}:${e.kind}:${e.handedInOn ?? ''}:${e.lastWorkingOn ?? ''}`;
+export const birthdayKey = (b: { id: string; dateKey: string }) => `bday:${b.id}:${b.dateKey}`;
 
 function itemKeys(items: NotificationItems): string[] {
-  return [...items.contracts.map(contractKey), ...items.resignations.map(resignationKey), ...items.birthdays.map(birthdayKey)];
+  return [...items.contracts.map(contractKey), ...items.exits.map(exitKey), ...items.birthdays.map(birthdayKey)];
 }
 
-/** How many badge items are still unread. */
+/** How many of a queue's waiting requests have not been read. */
+export function queueUnread(items: NotificationItems, marks: ReadMarks, queue: ApprovalQueue): number {
+  const waiting = items.approvals[queue];
+  return Math.max(0, waiting - Math.min(marks.seen[queue], waiting));
+}
+
+/** How many items are still unread. */
 export function unreadOf(items: NotificationItems, marks: ReadMarks): Unread {
   const read = new Set(marks.keys);
-  const approvals = (['gps', 'corrections', 'leave'] as const).reduce((sum, q) => sum + Math.max(0, items.approvals[q] - Math.min(marks.seen[q], items.approvals[q])), 0);
+  const approvals = queueUnread(items, marks, 'gps') + queueUnread(items, marks, 'corrections') + queueUnread(items, marks, 'leave');
   const contracts = items.contracts.filter(c => !read.has(contractKey(c))).length;
-  const resignations = items.resignations.filter(r => !read.has(resignationKey(r))).length;
-  const birthdays = items.birthdays.filter(b => !read.has(birthdayKey(b))).length;
-  return { approvals, contracts, resignations, birthdays, total: approvals + contracts + resignations + birthdays };
+  const unreadExits = items.exits.filter(e => !read.has(exitKey(e)));
+  const unreadBirthdays = items.birthdays.filter(b => !read.has(birthdayKey(b)));
+  const resignations = unreadExits.filter(e => e.counts).length;
+  const birthdays = unreadBirthdays.filter(b => b.counts).length;
+  return {
+    approvals,
+    contracts,
+    resignations,
+    birthdays,
+    total: approvals + contracts + resignations + birthdays,
+    listed: approvals + contracts + unreadExits.length + unreadBirthdays.length,
+  };
 }
 
 /** Everything the bell shows right now counts as read. Anything remembered from before that is no longer
@@ -102,21 +121,22 @@ export function NotificationReadsProvider({ children }: { children: React.ReactN
   return <NotificationReadsContext.Provider value={value}>{children}</NotificationReadsContext.Provider>;
 }
 
-/** What is unread in the owner's bell, and the "Mark all as read" action. */
+/** What is unread in the owner's bell, and the "Mark all as read" action. The panel lists only what is unread
+ * (`isRead` / `queueUnread` say which), so marking everything read empties it. */
 export function useNotificationReads() {
   const { counts, loaded: approvalsLoaded } = usePendingApprovals();
   const { contracts, birthdays, exits } = useSharedHrAlerts();
   const { marks, loaded, save } = useContext(NotificationReadsContext);
 
-  const items = useMemo<NotificationItems>(
-    () => ({
+  const items = useMemo<NotificationItems>(() => {
+    const soon = new Set(birthdaysToNotify(birthdays).map(b => b.id));
+    return {
       approvals: { gps: counts.gps, corrections: counts.corrections, leave: counts.leave },
       contracts: contracts.map(c => ({ id: c.id, endKey: c.endKey })),
-      resignations: exits.filter(e => e.kind === 'handed_in').map(e => ({ id: e.id, handedInOn: e.handedInOn })),
-      birthdays: birthdaysToNotify(birthdays).map(b => ({ id: b.id, dateKey: b.dateKey })),
-    }),
-    [counts.gps, counts.corrections, counts.leave, contracts, exits, birthdays]
-  );
+      exits: exits.map(e => ({ id: e.id, kind: e.kind, handedInOn: e.handedInOn, lastWorkingOn: e.lastWorkingOn, counts: e.kind === 'handed_in' })),
+      birthdays: birthdays.map(b => ({ id: b.id, dateKey: b.dateKey, counts: soon.has(b.id) })),
+    };
+  }, [counts.gps, counts.corrections, counts.leave, contracts, exits, birthdays]);
 
   // Not before the marks have been read back and the queues counted: until then they are empty or 0, and
   // lowering would wipe what was remembered.
@@ -128,6 +148,13 @@ export function useNotificationReads() {
 
   // Until the stored marks are back, show nothing rather than a number that then drops.
   const unread = useMemo(() => unreadOf(loaded ? items : NO_ITEMS, marks), [items, marks, loaded]);
+  const read = useMemo(() => new Set(marks.keys), [marks]);
 
-  return { unread, markAllRead: () => save(markAllRead(items)) };
+  return {
+    unread,
+    loaded,
+    isRead: (key: string) => read.has(key),
+    queueUnread: (queue: ApprovalQueue) => queueUnread(items, marks, queue),
+    markAllRead: () => save(markAllRead(items)),
+  };
 }

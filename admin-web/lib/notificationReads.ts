@@ -5,40 +5,59 @@ import { useCallback, useEffect, useState } from 'react';
 const STORAGE_KEY = 'notificationReads:v1';
 
 export type ApprovalCounts = { gps: number; corrections: number; leave: number };
+export type ApprovalQueue = keyof ApprovalCounts;
 
 /** What the owner has already read in the bell, kept on this device. Approvals are counted, not listed, so
  * they are remembered as "how many were waiting"; every other item is remembered by a key that changes when
- * the item does (a renewed contract, a new resignation, next year's birthday), so a change shows up as new. */
+ * the item does (a renewed contract, an exit moving to its next stage, next year's birthday), so a change
+ * shows up as new. */
 export type ReadMarks = { keys: string[]; seen: ApprovalCounts };
 
 export const NO_MARKS: ReadMarks = { keys: [], seen: { gps: 0, corrections: 0, leave: 0 } };
 
-/** Everything the bell's badge counts, as plain data. */
+/** Everything the bell lists, as plain data. `counts` marks the ones that also raise the badge. */
 export type NotificationItems = {
   approvals: ApprovalCounts;
   contracts: { id: string; endKey: string }[];
-  resignations: { id: string; handedInOn: string | null }[];
-  birthdays: { id: string; dateKey: string }[];
+  exits: { id: string; kind: string; handedInOn: string | null; lastWorkingOn: string | null; counts: boolean }[];
+  birthdays: { id: string; dateKey: string; counts: boolean }[];
 };
 
-export type Unread = { approvals: number; contracts: number; resignations: number; birthdays: number; total: number };
+/** What is still unread: the badge's total with its parts, and everything unread whether or not it raises the badge. */
+export type Unread = { approvals: number; contracts: number; resignations: number; birthdays: number; total: number; listed: number };
 
-const contractKey = (c: { id: string; endKey: string }) => `contract:${c.id}:${c.endKey}`;
-const resignationKey = (r: { id: string; handedInOn: string | null }) => `exit:${r.id}:${r.handedInOn ?? ''}`;
-const birthdayKey = (b: { id: string; dateKey: string }) => `bday:${b.id}:${b.dateKey}`;
+export const contractKey = (c: { id: string; endKey: string }) => `contract:${c.id}:${c.endKey}`;
+export const exitKey = (e: { id: string; kind: string; handedInOn: string | null; lastWorkingOn: string | null }) =>
+  `exit:${e.id}:${e.kind}:${e.handedInOn ?? ''}:${e.lastWorkingOn ?? ''}`;
+export const birthdayKey = (b: { id: string; dateKey: string }) => `bday:${b.id}:${b.dateKey}`;
 
 function itemKeys(items: NotificationItems): string[] {
-  return [...items.contracts.map(contractKey), ...items.resignations.map(resignationKey), ...items.birthdays.map(birthdayKey)];
+  return [...items.contracts.map(contractKey), ...items.exits.map(exitKey), ...items.birthdays.map(birthdayKey)];
 }
 
-/** How many badge items are still unread. */
+/** How many of a queue's waiting requests have not been read. */
+export function queueUnread(items: NotificationItems, marks: ReadMarks, queue: ApprovalQueue): number {
+  const waiting = items.approvals[queue];
+  return Math.max(0, waiting - Math.min(marks.seen[queue], waiting));
+}
+
+/** How many items are still unread. */
 export function unreadOf(items: NotificationItems, marks: ReadMarks): Unread {
   const read = new Set(marks.keys);
-  const approvals = (['gps', 'corrections', 'leave'] as const).reduce((sum, q) => sum + Math.max(0, items.approvals[q] - Math.min(marks.seen[q], items.approvals[q])), 0);
+  const approvals = queueUnread(items, marks, 'gps') + queueUnread(items, marks, 'corrections') + queueUnread(items, marks, 'leave');
   const contracts = items.contracts.filter(c => !read.has(contractKey(c))).length;
-  const resignations = items.resignations.filter(r => !read.has(resignationKey(r))).length;
-  const birthdays = items.birthdays.filter(b => !read.has(birthdayKey(b))).length;
-  return { approvals, contracts, resignations, birthdays, total: approvals + contracts + resignations + birthdays };
+  const unreadExits = items.exits.filter(e => !read.has(exitKey(e)));
+  const unreadBirthdays = items.birthdays.filter(b => !read.has(birthdayKey(b)));
+  const resignations = unreadExits.filter(e => e.counts).length;
+  const birthdays = unreadBirthdays.filter(b => b.counts).length;
+  return {
+    approvals,
+    contracts,
+    resignations,
+    birthdays,
+    total: approvals + contracts + resignations + birthdays,
+    listed: approvals + contracts + unreadExits.length + unreadBirthdays.length,
+  };
 }
 
 /** Everything the bell shows right now counts as read. Anything remembered from before that is no longer
@@ -81,7 +100,8 @@ function readStored(): ReadMarks {
 }
 
 /** What is unread in the bell, and the "Mark all as read" action. Remembered in this browser (localStorage), so
- * it survives a reload; a private window that blocks storage just starts unread each time. */
+ * it survives a reload; a private window that blocks storage just starts unread each time. The panel lists only
+ * what is unread (`isRead` / `queueUnread` say which), so marking everything read empties it. */
 export function useNotificationReads(items: NotificationItems, approvalsLoaded: boolean) {
   const [marks, setMarks] = useState<ReadMarks>(() => (typeof window === 'undefined' ? NO_MARKS : readStored()));
 
@@ -110,5 +130,11 @@ export function useNotificationReads(items: NotificationItems, approvalsLoaded: 
     if (lowered !== marks) save(lowered);
   }, [items, marks, save, approvalsLoaded]);
 
-  return { unread: unreadOf(items, marks), markAllRead: () => save(markAllRead(items)) };
+  const read = new Set(marks.keys);
+  return {
+    unread: unreadOf(items, marks),
+    isRead: (key: string) => read.has(key),
+    queueUnread: (queue: ApprovalQueue) => queueUnread(items, marks, queue),
+    markAllRead: () => save(markAllRead(items)),
+  };
 }

@@ -4,7 +4,7 @@ import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { formatAdDate } from '../lib/calendar';
 import { BIRTHDAY_LOOKAHEAD_DAYS, BIRTHDAY_NOTIFY_DAYS, exitLabel, formatDayMonth } from '../lib/hrAlerts';
 import { useSharedHrAlerts } from '../lib/HrAlertsProvider';
-import { useNotificationReads } from '../lib/NotificationReads';
+import { birthdayKey, contractKey, exitKey, useNotificationReads } from '../lib/NotificationReads';
 import { usePendingApprovals } from '../lib/PendingApprovals';
 import { colors } from '../theme';
 import { Sheet } from './hr/HrKit';
@@ -52,21 +52,25 @@ export default function NotificationsModal({
 }) {
   const { system } = useCalendarSystem();
   const { counts } = usePendingApprovals();
-  const { contracts, birthdays, exits } = useSharedHrAlerts();
-  const { unread, markAllRead } = useNotificationReads();
+  const { contracts: allContracts, birthdays: allBirthdays, exits: allExits } = useSharedHrAlerts();
+  const { unread, isRead, queueUnread, markAllRead } = useNotificationReads();
   const badge = unread.total;
 
+  // The panel lists only what has not been read, so "Mark all as read" empties it.
+  const contracts = allContracts.filter(c => !isRead(contractKey(c)));
+  const exits = allExits.filter(e => !isRead(exitKey(e)));
+  const birthdays = allBirthdays.filter(b => !isRead(birthdayKey(b)));
   const approvals = [
-    { label: 'GPS check-ins', segment: 'gps' as const, count: counts.gps },
-    { label: 'Missed-punch corrections', segment: 'correction' as const, count: counts.corrections },
-    { label: 'Leave requests', segment: 'leave' as const, count: counts.leave },
-  ].filter(a => a.count > 0);
-  const approvalTotal = counts.gps + counts.corrections + counts.leave;
+    { label: 'GPS check-ins', segment: 'gps' as const, count: counts.gps, unread: queueUnread('gps') },
+    { label: 'Missed-punch corrections', segment: 'correction' as const, count: counts.corrections, unread: queueUnread('corrections') },
+    { label: 'Leave requests', segment: 'leave' as const, count: counts.leave, unread: queueUnread('leave') },
+  ].filter(a => a.unread > 0);
+  const approvalTotal = approvals.reduce((sum, a) => sum + a.count, 0);
   const nothing = approvals.length === 0 && contracts.length === 0 && exits.length === 0 && birthdays.length === 0;
 
   return (
     <Sheet visible={visible} title="Notifications" subtitle={badge > 0 ? `${badge} need attention` : undefined} onClose={onClose} closeLabel="Close">
-      {badge > 0 && (
+      {!nothing && (
         <TouchableOpacity style={styles.markRead} onPress={markAllRead} accessibilityRole="button" accessibilityLabel="Mark all as read">
           <Text style={styles.markReadText}>Mark all as read</Text>
         </TouchableOpacity>
@@ -75,7 +79,7 @@ export default function NotificationsModal({
       {nothing && (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>You're all caught up</Text>
-          <Text style={styles.emptyText}>No approvals waiting, no resignations, no contracts ending and no birthdays coming up.</Text>
+          <Text style={styles.emptyText}>New approvals, resignations, contracts ending and birthdays will show up here.</Text>
         </View>
       )}
 

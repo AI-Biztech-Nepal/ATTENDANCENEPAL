@@ -10,7 +10,7 @@ import { notificationLines, notificationTitle, type EmployeeNotification } from 
 type Notifications = { items: EmployeeNotification[]; unread: number; markAllRead: () => Promise<void> };
 
 /** The employee portal's bell: what HR has done about them — today, changes to their exit. The badge counts what
- * they have not read; the unread ones are highlighted, and "Mark all as read" clears both. `notes` comes from the
+ * they have not read and the panel lists only those; "Mark all as read" clears both. `notes` comes from the
  * shell so the phone and computer headers share one fetch. */
 export default function EmployeeBell({ notes, variant }: { notes: Notifications; variant: 'onDark' | 'portal' }) {
   const pathname = usePathname();
@@ -18,6 +18,7 @@ export default function EmployeeBell({ notes, variant }: { notes: Notifications;
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const { items, unread, markAllRead } = notes;
+  const shown = items.filter(n => !n.read_at);
 
   function toggle() {
     setOpen(o => !o);
@@ -83,21 +84,20 @@ export default function EmployeeBell({ notes, variant }: { notes: Notifications;
             )}
           </div>
 
-          {items.length === 0 ? (
+          {shown.length === 0 ? (
             <div className="px-4 py-10 text-center">
               <p className="text-sm font-semibold text-ink">Nothing new</p>
               <p className="mt-1 text-xs text-slate-500">When HR updates something about you, it shows up here.</p>
             </div>
           ) : (
             <ul>
-              {items.map(n => {
+              {shown.map(n => {
                 const lines = notificationLines(n, system);
-                const fresh = !n.read_at;
                 return (
                   <li key={n.id} className="border-b border-slate-100 last:border-b-0">
-                    <Link href="/my-profile?tab=exit" onClick={() => setOpen(false)} className={`block px-4 py-3 hover:bg-slate-50 ${fresh ? 'bg-accent/5' : ''}`}>
+                    <Link href="/my-profile?tab=exit" onClick={() => setOpen(false)} className="block bg-accent/5 px-4 py-3 hover:bg-accent/10">
                       <span className="flex items-start gap-2">
-                        <span aria-hidden="true" className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${fresh ? 'bg-accent' : 'bg-transparent'}`} />
+                        <span aria-hidden="true" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
                         <span className="min-w-0 flex-1">
                           <span className="flex items-baseline justify-between gap-3">
                             <span className="text-sm font-semibold text-ink">{notificationTitle(n)}</span>
