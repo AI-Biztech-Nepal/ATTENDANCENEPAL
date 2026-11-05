@@ -42,6 +42,7 @@ import UpdateBanner from './src/components/UpdateBanner';
 import { useUpdateCheck } from './src/lib/useUpdateCheck';
 import { PendingApprovalsProvider, usePendingApprovals } from './src/lib/PendingApprovals';
 import { HrAlertsProvider } from './src/lib/HrAlertsProvider';
+import { NotificationReadsProvider } from './src/lib/NotificationReads';
 import { colors } from './src/theme';
 import {
   CalendarIcon,
@@ -370,7 +371,9 @@ function AppInner() {
           ) : profile?.role === 'admin' || profile?.role === 'hr' ? (
             <PendingApprovalsProvider>
               <HrAlertsProvider>
-                <AdminTabNavigator />
+                <NotificationReadsProvider>
+                  <AdminTabNavigator />
+                </NotificationReadsProvider>
               </HrAlertsProvider>
             </PendingApprovalsProvider>
           ) : (

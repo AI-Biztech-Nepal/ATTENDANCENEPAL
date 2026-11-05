@@ -5,7 +5,7 @@ import { supabase, supabaseConfigured } from './supabase';
 
 type Oldest = { created_at: string; leave_type?: string; start_date?: string; end_date?: string } | null;
 export type PendingQueue = { count: number; oldest: Oldest };
-export type PendingApprovals = { gps: PendingQueue; corrections: PendingQueue; leave: PendingQueue; total: number };
+export type PendingApprovals = { gps: PendingQueue; corrections: PendingQueue; leave: PendingQueue; total: number; /** False until the first count has come back. */ loaded: boolean };
 
 const EMPTY: PendingQueue = { count: 0, oldest: null };
 
@@ -23,6 +23,7 @@ async function loadQueue(table: string, columns: string): Promise<PendingQueue> 
  * approval" card; re-counted every minute. */
 export function usePendingApprovals(): PendingApprovals {
   const [queues, setQueues] = useState({ gps: EMPTY, corrections: EMPTY, leave: EMPTY });
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     if (!supabaseConfigured) return;
@@ -33,7 +34,9 @@ export function usePendingApprovals(): PendingApprovals {
         loadQueue('attendance_correction_requests', 'created_at'),
         loadQueue('leave_requests', 'created_at, leave_type, start_date, end_date'),
       ]).then(([gps, corrections, leave]) => {
-        if (active) setQueues({ gps, corrections, leave });
+        if (!active) return;
+        setQueues({ gps, corrections, leave });
+        setLoaded(true);
       });
     load();
     const timer = setInterval(load, 60000);
@@ -43,7 +46,7 @@ export function usePendingApprovals(): PendingApprovals {
     };
   }, []);
 
-  return { ...queues, total: queues.gps.count + queues.corrections.count + queues.leave.count };
+  return { ...queues, total: queues.gps.count + queues.corrections.count + queues.leave.count, loaded };
 }
 
 /** "just now", "12 min ago", "2 h ago", "yesterday", "4 days ago". */

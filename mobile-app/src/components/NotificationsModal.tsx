@@ -2,8 +2,9 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { formatAdDate } from '../lib/calendar';
-import { BIRTHDAY_LOOKAHEAD_DAYS, BIRTHDAY_NOTIFY_DAYS, birthdaysToNotify, exitLabel, formatDayMonth } from '../lib/hrAlerts';
+import { BIRTHDAY_LOOKAHEAD_DAYS, BIRTHDAY_NOTIFY_DAYS, exitLabel, formatDayMonth } from '../lib/hrAlerts';
 import { useSharedHrAlerts } from '../lib/HrAlertsProvider';
+import { useNotificationReads } from '../lib/NotificationReads';
 import { usePendingApprovals } from '../lib/PendingApprovals';
 import { colors } from '../theme';
 import { Sheet } from './hr/HrKit';
@@ -12,13 +13,11 @@ const BIRTHDAYS_SHOWN = 8;
 
 export type ApprovalSegment = 'gps' | 'correction' | 'leave';
 
-/** How many things need the owner's attention — what the bell's badge shows. */
+/** How many things need the owner's attention and have not been marked as read — what the bell's badge shows.
+ * (A resignation an employee handed in and HR has not started on needs a first move; the other exits are
+ * listed, not counted.) */
 export function useNotificationBadge() {
-  const { total } = usePendingApprovals();
-  const { contracts, birthdays, exits } = useSharedHrAlerts();
-  // A resignation an employee handed in and HR has not started on needs a first move; the other exits are listed, not counted.
-  const newResignations = exits.filter(e => e.kind === 'handed_in').length;
-  return total + contracts.length + newResignations + birthdaysToNotify(birthdays).length;
+  return useNotificationReads().unread.total;
 }
 
 function contractLabel(daysLeft: number): string {
@@ -54,7 +53,8 @@ export default function NotificationsModal({
   const { system } = useCalendarSystem();
   const { counts } = usePendingApprovals();
   const { contracts, birthdays, exits } = useSharedHrAlerts();
-  const badge = useNotificationBadge();
+  const { unread, markAllRead } = useNotificationReads();
+  const badge = unread.total;
 
   const approvals = [
     { label: 'GPS check-ins', segment: 'gps' as const, count: counts.gps },
@@ -66,6 +66,12 @@ export default function NotificationsModal({
 
   return (
     <Sheet visible={visible} title="Notifications" subtitle={badge > 0 ? `${badge} need attention` : undefined} onClose={onClose} closeLabel="Close">
+      {badge > 0 && (
+        <TouchableOpacity style={styles.markRead} onPress={markAllRead} accessibilityRole="button" accessibilityLabel="Mark all as read">
+          <Text style={styles.markReadText}>Mark all as read</Text>
+        </TouchableOpacity>
+      )}
+
       {nothing && (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>You're all caught up</Text>
@@ -195,6 +201,8 @@ function Row({ label, onPress, children }: { label: string; onPress: () => void;
 }
 
 const styles = StyleSheet.create({
+  markRead: { alignSelf: 'flex-end', paddingVertical: 4, paddingHorizontal: 2 },
+  markReadText: { fontSize: 13, fontWeight: '800', color: colors.accent },
   empty: { alignItems: 'center', paddingVertical: 28 },
   emptyTitle: { fontSize: 14, fontWeight: '700', color: colors.ink },
   emptyText: { fontSize: 12, color: colors.slate500, marginTop: 4, textAlign: 'center' },

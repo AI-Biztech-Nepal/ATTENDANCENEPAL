@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Avatar from './Avatar';
@@ -8,6 +8,7 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import { usePendingApprovals, timeAgo } from '@/lib/pendingApprovals';
 import { BIRTHDAY_LOOKAHEAD_DAYS, BIRTHDAY_NOTIFY_DAYS, birthdaysToNotify, exitLabel, formatDayMonth, useHrAlerts } from '@/lib/hrAlerts';
 import { formatAdDate } from '@/lib/calendar';
+import { useNotificationReads, type NotificationItems } from '@/lib/notificationReads';
 
 const BIRTHDAYS_SHOWN = 8;
 
@@ -30,9 +31,18 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const birthdaysSoon = birthdaysToNotify(birthdays).length;
-  const newResignations = exits.filter(e => e.kind === 'handed_in').length;
-  const badge = pending.total + contracts.length + newResignations + birthdaysSoon;
+  // What the badge counts, as plain data — so "Mark all as read" can remember it and later changes show as new.
+  const items = useMemo<NotificationItems>(
+    () => ({
+      approvals: { gps: pending.gps.count, corrections: pending.corrections.count, leave: pending.leave.count },
+      contracts: contracts.map(c => ({ id: c.id, endKey: c.endKey })),
+      resignations: exits.filter(e => e.kind === 'handed_in').map(e => ({ id: e.id, handedInOn: e.handedInOn })),
+      birthdays: birthdaysToNotify(birthdays).map(b => ({ id: b.id, dateKey: b.dateKey })),
+    }),
+    [pending.gps.count, pending.corrections.count, pending.leave.count, contracts, exits, birthdays]
+  );
+  const { unread, markAllRead } = useNotificationReads(items, pending.loaded);
+  const badge = unread.total;
 
   useEffect(() => {
     if (!open) return;
@@ -86,7 +96,14 @@ export default function NotificationBell() {
         >
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3">
             <h2 className="text-sm font-extrabold text-ink">Notifications</h2>
-            {badge > 0 && <span className="text-xs font-semibold text-slate-500">{badge} need attention</span>}
+            {badge > 0 && (
+              <span className="flex items-center gap-3">
+                <span className="text-xs font-semibold text-slate-500">{badge} need attention</span>
+                <button type="button" onClick={markAllRead} className="text-xs font-extrabold text-brand hover:underline">
+                  Mark all as read
+                </button>
+              </span>
+            )}
           </div>
 
           {nothing && (
