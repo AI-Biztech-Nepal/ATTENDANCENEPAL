@@ -6,6 +6,8 @@ module.exports = phase => {
 
   return {
     reactStrictMode: true,
+    // Attendance is served by the AIBIZTECH portal under /attendance (the portal rewrites that path to this app)
+    basePath: '/attendance',
     // Every page here is an authenticated, per-user dashboard — Next's default
     // long s-maxage on prerendered pages assumes a CDN that understands its
     // ISR revalidation protocol (Vercel's edge does; Hostinger's generic nginx

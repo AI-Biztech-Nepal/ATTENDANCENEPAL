@@ -97,7 +97,7 @@ export default function DashboardPage() {
         setCheckingSuperadmin(false);
         return;
       }
-      const res = await fetch('/api/superadmin/me', { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch('/attendance/api/superadmin/me', { headers: { Authorization: `Bearer ${token}` } });
       const body = await res.json().catch(() => ({ isSuperadmin: false }));
       if (!active) return;
       if (body.isSuperadmin) {

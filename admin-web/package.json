@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.45.0",
     "eslint-config-next": "^16.3.6",
     "jspdf": "^4.2.1",

@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
 
 // .trim() guards against the most common real-world mistake: a stray
 // trailing newline or space left over from copy-pasting the value into
@@ -24,8 +24,10 @@ function isValidHttpUrl(value?: string) {
 // every route instead of a readable in-page message.
 export const supabaseConfigured = isValidHttpUrl(supabaseUrl) && Boolean(supabaseAnonKey);
 
-export const supabase = createClient(
+// Same Supabase project and cookies as the AIBIZTECH portal, so signing in there signs you in here. The cookie is shared
+// because both are served from the same address (the portal rewrites /attendance to this app).
+export const supabase = createBrowserClient(
   isValidHttpUrl(supabaseUrl) ? (supabaseUrl as string) : 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder-anon-key',
-  { db: { schema: 'attendance' as 'public' } }
+  { db: { schema: 'attendance' as 'public' }, cookieOptions: { path: '/', sameSite: 'lax' } }
 );

@@ -184,7 +184,7 @@ export default function DevicesPage() {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
     if (!token) return;
-    const res = await fetch('/api/bridge-credentials', { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch('/attendance/api/bridge-credentials', { headers: { Authorization: `Bearer ${token}` } });
     const body = await res.json().catch(() => ({}));
     if (res.ok) setBridgeCredentials(body.credentials ?? []);
   }
@@ -199,7 +199,7 @@ export default function DevicesPage() {
       setBridgeError('Your session expired — please sign in again.');
       return;
     }
-    const res = await fetch('/api/bridge-credentials', {
+    const res = await fetch('/attendance/api/bridge-credentials', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -230,7 +230,7 @@ export default function DevicesPage() {
       alert('Your session expired — please sign in again.');
       return;
     }
-    const res = await fetch('/api/bridge-credentials', {
+    const res = await fetch('/attendance/api/bridge-credentials', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ id }),

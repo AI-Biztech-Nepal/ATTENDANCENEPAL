@@ -39,7 +39,7 @@ export default function SuperadminCompaniesPage() {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) return;
-    const res = await fetch('/api/superadmin/companies', { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch('/attendance/api/superadmin/companies', { headers: { Authorization: `Bearer ${token}` } });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       setError(body.error ?? 'Could not load companies.');

@@ -102,8 +102,8 @@ export default function SuperadminDashboardPage() {
     if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
     const [statsRes, companiesRes] = await Promise.all([
-      fetch('/api/superadmin/stats', { headers }),
-      fetch('/api/superadmin/companies', { headers }),
+      fetch('/attendance/api/superadmin/stats', { headers }),
+      fetch('/attendance/api/superadmin/companies', { headers }),
     ]);
     const statsBody = await statsRes.json().catch(() => ({}));
     const companiesBody = await companiesRes.json().catch(() => ({}));

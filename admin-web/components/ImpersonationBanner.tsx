@@ -43,7 +43,7 @@ export default function ImpersonationBanner() {
       await supabase.auth.setSession({ access_token: info!.returnAccessToken, refresh_token: info!.returnRefreshToken });
     } finally {
       sessionStorage.removeItem(STORAGE_KEY);
-      window.location.href = '/superadmin';
+      window.location.href = '/attendance/superadmin';
     }
   }
 

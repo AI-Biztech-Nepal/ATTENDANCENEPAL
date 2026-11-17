@@ -268,7 +268,7 @@ function EmployeesView() {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
     if (!token) return;
-    const res = await fetch('/api/accounts', { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch('/attendance/api/accounts', { headers: { Authorization: `Bearer ${token}` } });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) return;
     const map: Record<string, string> = {};
@@ -311,7 +311,7 @@ function EmployeesView() {
       alert('Your session expired — please sign in again.');
       return;
     }
-    const res = await fetch('/api/update-login-email', {
+    const res = await fetch('/attendance/api/update-login-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ employeeId: emp.id, email }),
@@ -846,7 +846,7 @@ function EmployeesView() {
       setLoginError('Your session expired — please sign in again.');
       return;
     }
-    const res = await fetch('/api/create-login', {
+    const res = await fetch('/attendance/api/create-login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ employeeId: loginModalEmployee.id, email: loginForm.email, password: loginForm.password }),
@@ -880,7 +880,7 @@ function EmployeesView() {
       setResetError('Your session expired — please sign in again.');
       return;
     }
-    const res = await fetch('/api/reset-password', {
+    const res = await fetch('/attendance/api/reset-password', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ employeeId: resetModalEmployee.id, password: resetPassword }),

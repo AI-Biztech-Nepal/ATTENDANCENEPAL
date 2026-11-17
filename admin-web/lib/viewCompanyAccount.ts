@@ -14,7 +14,7 @@ export async function viewCompanyAccount(companyId: string): Promise<void> {
   const returnSession = sessionData.session;
   if (!returnSession) throw new Error('Your own session expired — refresh and sign in again.');
 
-  const res = await fetch(`/api/superadmin/companies/${companyId}/impersonate`, {
+  const res = await fetch(`/attendance/api/superadmin/companies/${companyId}/impersonate`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${returnSession.access_token}`, 'Content-Type': 'application/json' },
   });
@@ -35,5 +35,5 @@ export async function viewCompanyAccount(companyId: string): Promise<void> {
   const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: body.tokenHash, type: 'magiclink' });
   if (verifyError) throw verifyError;
 
-  window.location.href = '/';
+  window.location.href = '/attendance';
 }

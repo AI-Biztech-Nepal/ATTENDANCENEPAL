@@ -74,7 +74,7 @@ export default function SuperadminCompanyDashboardPreviewPage() {
     supabase.auth.getSession().then(async ({ data: sessionData }) => {
       const token = sessionData.session?.access_token;
       if (!token) return;
-      const res = await fetch(`/api/superadmin/companies/${params.id}/dashboard`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/attendance/api/superadmin/companies/${params.id}/dashboard`, { headers: { Authorization: `Bearer ${token}` } });
       const body = await res.json().catch(() => ({}));
       if (!active) return;
       if (!res.ok) {

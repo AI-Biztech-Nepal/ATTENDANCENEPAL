@@ -28,7 +28,7 @@ export default function SuperadminLayout({ children }: { children: React.ReactNo
         router.replace('/login');
         return;
       }
-      const res = await fetch('/api/superadmin/me', {
+      const res = await fetch('/attendance/api/superadmin/me', {
         headers: { Authorization: `Bearer ${data.session.access_token}` },
       });
       const body = await res.json().catch(() => ({ isSuperadmin: false }));
