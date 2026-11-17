@@ -1,4 +1,4 @@
 # Identifies which Supabase project this repo's supabase/migrations are for.
 # Required by Supabase's GitHub integration (Project Settings > Integrations >
 # GitHub) to auto-apply new migration files on push to main.
-project_id = "whaahjtqmlbwrfppogsw"
+project_id = "feylbretbknouzxxyjwg"

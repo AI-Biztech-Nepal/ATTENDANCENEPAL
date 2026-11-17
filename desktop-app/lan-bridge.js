@@ -27,9 +27,9 @@ const { createClient } = require('@supabase/supabase-js');
 // Same values admin-web's own browser code already ships with — the anon
 // key is meant to be public (protected by RLS, not secrecy), same as
 // SUPABASE_URL in main.js.
-const SUPABASE_URL = 'https://whaahjtqmlbwrfppogsw.supabase.co';
+const SUPABASE_URL = 'https://feylbretbknouzxxyjwg.supabase.co';
 const SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoYWFoanRxbWxid3JmcHBvZ3N3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxNDk4NzEsImV4cCI6MjEwMDcyNTg3MX0.DZiANjUeVkelmk59ttdOu-6YaHCrjtEaW9sCxo3P4D4';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZleWxicmV0Ymtub3V6eHh5andnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMxMDE2OTEsImV4cCI6MjEwODY3NzY5MX0.f4DpHRWYRmS1uhTYuioh0HsmWzd5HkJuItQWroW8ayU';
 
 // Was 15s. A device's onboard attendance log has no "only what's new" read
 // mode — every poll re-downloads its ENTIRE stored history, and until
