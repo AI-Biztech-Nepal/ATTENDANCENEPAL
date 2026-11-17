@@ -35,7 +35,8 @@ export default function Avatar({
     return <img src={photoUrl} alt={name} className={`shrink-0 rounded-full object-cover ${className}`} />;
   }
   return (
-    <span className={`flex shrink-0 items-center justify-center rounded-full font-bold ${avatarTone(name)} ${className}`}>
+    // In the employee portal (.theme-employee) every initials circle is the theme green, not one of five hashed colours.
+    <span className={`flex shrink-0 items-center justify-center rounded-full font-bold ${avatarTone(name)} [.theme-employee_&]:bg-accent/15 [.theme-employee_&]:text-accent ${className}`}>
       {initials || '?'}
     </span>
   );

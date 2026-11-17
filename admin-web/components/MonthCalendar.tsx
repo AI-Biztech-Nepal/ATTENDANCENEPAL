@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { buildMonth, localDateKey, stepAnchor, todayAnchor } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { DayStatus } from '@/lib/shift';
@@ -20,9 +20,17 @@ type Props = {
    * the visible month changes) — lets a parent aggregate stats for exactly
    * the month this grid is showing, without owning the anchor itself. */
   onMonthChange?: (adKeys: string[]) => void;
+  /** Only the month stepper, no grid — for when something else (the daily log) is
+   * showing but the month still has to be changeable. Stays mounted so the month
+   * in view isn't lost. Its bottom edge is left open: the log's card sits flush
+   * under it, so the two read as one card, like the grid and its stepper do. */
+  compact?: boolean;
+  /** A control for the right end of the stepper row (the Calendar / Daily log switch).
+   * With one, the stepper moves to the left so the two never fight for room on a phone. */
+  action?: ReactNode;
 };
 
-type DayFlags = {
+export type DayFlags = {
   late: boolean;
   early: boolean;
   leave: boolean;
@@ -45,7 +53,7 @@ type DayFlags = {
  * leave/week off, that's already happened counts as absent — previously
  * such a day rendered identically to a future day with no way to tell them
  * apart. */
-function dayFlags(status: DayStatus | undefined, onLeave: boolean, onWeekOff: boolean, isPastOrToday: boolean): DayFlags {
+export function dayFlags(status: DayStatus | undefined, onLeave: boolean, onWeekOff: boolean, isPastOrToday: boolean): DayFlags {
   if (onLeave || onWeekOff) {
     return {
       late: false,
@@ -81,7 +89,7 @@ function dayFlags(status: DayStatus | undefined, onLeave: boolean, onWeekOff: bo
   };
 }
 
-function captionFor(flags: DayFlags): string | undefined {
+export function captionFor(flags: DayFlags): string | undefined {
   const parts: string[] = [];
   if (flags.leave) parts.push('On leave');
   if (flags.weekOff) parts.push('Week Off');
@@ -94,7 +102,7 @@ function captionFor(flags: DayFlags): string | undefined {
   return parts.length > 0 ? parts.join(' & ') : undefined;
 }
 
-export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, selectedDate, onSelectDate, onMonthChange }: Props) {
+export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, selectedDate, onSelectDate, onMonthChange, compact, action }: Props) {
   const { system } = useCalendarSystem();
   const [anchor, setAnchor] = useState(todayAnchor);
 
@@ -112,18 +120,21 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-      <div className="mb-3 flex items-center justify-center gap-3">
-        <button onClick={() => go(-1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
-          ←
-        </button>
-        <span className="min-w-[10ch] text-center text-base font-semibold text-ink">{month.label}</span>
-        <button onClick={() => go(1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
-          →
-        </button>
+    <div className={`rounded-xl border border-slate-200 bg-white p-3 sm:p-4 ${compact ? 'rounded-b-none border-b-0' : ''}`}>
+      <div className={`flex items-center gap-3 ${action ? 'justify-between' : 'justify-center'} ${compact ? '' : 'mb-3'}`}>
+        <div className="flex items-center gap-3">
+          <button onClick={() => go(-1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
+            ←
+          </button>
+          <span className="min-w-[10ch] text-center text-base font-semibold text-ink">{month.label}</span>
+          <button onClick={() => go(1)} className="rounded-md border border-slate-200 px-2 py-1 text-slate-500 hover:bg-slate-50">
+            →
+          </button>
+        </div>
+        {action}
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-medium uppercase text-slate-400">
+      <div className={`grid-cols-7 gap-1 text-center text-[11px] font-medium uppercase text-slate-400 ${compact ? 'hidden' : 'grid'}`}>
         {WEEKDAY_LABELS.map(w => (
           <div key={w} className="py-1">
             {w}
@@ -131,7 +142,7 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-1">
+      <div className={`grid-cols-7 gap-1 ${compact ? 'hidden' : 'grid'}`}>
         {month.weeks.flat().map((cell, i) => {
           const status = dayStatus.get(cell.adKey);
           const onLeave = leaveDates?.has(cell.adKey) ?? false;
@@ -143,12 +154,13 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
           const caption = cell.inMonth ? captionFor(flags) : undefined;
           // On Leave/Week Off gets its own yellow, distinct from Checked-in's
           // pink — those two used to both read as similar light pastels.
+          // In the employee portal (.theme-employee) the pale yellow / pink become a grey and a light green.
           const attendanceBg = onLeave || onWeekOff
-            ? 'bg-yellow-50'
+            ? 'bg-yellow-50 [.theme-employee_&]:bg-slate-100'
             : flags.present || flags.late || flags.early
               ? 'bg-good-bg'
               : flags.checkedInOnly
-                ? 'bg-pink-50'
+                ? 'bg-pink-50 [.theme-employee_&]:bg-good-bg/40 [.theme-employee_&]:ring-1 [.theme-employee_&]:ring-inset [.theme-employee_&]:ring-good/30'
                 : flags.absent
                   ? 'bg-critical-bg'
                   : '';
@@ -198,15 +210,15 @@ export default function MonthCalendar({ dayStatus, leaveDates, weekOffDates, sel
         })}
       </div>
 
-      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+      <div className={`mt-2.5 flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 ${compact ? 'hidden' : 'flex'}`}>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm bg-good-bg" /> Present
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-pink-50" /> Checked in
+          <span className="h-2.5 w-2.5 rounded-sm bg-pink-50 [.theme-employee_&]:bg-good-bg/40 [.theme-employee_&]:ring-1 [.theme-employee_&]:ring-inset [.theme-employee_&]:ring-good/30" /> Checked in
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-sm bg-yellow-50" /> On leave / Week Off
+          <span className="h-2.5 w-2.5 rounded-sm bg-yellow-50 [.theme-employee_&]:bg-slate-100" /> On leave / Week Off
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-sm bg-critical-bg" /> Absent

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { signOutAndUnregisterPush } from '../lib/pushNotifications';
 import { useAuth } from '../lib/AuthContext';
 import { colors } from '../theme';
 import {
@@ -83,7 +84,7 @@ export default function MoreScreen({ navigation }: any) {
         <Text style={styles.groupTitle}>{'People & setup'}</Text>
         {renderTiles(SETUP_TILES)}
 
-        <TouchableOpacity style={styles.signOut} onPress={() => supabase.auth.signOut()}>
+        <TouchableOpacity style={styles.signOut} onPress={() => signOutAndUnregisterPush()}>
           <SignOutIcon size={18} color={colors.criticalText} />
           <Text style={styles.signOutText}>Sign out</Text>
         </TouchableOpacity>

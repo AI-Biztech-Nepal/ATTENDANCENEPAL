@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, StyleSheet, TouchableOpacity, Image, Pressable, TextInput, Alert, ActivityIndicator } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
+import { signOutAndUnregisterPush } from '../lib/pushNotifications';
 import { useAuth } from '../lib/AuthContext';
 import { colors } from '../theme';
 import { BuildingIcon, CalendarDotIcon, EditIcon, KeyIcon, MailIcon, PinIcon, SignOutIcon } from './icons';
@@ -28,7 +29,7 @@ export default function AccountMenuModal({ visible, onClose }: { visible: boolea
 
   async function handleSignOut() {
     onClose();
-    await supabase.auth.signOut();
+    await signOutAndUnregisterPush();
   }
 
   async function pickAndUploadPhoto() {

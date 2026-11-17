@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { supabase, supabaseConfigured } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
-import StatCard from '@/components/StatCard';
-import Badge from '@/components/Badge';
-import { formatAdDate, localDateKey } from '@/lib/calendar';
+import { useCompanyName } from '@/lib/companyName';
+import { timeAgo, usePendingApprovals, type PendingQueue } from '@/lib/pendingApprovals';
+import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import type { AttendanceLog, CompanyHoliday, Device, Employee, LeaveRequest, Shift } from '@/lib/types';
 import { ATTENDANCE_LOG_COLUMNS } from '@/lib/types';
@@ -20,7 +21,6 @@ import {
   computeDayStatusForResolvedShift,
   isWeekOff,
   nepalTodayIso,
-  punchTypeLabel,
   resolveShiftForDate,
   type DailyShiftByDate,
 } from '@/lib/shift';
@@ -34,12 +34,31 @@ const DEPT_COLORS: Record<string, string> = {
 };
 const OTHER_COLOR = '#94a3b8';
 
+// Live activity rows: pastel initials circles, cycled per row.
+const AVATAR_COLORS: [string, string][] = [
+  ['#e0e7ff', '#3730a3'],
+  ['#fce7f3', '#9d174d'],
+  ['#dcfce7', '#166534'],
+  ['#fef3c7', '#92400e'],
+  ['#e0f2fe', '#075985'],
+];
+const PUNCH_VERB: Record<string, string> = { '0': 'checked in', '1': 'checked out', '2': 'started a break', '3': 'is back from break' };
+const METHOD_LABEL: Record<string, string> = { zkteco: 'Biometric', gps: 'GPS', qr: 'QR code', selfie: 'Selfie' };
+function initialsOf(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0])
+    .join('')
+    .toUpperCase();
+}
+
 type FeedItem = AttendanceLog & { employee_name: string };
 type DetailRow = { id: string; primary: string; secondary?: string };
 type DetailKey = 'total' | 'present' | 'late' | 'leave' | 'weekOff' | 'absent' | 'hours' | 'overtime';
 
 export default function DashboardPage() {
-  usePageTitle('Dashboard');
   const router = useRouter();
   const { system } = useCalendarSystem();
   // Superadmins never see this tenant dashboard — any account listed in the
@@ -59,6 +78,11 @@ export default function DashboardPage() {
   const [todayHoliday, setTodayHoliday] = useState<CompanyHoliday | null>(null);
   const [detailKey, setDetailKey] = useState<DetailKey | null>(null);
   const [weeklyPatternRows, setWeeklyPatternRows] = useState<{ employee_id: string; weekday: number; shift_id: string | null }[]>([]);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const pending = usePendingApprovals();
+  // Top bar reads "DASHBOARD" over the company's name (just "Dashboard" until the name has loaded).
+  const companyName = useCompanyName();
+  usePageTitle(companyName || 'Dashboard', companyName ? 'Dashboard' : '');
 
   useEffect(() => {
     if (!supabaseConfigured) {
@@ -118,6 +142,8 @@ export default function DashboardPage() {
       .select('employee_id, weekday, shift_id')
       .then(({ data }) => setWeeklyPatternRows(data ?? []));
     supabase.from('company_holidays').select('*').eq('holiday_date', today).maybeSingle().then(({ data }) => setTodayHoliday(data ?? null));
+    // Branch names for the live activity and device rows.
+    supabase.from('branches').select('id, name').then(({ data }) => setBranches(data ?? []));
     // A week of punches for a busy/large company can pass PostgREST's
     // default 1000-row cap on a plain select(), which silently truncates
     // rather than erroring — quietly wrong present/late/absent KPIs and a
@@ -368,144 +394,345 @@ export default function DashboardPage() {
       const key = emp.department && DEPT_COLORS[emp.department] ? emp.department : emp.department ? 'Other' : 'Unassigned';
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    return Array.from(counts.entries()).map(([name, value]) => ({
-      name,
-      value,
-      color: DEPT_COLORS[name] ?? OTHER_COLOR,
-    }));
+    return Array.from(counts.entries())
+      .map(([name, value]) => ({ name, value, color: DEPT_COLORS[name] ?? OTHER_COLOR }))
+      .sort((a, b) => b.value - a.value);
   }, [activeEmployees]);
 
   if (checkingSuperadmin) {
     return <div className="flex h-screen items-center justify-center text-slate-400">Loading…</div>;
   }
 
+  // Today's attendance bar: late arrivals are a subset of present, so on time
+  // is the rest. Each count opens the same name list as before.
+  const onTimeCount = Math.max(0, presentIds.size - lateCount);
+  // `color` fills the bar; `ink` is the same hue darkened so a number or icon on its own tint reads at 4.5:1.
+  const segments: { key: string; label: string; count: number; color: string; ink: string; icon: React.ReactNode; detail: DetailKey }[] = [
+    { key: 'onTime', label: 'On time', count: onTimeCount, color: '#15803d', ink: '#166534', icon: <CheckCircleGlyph />, detail: 'present' },
+    { key: 'late', label: 'Late', count: lateCount, color: '#d97706', ink: '#92400e', icon: <ClockGlyph />, detail: 'late' },
+    { key: 'leave', label: 'On leave', count: onLeaveIds.size, color: '#2563eb', ink: '#1d4ed8', icon: <UmbrellaGlyph />, detail: 'leave' },
+    { key: 'absent', label: 'Absent', count: absentCount, color: '#dc2626', ink: '#b91c1c', icon: <CrossCircleGlyph />, detail: 'absent' },
+    { key: 'weekOff', label: 'Week-off', count: weekOffCount, color: '#94a3b8', ink: '#475569', icon: <MoonGlyph />, detail: 'weekOff' },
+  ];
+  const shareOf = (n: number) => (activeEmployees.length ? Math.round((n / activeEmployees.length) * 100) : 0);
+  const allOnline = devices.length > 0 && devices.every(d => d.status === 'online');
+  const onlineDevices = devices.filter(d => d.status === 'online').length;
+  const branchName = (id: string | null) => branches.find(b => b.id === id)?.name ?? null;
+  const deviceById = new Map(devices.map(d => [d.id, d]));
+  const oldestText = (q: PendingQueue) => (q.oldest ? `Oldest ${timeAgo(q.oldest.created_at)}` : 'Nothing waiting');
+  const leaveText = (q: PendingQueue) => {
+    const o = q.oldest;
+    if (!o?.leave_type || !o.start_date || !o.end_date) return 'Nothing waiting';
+    const days = Math.round((new Date(o.end_date).getTime() - new Date(o.start_date).getTime()) / 86400000) + 1;
+    return `${o.leave_type[0].toUpperCase()}${o.leave_type.slice(1)} · ${days} ${days === 1 ? 'day' : 'days'}`;
+  };
+  const approvals = [
+    { label: 'GPS check-ins', count: pending.gps.count, sub: oldestText(pending.gps), href: '/corrections', icon: <PinGlyph /> },
+    { label: 'Missed-punch corrections', count: pending.corrections.count, sub: oldestText(pending.corrections), href: '/corrections', icon: <PencilGlyph /> },
+    { label: 'Leave requests', count: pending.leave.count, sub: leaveText(pending.leave), href: '/leave', icon: <UmbrellaGlyph /> },
+  ];
+  const kpis: { label: string; value: string; caption: string; detail: DetailKey }[] = [
+    { label: 'Active staff', value: String(activeEmployees.length), caption: 'On active rosters', detail: 'total' },
+    { label: 'Work hours today', value: `${todayWorkHours.toFixed(1)}h`, caption: 'All staff, checked out', detail: 'hours' },
+    { label: 'Overtime today', value: `${todayOvertimeHours.toFixed(1)}h`, caption: 'Beyond shift hours', detail: 'overtime' },
+    {
+      label: 'Week-off today',
+      value: String(weekOffCount),
+      caption: todayIsWeekOff ? (todayHoliday?.name ?? 'Recurring weekly day') : 'Off by roster or holiday',
+      detail: 'weekOff',
+    },
+  ];
+  const [ty, tm, td] = today.split('-').map(Number);
+  const todayLine = `${new Date(ty, tm - 1, td).toLocaleDateString(undefined, { weekday: 'short' })}, ${formatAdDate(today, 'AD')}  ·  ${formatAdDate(today, 'BS')}`;
+  const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const lastPunch = feed[0];
+  const maxDept = Math.max(1, ...deptBreakdown.map(d => d.value));
+
+  // The three tiles under the weekly chart, all read off the same seven days it draws.
+  const weekTotal = trend.reduce((sum, d) => sum + d.present, 0);
+  const weekAverage = trend.length ? Math.round((weekTotal / trend.length) * 10) / 10 : 0;
+  const busiest = trend.reduce((best, d) => (d.present > best.present ? d : best), trend[0] ?? { day: '—', present: 0 });
+  const presentToday = trend[trend.length - 1]?.present ?? 0;
+  const presentYesterday = trend[trend.length - 2]?.present ?? 0;
+  const dayDelta = presentToday - presentYesterday;
+  const weekGlance = [
+    { label: 'Daily average', value: String(weekAverage), sub: 'staff present per day', ink: '#064e3b' },
+    { label: 'Busiest day', value: busiest.present > 0 ? busiest.day : '—', sub: busiest.present > 0 ? `${busiest.present} present` : 'No punches yet', ink: '#064e3b' },
+    {
+      label: 'Today vs yesterday',
+      value: dayDelta > 0 ? `+${dayDelta}` : String(dayDelta),
+      sub: `${presentToday} today · ${presentYesterday} yesterday`,
+      ink: dayDelta > 0 ? '#166534' : dayDelta < 0 ? '#b91c1c' : '#475569',
+    },
+  ];
+
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4">
-        <StatCard label="Total Employees" value={String(activeEmployees.length)} hint="Active rosters" onClick={() => setDetailKey('total')} />
-        <StatCard label="Present Today" value={String(presentIds.size)} hint={`${attendancePct}% attendance`} onClick={() => setDetailKey('present')} />
-        <StatCard label="Late Arrivals" value={String(lateCount)} hint="Past grace period" onClick={() => setDetailKey('late')} />
-        <StatCard label="On Leave" value={String(onLeaveIds.size)} hint="Approved today" onClick={() => setDetailKey('leave')} />
-        <StatCard
-          label="Week-off Today"
-          value={String(weekOffCount)}
-          hint={todayIsWeekOff ? (todayHoliday?.name ?? 'Recurring weekly day') : 'Employees off today'}
-          onClick={() => setDetailKey('weekOff')}
-        />
-        <StatCard label="Absent Today" value={String(absentCount)} hint="No punch, not on leave" onClick={() => setDetailKey('absent')} />
-        <StatCard label="Total Work Hours" value={todayWorkHours.toFixed(1)} hint="Today, all staff" onClick={() => setDetailKey('hours')} />
-        <StatCard
-          className="col-span-2 sm:col-span-1"
-          label="Overtime"
-          value={`${todayOvertimeHours.toFixed(1)} hrs`}
-          hint="Today, all staff"
-          onClick={() => setDetailKey('overtime')}
-        />
+      <p className="mb-5 text-[13px] font-bold text-[#586474]">{todayLine}</p>
+
+      <div className="flex flex-wrap gap-5">
+        <section className="min-w-0 flex-[2_1_560px] rounded-[18px] border border-[#d5e6dc] bg-[linear-gradient(180deg,#eef8f2_0%,#ffffff_48%)] px-6 py-[22px] shadow-[0_1px_2px_rgba(6,78,59,0.04),0_8px_24px_-14px_rgba(6,78,59,0.22)]">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <h2 className="text-[13px] font-extrabold tracking-[0.06em] text-[#586474]">TODAY&apos;S ATTENDANCE</h2>
+            {devices.length > 0 && (
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold ${
+                  allOnline ? 'bg-[#e2f3e8] text-[#14532d]' : 'bg-[#fdf0d5] text-[#8a4b06]'
+                }`}
+              >
+                <span className={`h-[7px] w-[7px] rounded-full ${allOnline ? 'bg-[#15803d]' : 'bg-[#d97706]'}`} />
+                Devices {onlineDevices}/{devices.length} online
+              </span>
+            )}
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-baseline gap-2.5">
+            <button
+              onClick={() => setDetailKey('present')}
+              className="text-[56px] font-extrabold leading-none tracking-[-0.03em] text-brand-deep hover:text-brand"
+            >
+              {presentIds.size}
+            </button>
+            <span className="text-lg font-bold text-[#586474]">of {activeEmployees.length} checked in</span>
+            <span className="rounded-full bg-brand px-2.5 py-1 text-[13px] font-extrabold text-white">{attendancePct}%</span>
+            {lastPunch && (
+              <span className="ml-auto inline-flex items-center gap-2 self-center rounded-full bg-white px-3 py-1.5 text-[13px] font-semibold text-[#586474] shadow-[0_1px_2px_rgba(15,23,42,0.06)] ring-1 ring-slate-200">
+                <span className="relative flex h-2 w-2" aria-hidden="true">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-50 motion-reduce:animate-none" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-brand" />
+                </span>
+                <span>
+                  Last punch · <span className="font-extrabold text-ink">{lastPunch.employee_name}</span> {PUNCH_VERB[lastPunch.punch_type] ?? 'punched'} at {timeOf(lastPunch.punch_time)}
+                </span>
+              </span>
+            )}
+          </div>
+          <div
+            role="img"
+            aria-label={segments.filter(s => s.count > 0).map(s => `${s.label} ${s.count}`).join(', ')}
+            className="mt-[18px] flex h-4 gap-[3px] overflow-hidden rounded-full bg-slate-100"
+          >
+            {segments
+              .filter(s => s.count > 0)
+              .map((s, i) => (
+                <span
+                  key={s.key}
+                  title={`${s.label} · ${s.count} (${shareOf(s.count)}%)`}
+                  className="att-seg rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.28)]"
+                  style={{ flex: s.count, backgroundColor: s.color, animationDelay: `${i * 80}ms` }}
+                />
+              ))}
+          </div>
+          {/* Each tile wears its status: a tinted wash and hairline, a drawn icon (so the status is not
+              colour alone), and the count in a darkened shade of the same hue. A status nobody is in goes
+              quiet and grey so the tiles that matter stand out. The small % is the share of active staff. */}
+          <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(110px,1fr))] gap-3">
+            {segments.map(s => {
+              const on = s.count > 0;
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => setDetailKey(s.detail)}
+                  style={on ? { backgroundColor: `${s.color}14`, borderColor: `${s.color}38` } : undefined}
+                  className={`rounded-xl border px-3 py-2.5 text-left transition duration-200 hover:-translate-y-px hover:shadow-[0_8px_16px_-10px_rgba(15,23,42,0.4)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${
+                    on ? '' : 'border-slate-100 bg-slate-50'
+                  }`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg ${on ? '' : 'bg-slate-100 text-slate-400'}`}
+                      style={on ? { backgroundColor: `${s.color}22`, color: s.ink } : undefined}
+                    >
+                      {s.icon}
+                    </span>
+                    {on && <span className="text-[11px] font-bold text-[#586474]">{shareOf(s.count)}%</span>}
+                  </span>
+                  <span className={`mt-2 block text-[26px] font-extrabold leading-none ${on ? '' : 'text-[#7b8798]'}`} style={on ? { color: s.ink } : undefined}>
+                    {s.count}
+                  </span>
+                  <span className={`mt-1 block text-xs font-bold ${on ? 'text-[#586474]' : 'text-slate-500'}`}>{s.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section className="min-w-0 flex-[1_1_340px] rounded-[18px] border border-slate-200 bg-white px-5 py-[18px]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-extrabold text-ink">Needs your approval</h2>
+            {pending.total > 0 && (
+              <span className="rounded-full bg-[#fee2e2] px-[9px] py-0.5 text-xs font-extrabold text-[#991b1b]">{pending.total} waiting</span>
+            )}
+          </div>
+          <div className="mt-2 flex flex-col">
+            {approvals.map((a, i) => (
+              <Link
+                key={a.label}
+                href={a.href}
+                className={`flex items-center gap-3 py-3 transition-opacity hover:opacity-80 ${i < approvals.length - 1 ? 'border-b border-slate-100' : ''}`}
+              >
+                <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full bg-brand-light text-brand">{a.icon}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-ink">{a.label}</span>
+                  <span className="block text-xs font-semibold text-[#586474]">{a.sub}</span>
+                </span>
+                <span
+                  className={`rounded-full px-[9px] py-[3px] text-xs font-extrabold ${
+                    a.count > 0 ? 'bg-[#fdf0d5] text-[#8a4b06]' : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {a.count}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:col-span-2">
-          <h2 className="mb-4 text-base font-semibold text-ink">Weekly Attendance Trend</h2>
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={trend} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="#e2e8f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
-              <YAxis tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} allowDecimals={false} />
-              <Tooltip
-                contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
-                formatter={(v: number) => [`${v} present`, '']}
-              />
-              <Line
-                type="monotone"
-                dataKey="present"
-                name="Present"
-                stroke="#0d9488"
-                strokeWidth={2}
-                dot={{ r: 4, fill: '#0d9488' }}
-                activeDot={{ r: 6 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+      <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-5">
+        {kpis.map(k => (
+          <button
+            key={k.label}
+            onClick={() => setDetailKey(k.detail)}
+            className="rounded-2xl border border-slate-200 bg-white px-[18px] py-4 text-left transition-colors hover:border-slate-300"
+          >
+            <div className="text-xs font-extrabold uppercase tracking-[0.05em] text-[#586474]">{k.label}</div>
+            <div className="mt-1.5 text-[26px] font-extrabold text-ink">{k.value}</div>
+            <div className="text-xs font-semibold text-[#586474]">{k.caption}</div>
+          </button>
+        ))}
+      </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-ink">Live Biometric Feed</h2>
-            <span className="flex items-center gap-1.5 text-xs font-medium text-good">
-              <span className="h-1.5 w-1.5 rounded-full bg-good" />
-              Realtime
+      <div className="mt-5 flex flex-wrap gap-5">
+        <section className="flex min-w-0 flex-[2_1_560px] flex-col rounded-[18px] border border-slate-200 bg-white px-6 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-extrabold text-ink">Weekly attendance</h2>
+            <span className="text-xs font-bold text-[#586474]">Present each day · last 7 days</span>
+          </div>
+          {/* The Live activity card beside this one is taller, so the chart takes whatever height is left
+              (never less than 230px) and the three week-at-a-glance tiles sit under it — no empty gap. */}
+          <div className="relative mt-[18px] min-h-[230px] flex-1">
+            <div className="absolute inset-0">
+              <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={trend} margin={{ top: 22, right: 8, left: 8, bottom: 0 }} barCategoryGap="18%">
+                <CartesianGrid vertical={false} stroke="#e2e8f0" strokeDasharray="4 4" />
+                <XAxis dataKey="day" tick={{ fontSize: 12, fontWeight: 700, fill: '#586474' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
+                <YAxis hide allowDecimals={false} />
+                <Tooltip
+                  cursor={{ fill: '#f1f5f9' }}
+                  contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+                  formatter={(v: number) => [`${v} present`, '']}
+                />
+                <Bar dataKey="present" radius={[8, 8, 3, 3]} maxBarSize={56} label={{ position: 'top', fontSize: 12, fontWeight: 800, fill: '#334155' }}>
+                  {trend.map((d, i) => (
+                    // Today in full emerald, the six days before it lighter.
+                    <Cell key={`${d.day}-${i}`} fill={i === trend.length - 1 ? '#047857' : '#a7d0c4'} />
+                  ))}
+                </Bar>
+              </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3">
+            {weekGlance.map(g => (
+              <div key={g.label} className="rounded-xl bg-slate-50 px-3.5 py-2.5">
+                <span className="block text-xs font-bold text-[#586474]">{g.label}</span>
+                <span className="mt-0.5 block text-xl font-extrabold leading-tight" style={{ color: g.ink }}>
+                  {g.value}
+                </span>
+                <span className="block text-xs font-semibold text-[#586474]">{g.sub}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="min-w-0 flex-[1_1_340px] rounded-[18px] border border-slate-200 bg-white px-5 py-[18px]">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-extrabold text-ink">Live activity</h2>
+            <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#15803d]">
+              <span className="h-[7px] w-[7px] rounded-full bg-[#15803d]" />
+              Live
             </span>
           </div>
-          <ul className="space-y-3">
-            {feed.length === 0 && <li className="text-sm text-slate-400">No punches yet.</li>}
-            {feed.map(item => (
-              <li key={item.id} className="flex items-center justify-between border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-                <div>
-                  <div className="text-sm font-medium text-ink">{item.employee_name}</div>
-                  <div className="text-xs text-slate-500">{item.method}</div>
+          <div className="mt-1.5 flex flex-col">
+            {feed.length === 0 && <p className="py-3 text-sm text-slate-400">No punches yet.</p>}
+            {feed.map((item, i) => {
+              const [bg, fg] = AVATAR_COLORS[i % AVATAR_COLORS.length];
+              const device = item.device_id ? deviceById.get(item.device_id) : undefined;
+              const where = device ? (branchName(device.branch_id) ?? device.name) : null;
+              const isToday = dateKey(item.punch_time) === today;
+              return (
+                <div key={item.id} className="flex items-center gap-3 border-b border-slate-100 py-2.5">
+                  <span
+                    className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full text-xs font-extrabold"
+                    style={{ backgroundColor: bg, color: fg }}
+                  >
+                    {initialsOf(item.employee_name)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-bold text-ink">
+                      {item.employee_name} {PUNCH_VERB[item.punch_type] ?? 'punched'}
+                    </span>
+                    <span className="block truncate text-xs font-semibold text-[#586474]">
+                      {METHOD_LABEL[item.method] ?? item.method}
+                      {where ? ` · ${where}` : ''}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right text-xs font-bold text-[#586474]">
+                    {isToday ? timeOf(item.punch_time) : `${formatAdDate(dateKey(item.punch_time), system)} ${timeOf(item.punch_time)}`}
+                  </span>
                 </div>
-                <div className="text-right">
-                  <Badge tone={item.punch_type === '0' ? 'good' : item.punch_type === '1' ? 'info' : 'warning'}>
-                    {punchTypeLabel(item.punch_type)}
-                  </Badge>
-                  <div className="mt-1 text-xs text-slate-500">
-                    ({formatAdDate(localDateKey(item.punch_time), system)}{' '}
-                    {new Date(item.punch_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+              );
+            })}
+            <Link href="/attendance" className="mt-2.5 text-[13px] font-extrabold text-brand hover:underline">
+              Full attendance logs
+            </Link>
+          </div>
+        </section>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <h2 className="mb-4 text-base font-semibold text-ink">Department Breakdown</h2>
+      <div className="mt-5 flex flex-wrap gap-5">
+        <section className="min-w-0 flex-[1_1_420px] rounded-[18px] border border-slate-200 bg-white px-[22px] py-[18px]">
+          <h2 className="text-base font-extrabold text-ink">Departments</h2>
           {deptBreakdown.length === 0 ? (
-            <p className="text-sm text-slate-400">No employees yet.</p>
+            <p className="mt-3 text-sm text-slate-400">No employees yet.</p>
           ) : (
-            // A right-side vertical legend fights the pie for width on a
-            // narrow phone (single-column below lg) — bottom-horizontal
-            // works at every width instead of needing a JS breakpoint check.
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={deptBreakdown} dataKey="value" nameKey="name" innerRadius={50} outerRadius={80} paddingAngle={2}>
-                  {deptBreakdown.map(d => (
-                    <Cell key={d.name} fill={d.color} stroke="#fff" strokeWidth={2} />
-                  ))}
-                </Pie>
-                <Legend
-                  layout="horizontal"
-                  verticalAlign="bottom"
-                  align="center"
-                  iconType="circle"
-                  wrapperStyle={{ paddingTop: 12 }}
-                  formatter={(value: string) => <span className="text-sm text-slate-600">{value}</span>}
-                />
-                <Tooltip formatter={(v: number, n: string) => [`${v} staff`, n]} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <h2 className="mb-4 text-base font-semibold text-ink">Device Sync Activity</h2>
-          <ul className="space-y-3">
-            {devices.length === 0 && <li className="text-sm text-slate-400">No devices registered.</li>}
-            {devices.map(d => (
-              <li key={d.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2.5">
-                <div>
-                  <div className="text-sm font-medium text-ink">{d.name}</div>
-                  <div className="text-xs text-slate-500">
-                    {d.ip_address} · Sync: {d.last_sync ? new Date(d.last_sync).toLocaleTimeString() : 'never'}
-                  </div>
+            <div className="mt-3.5 flex flex-col gap-3">
+              {deptBreakdown.map(d => (
+                <div key={d.name} className="flex items-center gap-3">
+                  <span className="w-[110px] shrink-0 truncate text-[13px] font-bold text-ink">{d.name}</span>
+                  <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <span className="block h-full rounded-full bg-brand" style={{ width: `${(d.value / maxDept) * 100}%` }} />
+                  </span>
+                  <span className="w-6 text-right text-[13px] font-extrabold text-ink">{d.value}</span>
                 </div>
-                <Badge tone={d.status === 'online' ? 'good' : 'critical'}>{d.status}</Badge>
-              </li>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="min-w-0 flex-[1_1_420px] rounded-[18px] border border-slate-200 bg-white px-[22px] py-[18px]">
+          <h2 className="text-base font-extrabold text-ink">Biometric devices</h2>
+          <div className="mt-2 flex flex-col">
+            {devices.length === 0 && <p className="py-3 text-sm text-slate-400">No devices registered.</p>}
+            {devices.map((d, i) => (
+              <div key={d.id} className={`flex items-center gap-3 py-3 ${i < devices.length - 1 ? 'border-b border-slate-100' : ''}`}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold text-ink">{d.name}</span>
+                  <span className="block text-xs font-semibold text-[#586474]">
+                    {branchName(d.branch_id) ?? d.ip_address} · {d.last_sync ? `synced ${timeAgo(d.last_sync)}` : 'never synced'}
+                  </span>
+                </span>
+                <span
+                  className={`rounded-full px-[9px] py-[3px] text-xs font-extrabold ${
+                    d.status === 'online' ? 'bg-[#e2f3e8] text-[#14532d]' : 'bg-[#fde2e1] text-[#991b1b]'
+                  }`}
+                >
+                  {d.status === 'online' ? 'Online' : 'Offline'}
+                </span>
+              </div>
             ))}
-          </ul>
-        </div>
+          </div>
+        </section>
       </div>
 
       {detailKey && (
@@ -546,5 +773,61 @@ export default function DashboardPage() {
         </div>
       )}
     </>
+  );
+}
+
+// Icons for the "Needs your approval" rows.
+function PinGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 21s-7-6.1-7-11a7 7 0 1 1 14 0c0 4.9-7 11-7 11Z" />
+      <circle cx="12" cy="10" r="2.5" />
+    </svg>
+  );
+}
+function PencilGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+function CheckCircleGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8.5 12.5 2.5 2.5 4.5-5" />
+    </svg>
+  );
+}
+function ClockGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7.5V12l3 2" />
+    </svg>
+  );
+}
+function CrossCircleGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m9 9 6 6m0-6-6 6" />
+    </svg>
+  );
+}
+function MoonGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" />
+    </svg>
+  );
+}
+function UmbrellaGlyph() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12a9 9 0 0 1 18 0Z" />
+      <path d="M12 12v7a2 2 0 0 1-4 0" />
+    </svg>
   );
 }

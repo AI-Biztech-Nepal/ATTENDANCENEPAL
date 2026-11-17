@@ -2,11 +2,11 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { supabase } from './supabase';
 
 type Counts = { gps: number; corrections: number; leave: number };
-type PendingApprovalsValue = { counts: Counts; total: number; refresh: () => void };
+type PendingApprovalsValue = { counts: Counts; total: number; refresh: () => void; /** False until the first count has come back. */ loaded: boolean };
 
 const EMPTY: Counts = { gps: 0, corrections: 0, leave: 0 };
 
-const PendingApprovalsContext = createContext<PendingApprovalsValue>({ counts: EMPTY, total: 0, refresh: () => {} });
+const PendingApprovalsContext = createContext<PendingApprovalsValue>({ counts: EMPTY, total: 0, refresh: () => {}, loaded: false });
 
 function countPending(table: string) {
   return supabase
@@ -21,13 +21,17 @@ function countPending(table: string) {
  * Re-counted every minute and whenever an approve/reject calls refresh(). */
 export function PendingApprovalsProvider({ children }: { children: React.ReactNode }) {
   const [counts, setCounts] = useState<Counts>(EMPTY);
+  const [loaded, setLoaded] = useState(false);
 
   const refresh = useCallback(() => {
     Promise.all([
       countPending('attendance_gps_requests'),
       countPending('attendance_correction_requests'),
       countPending('leave_requests'),
-    ]).then(([gps, corrections, leave]) => setCounts({ gps, corrections, leave }));
+    ]).then(([gps, corrections, leave]) => {
+      setCounts({ gps, corrections, leave });
+      setLoaded(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -37,7 +41,7 @@ export function PendingApprovalsProvider({ children }: { children: React.ReactNo
   }, [refresh]);
 
   return (
-    <PendingApprovalsContext.Provider value={{ counts, total: counts.gps + counts.corrections + counts.leave, refresh }}>
+    <PendingApprovalsContext.Provider value={{ counts, total: counts.gps + counts.corrections + counts.leave, refresh, loaded }}>
       {children}
     </PendingApprovalsContext.Provider>
   );

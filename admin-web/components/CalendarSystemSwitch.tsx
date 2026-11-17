@@ -2,9 +2,76 @@
 
 import { useCalendarSystem } from '@/lib/calendarSystem';
 
-/** The one AD/BS switch for the whole app — lives next to the page title. */
-export default function CalendarSystemSwitch() {
+/** The one AD/BS switch for the whole app — lives next to the page title.
+ * `pill` is the owner top bar's rounded version; `portal` is the same look with
+ * 44px touch targets, for the employee pages' header. */
+export default function CalendarSystemSwitch({ variant = 'boxed' }: { variant?: 'boxed' | 'pill' | 'portal' | 'onDark' }) {
   const { system, setSystem } = useCalendarSystem();
+
+  // The employee pages' version, for the green sidebar / header: a translucent
+  // track with a white active segment. The buttons stretch, so in the sidebar
+  // (a full-width parent) it fills the row.
+  if (variant === 'onDark') {
+    return (
+      <div className="flex shrink-0 rounded-full bg-white/15 p-[3px]">
+        {(['AD', 'BS'] as const).map(s => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSystem(s)}
+            aria-pressed={system === s}
+            title={s === 'AD' ? 'Gregorian calendar' : 'Nepali (Bikram Sambat) calendar'}
+            className={`h-[38px] flex-1 rounded-full px-3.5 text-xs transition-colors ${
+              system === s ? 'bg-white font-extrabold text-brand' : 'font-bold text-white hover:bg-white/10'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  if (variant === 'portal') {
+    return (
+      <div role="group" aria-label="Calendar system" className="flex shrink-0 rounded-full bg-slate-100 p-[3px]">
+        {(['AD', 'BS'] as const).map(s => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSystem(s)}
+            aria-pressed={system === s}
+            title={s === 'AD' ? 'Gregorian calendar' : 'Nepali (Bikram Sambat) calendar'}
+            className={`h-[38px] rounded-full px-4 text-xs transition-colors ${
+              system === s ? 'bg-brand font-extrabold text-white' : 'font-bold text-slate-600 hover:text-ink'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  if (variant === 'pill') {
+    return (
+      <div className="flex shrink-0 rounded-full bg-slate-100 p-[3px]">
+        {(['AD', 'BS'] as const).map(s => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setSystem(s)}
+            title={s === 'AD' ? 'Gregorian calendar' : 'Nepali (Bikram Sambat) calendar'}
+            className={`rounded-full px-[13px] py-[7px] text-xs transition-colors ${
+              system === s ? 'bg-brand font-extrabold text-white' : 'font-bold text-[#586474] hover:text-ink'
+            }`}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="flex shrink-0 items-center">

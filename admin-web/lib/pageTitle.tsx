@@ -4,32 +4,35 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 
 type PageTitleContextType = {
   title: string;
-  setTitle: (title: string) => void;
+  /** Optional small uppercase label shown above the title (e.g. "Dashboard"). */
+  eyebrow: string;
+  setTitle: (title: string, eyebrow?: string) => void;
 };
 
 const PageTitleContext = createContext<PageTitleContextType>({
   title: '',
+  eyebrow: '',
   setTitle: () => {},
 });
 
 export function PageTitleProvider({ children }: { children: ReactNode }) {
-  const [title, setTitleState] = useState('');
-  const setTitle = useCallback((t: string) => setTitleState(t), []);
+  const [state, setState] = useState({ title: '', eyebrow: '' });
+  const setTitle = useCallback((title: string, eyebrow = '') => setState({ title, eyebrow }), []);
   return (
-    <PageTitleContext.Provider value={{ title, setTitle }}>
+    <PageTitleContext.Provider value={{ ...state, setTitle }}>
       {children}
     </PageTitleContext.Provider>
   );
 }
 
-export function usePageTitle(newTitle?: string) {
+export function usePageTitle(newTitle?: string, eyebrow?: string) {
   const ctx = useContext(PageTitleContext);
 
   useEffect(() => {
     if (newTitle !== undefined) {
-      ctx.setTitle(newTitle);
+      ctx.setTitle(newTitle, eyebrow);
     }
-  }, [newTitle, ctx.setTitle]);
+  }, [newTitle, eyebrow, ctx.setTitle]);
 
   return ctx;
 }

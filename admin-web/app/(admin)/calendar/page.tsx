@@ -3,15 +3,24 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
-import Avatar from '@/components/Avatar';
+import EmployeeListPanel from '@/components/EmployeeListPanel';
+import EmployeePicker from '@/components/EmployeePicker';
 import EmployeeCalendarView from '@/components/EmployeeCalendarView';
+import TeamTodayCard from '@/components/TeamTodayCard';
+import { useTeamToday } from '@/lib/teamToday';
 import type { Employee } from '@/lib/types';
 
+// Master/detail: the employee list stays beside the calendar (lg and up) so
+// switching person is one click; below lg it folds into EmployeePicker. Each row
+// shows how that person's day is going, and the compact Team today card sits under
+// the list at the bottom of the column — the list is the long part and takes all the
+// room the card leaves — and on a smaller screen the card drops to the bottom of the page.
 export default function CalendarPage() {
   usePageTitle('Attendance Calendar');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeId, setEmployeeId] = useState<string>('');
-  const selectedEmployee = employees.find(e => e.id === employeeId);
+  // One read of today's attendance feeds both the status on each list row and the card under the list.
+  const team = useTeamToday(employees);
 
   useEffect(() => {
     supabase
@@ -26,41 +35,26 @@ export default function CalendarPage() {
   }, []);
 
   return (
-    <>
-      <div className="mb-4 flex w-fit items-center gap-2.5 rounded-xl border border-slate-200 bg-white py-1.5 pl-1.5 pr-3 shadow-sm">
-        {selectedEmployee ? (
-          <Avatar name={selectedEmployee.name} photoUrl={selectedEmployee.profile_photo_url} className="h-10 w-10 text-sm" />
-        ) : (
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
-            <UserIcon className="h-4 w-4" />
-          </span>
-        )}
-        <div className="flex flex-col">
-          <label className="text-[10px] font-semibold uppercase leading-none tracking-wide text-slate-400">Employee</label>
-          <select
-            value={employeeId}
-            onChange={e => setEmployeeId(e.target.value)}
-            className="max-w-[16rem] bg-transparent text-sm font-semibold text-ink focus:outline-none"
-          >
-            {employees.map(emp => (
-              <option key={emp.id} value={emp.id}>
-                {emp.name}
-              </option>
-            ))}
-          </select>
+    <div className="flex flex-col gap-5 lg:flex-row">
+      {/* The left column is as tall as the calendar side, so the card ends level with the bottom of the page and
+          nothing is left empty beside it. The list takes whatever the card leaves; it is pinned inside its box
+          (absolute) so a long staff list scrolls there instead of making this column taller than the other. */}
+      <div className="order-2 w-full lg:order-1 lg:flex lg:min-h-[calc(100vh-9rem)] lg:w-72 lg:shrink-0 lg:flex-col lg:gap-5">
+        <div className="hidden lg:relative lg:block lg:min-h-[11rem] lg:flex-1">
+          <div className="lg:absolute lg:inset-0 lg:flex">
+            <EmployeeListPanel employees={employees} value={employeeId} onChange={setEmployeeId} statusOf={team.statusOf} />
+          </div>
         </div>
+        <TeamTodayCard summary={team.summary} nextHoliday={team.nextHoliday} />
       </div>
 
-      {employeeId && <EmployeeCalendarView employeeId={employeeId} />}
-    </>
-  );
-}
+      <div className="order-1 min-w-0 flex-1 lg:order-2">
+        <div className="mb-3 lg:hidden">
+          <EmployeePicker employees={employees} value={employeeId} onChange={setEmployeeId} />
+        </div>
 
-function UserIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <circle cx="12" cy="8" r="3.5" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 20a7 7 0 0 1 14 0" />
-    </svg>
+        {employeeId && <EmployeeCalendarView employeeId={employeeId} />}
+      </div>
+    </div>
   );
 }

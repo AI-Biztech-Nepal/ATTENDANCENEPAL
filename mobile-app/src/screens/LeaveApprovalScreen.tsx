@@ -23,7 +23,7 @@ import {
   type LeavePolicy,
 } from '../lib/leaveBalance';
 
-const FILTERS = ['pending', 'approved', 'rejected', 'All'] as const;
+const FILTERS = ['All', 'pending', 'approved', 'rejected'] as const;
 
 const ENTRY_LABEL: Record<LeaveEntry['kind'], string> = {
   earned: 'Worked on Week Off',

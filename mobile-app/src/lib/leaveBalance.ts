@@ -361,30 +361,38 @@ export async function loadLeaveLedgers(opts: {
     return result;
   }
 
+  // A balance for one person (the exit settlement) needs only their rows, not the whole company's year of
+  // punches. For a long list the ids would not fit in a URL, so those still read everything.
+  const only = opts.employees.length <= 20 ? opts.employees.map(e => e.id) : null;
+  const mine = <Q>(query: Q): Q => (only ? (query as unknown as { in(column: string, values: string[]): Q }).in('employee_id', only) : query);
+
   const [firstPunch, summaries, logs, shifts, roster, holidays, leave, pattern] = await Promise.all([
+    // The company's first punch ever, whoever made it — it marks when the company started using the system.
     supabase.from('attendance_logs').select('punch_time').order('punch_time', { ascending: true }).limit(1),
     fetchAll<PayrollSummary>((a, b) =>
-      supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', walkStart).lte('work_date', until).order('work_date').range(a, b)
+      mine(supabase.from('payroll_summaries').select(PAYROLL_SUMMARY_COLUMNS).gte('work_date', walkStart).lte('work_date', until)).order('work_date').range(a, b)
     ),
     // A day either side: an overnight duty's tap-out lands on the next date,
     // and the Kathmandu day starts 5h45m before the UTC one.
     fetchAll<AttendanceLog>((a, b) =>
-      supabase
-        .from('attendance_logs')
-        .select(ATTENDANCE_LOG_COLUMNS)
-        .gte('punch_time', `${addDays(walkStart, -1)}T00:00:00Z`)
-        .lte('punch_time', `${addDays(until, 1)}T23:59:59Z`)
+      mine(
+        supabase
+          .from('attendance_logs')
+          .select(ATTENDANCE_LOG_COLUMNS)
+          .gte('punch_time', `${addDays(walkStart, -1)}T00:00:00Z`)
+          .lte('punch_time', `${addDays(until, 1)}T23:59:59Z`)
+      )
         .order('punch_time')
         .range(a, b)
     ),
     supabase.from('shifts').select('*'),
     fetchAll<{ employee_id: string; work_date: string; shift_id: string | null }>((a, b) =>
-      supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', walkStart).lte('work_date', until).order('work_date').range(a, b)
+      mine(supabase.from('employee_daily_shifts').select('employee_id, work_date, shift_id').gte('work_date', walkStart).lte('work_date', until)).order('work_date').range(a, b)
     ),
     supabase.from('company_holidays').select('*').gte('holiday_date', walkStart).lte('holiday_date', until),
-    supabase.from('leave_requests').select('*').eq('status', 'approved').lte('start_date', until).gte('end_date', walkStart),
+    mine(supabase.from('leave_requests').select('*').eq('status', 'approved').lte('start_date', until).gte('end_date', walkStart)),
     opts.rosterMode === 'weekly'
-      ? supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id')
+      ? mine(supabase.from('employee_weekly_pattern').select('employee_id, weekday, shift_id'))
       : Promise.resolve({ data: [] as { employee_id: string; weekday: number; shift_id: string | null }[] }),
   ]);
 

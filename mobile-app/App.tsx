@@ -11,6 +11,7 @@ import { useFonts } from 'expo-font';
 import { MANROPE_FONTS, applyManropeGlobally } from './src/lib/fonts';
 import { AuthProvider, useAuth } from './src/lib/AuthContext';
 import { CalendarSystemProvider } from './src/lib/CalendarSystemContext';
+import { ToastProvider } from './src/components/Toast';
 import LoginScreen from './src/screens/LoginScreen';
 import CheckInScreen from './src/screens/CheckInScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
@@ -40,6 +41,8 @@ import EmployeeHeader from './src/navigation/EmployeeHeader';
 import UpdateBanner from './src/components/UpdateBanner';
 import { useUpdateCheck } from './src/lib/useUpdateCheck';
 import { PendingApprovalsProvider, usePendingApprovals } from './src/lib/PendingApprovals';
+import { HrAlertsProvider } from './src/lib/HrAlertsProvider';
+import { NotificationReadsProvider } from './src/lib/NotificationReads';
 import { colors } from './src/theme';
 import {
   CalendarIcon,
@@ -61,7 +64,8 @@ export type EmployeeTabParamList = {
   Calendar: undefined;
   Payroll: undefined;
   Tasks: undefined;
-  Profile: undefined;
+  // `tab` opens the Profile on that tab (the notification bell sends 'exit'); `at` makes a repeat open count as new.
+  Profile: { tab?: 'overview' | 'records' | 'docs' | 'exit'; at?: number } | undefined;
 };
 const EmployeeTab = createBottomTabNavigator<EmployeeTabParamList>();
 
@@ -170,7 +174,7 @@ function EmployeesStackScreen() {
   return (
     <EmployeesAdminStack.Navigator screenOptions={adminStackOptions}>
       <EmployeesAdminStack.Screen name="EmployeesList" component={EmployeesScreen} options={{ title: 'Employees' }} />
-      <EmployeesAdminStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee Details' }} />
+      <EmployeesAdminStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee' }} />
     </EmployeesAdminStack.Navigator>
   );
 }
@@ -199,7 +203,7 @@ function MoreStackScreen() {
           <MoreStack.Screen name="Branches" component={BranchesScreen} options={{ title: 'Branch / Department' }} />
           <MoreStack.Screen name="Devices" component={DevicesScreen} options={{ title: 'Biometric Sync Devices' }} />
           <MoreStack.Screen name="Resigned" component={EmployeesScreen} initialParams={{ filter: 'Resigned' }} options={{ title: 'Resigned' }} />
-          <MoreStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee Details' }} />
+          <MoreStack.Screen name="EmployeeDetail" component={EmployeeDetailScreen} options={{ title: 'Employee' }} />
         </>
       )}
     </MoreStack.Navigator>
@@ -366,7 +370,11 @@ function AppInner() {
             <SuperadminScreen />
           ) : profile?.role === 'admin' || profile?.role === 'hr' ? (
             <PendingApprovalsProvider>
-              <AdminTabNavigator />
+              <HrAlertsProvider>
+                <NotificationReadsProvider>
+                  <AdminTabNavigator />
+                </NotificationReadsProvider>
+              </HrAlertsProvider>
             </PendingApprovalsProvider>
           ) : (
             <EmployeeStack.Navigator
@@ -391,11 +399,13 @@ export default function App() {
       {/* Needed by the owner tab bar, which reads insets at the top level
           (outside any navigator's own provider) to clear the gesture bar. */}
       <SafeAreaProvider>
-        <AuthProvider>
-          <CalendarSystemProvider>
-            <AppInner />
-          </CalendarSystemProvider>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <CalendarSystemProvider>
+              <AppInner />
+            </CalendarSystemProvider>
+          </AuthProvider>
+        </ToastProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

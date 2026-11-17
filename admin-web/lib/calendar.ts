@@ -154,6 +154,38 @@ export function formatDdMmYyyy(adKey: string, system: CalendarSystem): string {
   return NepaliDate.fromAD(new Date(y, m - 1, d)).format('DD/MM/YYYY');
 }
 
+/** What a person typed into a date box -> an AD date key (YYYY-MM-DD), or null if it is not a
+ * real date in the active calendar `system`. Takes D/M/YYYY (the order formatDdMmYyyy writes) or,
+ * when pasted, YYYY-M-D; "/", "-" and "." all work as separators. Days that do not exist (31 in
+ * a 30-day month) and years the BS table does not cover (2000-2090) are refused, not rolled over. */
+export function parseTypedDate(text: string, system: CalendarSystem): string | null {
+  const t = text.trim();
+  let y: number;
+  let m: number;
+  let d: number;
+  const dayFirst = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(t);
+  const yearFirst = /^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})$/.exec(t);
+  if (dayFirst) [d, m, y] = [Number(dayFirst[1]), Number(dayFirst[2]), Number(dayFirst[3])];
+  else if (yearFirst) [y, m, d] = [Number(yearFirst[1]), Number(yearFirst[2]), Number(yearFirst[3])];
+  else return null;
+  if (m < 1 || m > 12 || d < 1 || d > 32) return null;
+  if (system === 'AD') {
+    if (y < 1900 || y > 2200) return null;
+    const date = new Date(y, m - 1, d);
+    if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return null;
+    return dateKey(y, m - 1, d);
+  }
+  try {
+    const bs = new NepaliDate(y, m - 1, d);
+    const back = bs.getBS();
+    if (back.year !== y || back.month !== m - 1 || back.date !== d) return null;
+    const ad = bs.getAD();
+    return dateKey(ad.year, ad.month, ad.date);
+  } catch {
+    return null;
+  }
+}
+
 /** A selectable month-long period: a real calendar month in whichever
  * system it was built for, with its true AD start/end already resolved
  * (see monthDateRange()) — never an AD month wearing a BS label that
@@ -253,6 +285,40 @@ export function formatAdDate(adKey: string | null | undefined, system: CalendarS
     });
   }
   return NepaliDate.fromAD(new Date(Number(y), Number(mo) - 1, Number(d))).format('D MMMM YYYY');
+}
+
+/** A date in BOTH calendars at once, the active one first — "12 Baisakh 2050 BS · 24 Apr 1993 AD". For dates
+ * where either calendar matters (a date of birth); everything else follows the AD/BS switch. Only one date is
+ * ever stored (AD): the other is computed from it, so the two can never disagree. A date the Nepali calendar
+ * can't convert still shows, in AD only. */
+export function formatBothCalendars(adKey: string | null | undefined, system: CalendarSystem): string {
+  if (!adKey) return '—';
+  const ad = `${formatAdDate(adKey, 'AD')} AD`;
+  try {
+    const bs = `${formatAdDate(adKey, 'BS')} BS`;
+    return system === 'BS' ? `${bs} · ${ad}` : `${ad} · ${bs}`;
+  } catch {
+    return ad;
+  }
+}
+
+/** The same date in the calendar that is NOT showing, for a line under a date picker — "Nepali (BS): 12 Baisakh
+ * 2050" while the picker is in AD, "English (AD): 24 Apr 1993" while it is in BS. Empty when there is no date. */
+export function otherCalendarHint(adKey: string | null | undefined, system: CalendarSystem): string {
+  if (!adKey || !/^\d{4}-\d{2}-\d{2}/.test(adKey)) return '';
+  try {
+    return system === 'AD' ? `Nepali (BS): ${formatAdDate(adKey, 'BS')}` : `English (AD): ${formatAdDate(adKey, 'AD')}`;
+  } catch {
+    return '';
+  }
+}
+
+/** "Mon, 2 Nov 2026 · 16 Kartik 2083" — today's date in both calendars, for
+ * the employee pages' greeting (same line the mobile app shows). */
+export function formatTodayLine(adKey: string): string {
+  const [y, mo, d] = adKey.split('-').map(Number);
+  const weekday = new Date(y, mo - 1, d).toLocaleDateString(undefined, { weekday: 'short' });
+  return `${weekday}, ${formatAdDate(adKey, 'AD')} · ${formatAdDate(adKey, 'BS')}`;
 }
 
 /** Formats a full ISO timestamp's clock time — reads the same regardless of

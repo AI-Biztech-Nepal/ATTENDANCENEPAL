@@ -9,7 +9,7 @@ import { useCalendarSystem } from '../lib/CalendarSystemContext';
 import { nepalDateKey } from '../lib/shift';
 import { usePendingApprovals } from '../lib/PendingApprovals';
 
-const FILTERS = ['pending', 'approved', 'rejected', 'All'] as const;
+const FILTERS = ['All', 'pending', 'approved', 'rejected'] as const;
 
 function formatTime(value: string | null) {
   if (!value) return '—';

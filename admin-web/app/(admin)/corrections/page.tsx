@@ -233,7 +233,7 @@ export default function CorrectionsPage() {
   return (
     <>
       <div className="mb-5 flex flex-wrap items-center gap-2">
-        {(['pending', 'approved', 'rejected', 'All'] as const).map(f => (
+        {(['All', 'pending', 'approved', 'rejected'] as const).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}

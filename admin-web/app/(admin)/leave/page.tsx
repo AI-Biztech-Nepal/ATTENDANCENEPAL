@@ -294,7 +294,7 @@ export default function LeavePage() {
         <>
           {error && <p className="mb-4 text-sm text-critical">{error}</p>}
           <div className="mb-5 flex flex-wrap gap-2">
-            {(['pending', 'approved', 'rejected', 'All'] as const).map(f => (
+            {(['All', 'pending', 'approved', 'rejected'] as const).map(f => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}

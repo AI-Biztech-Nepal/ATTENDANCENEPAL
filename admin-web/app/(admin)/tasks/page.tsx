@@ -197,7 +197,7 @@ export default function TasksPage() {
     <>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {(['pending', 'in_progress', 'submitted', 'approved', 'rejected', 'All'] as const).map(f => (
+          {(['All', 'pending', 'in_progress', 'submitted', 'approved', 'rejected'] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -390,7 +390,7 @@ export default function TasksPage() {
         <h2 className="mb-3 text-sm font-semibold text-ink">Point Redemptions</h2>
         {redemptionError && <p className="mb-3 text-sm text-critical">{redemptionError}</p>}
         <div className="mb-4 flex flex-wrap gap-2">
-          {(['pending', 'approved', 'rejected', 'All'] as const).map(f => (
+          {(['All', 'pending', 'approved', 'rejected'] as const).map(f => (
             <button
               key={f}
               onClick={() => setRedemptionFilter(f)}

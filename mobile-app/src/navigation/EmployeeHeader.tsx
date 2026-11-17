@@ -3,7 +3,11 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, Pressable, Stat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { supabase } from '../lib/supabase';
+import { signOutAndUnregisterPush } from '../lib/pushNotifications';
 import CalendarSystemSwitch from '../components/CalendarSystemSwitch';
+import EmployeeNotificationsModal from '../components/EmployeeNotificationsModal';
+import { BellIcon } from '../components/icons';
+import { useMyNotifications } from '../lib/employeeNotifications';
 import HeaderBackButton from './HeaderBackButton';
 
 // The employee's own `employees.name`/`profile_photo_url` (not the login
@@ -18,6 +22,17 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
   const [menuOpen, setMenuOpen] = useState(false);
   const anchorRef = useRef<View>(null);
   const [menuPos, setMenuPos] = useState({ top: 0, right: 12 });
+  // What HR has done about them. Reloaded as the person moves between screens.
+  const { items, unread, markAllRead } = useMyNotifications(route?.name ?? '');
+  const [bellOpen, setBellOpen] = useState(false);
+
+  function openBell() {
+    setBellOpen(true);
+  }
+  function openExit() {
+    setBellOpen(false);
+    navigation.navigate('Profile', { tab: 'exit', at: Date.now() });
+  }
 
   useEffect(() => {
     let active = true;
@@ -37,7 +52,7 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
 
   async function handleSignOut() {
     setMenuOpen(false);
-    await supabase.auth.signOut();
+    await signOutAndUnregisterPush();
   }
 
   function toggleMenu() {
@@ -78,12 +93,28 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
 
         <CalendarSystemSwitch onDark />
 
+        <TouchableOpacity
+          style={styles.bell}
+          onPress={openBell}
+          accessibilityRole="button"
+          accessibilityLabel={unread > 0 ? `Notifications, ${unread} new` : 'Notifications'}
+        >
+          <BellIcon size={18} color={colors.white} />
+          {unread > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
         <View ref={anchorRef} collapsable={false}>
           <TouchableOpacity style={styles.avatar} onPress={toggleMenu} accessibilityRole="button" accessibilityLabel="Account menu">
             {photoUrl ? <Image source={{ uri: photoUrl }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{initials}</Text>}
           </TouchableOpacity>
         </View>
       </View>
+
+      <EmployeeNotificationsModal visible={bellOpen} onClose={() => setBellOpen(false)} items={items} unread={unread} onMarkAllRead={markAllRead} onOpen={openExit} />
 
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuOpen(false)}>
@@ -113,6 +144,29 @@ const styles = StyleSheet.create({
   brandMark: { height: 38, width: 38, borderRadius: 11, backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
   brandLogo: { height: 34, width: 34 },
   brandText: { flexShrink: 1, fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
+  bell: {
+    height: 36,
+    width: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: colors.critical,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: colors.white, fontSize: 10, fontWeight: '800' },
   avatar: {
     height: 36,
     width: 36,
