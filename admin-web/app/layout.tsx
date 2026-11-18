@@ -4,6 +4,7 @@ import { CalendarSystemProvider } from '@/lib/calendarSystem';
 import { ConfirmProvider } from '@/components/ConfirmDialog';
 import { ToastProvider } from '@/components/Toast';
 import ChunkErrorReload from '@/components/ChunkErrorReload';
+import PortalFlagMount from '@/components/PortalFlagMount';
 
 export const metadata: Metadata = {
   title: 'Attendance Nepal Admin',
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <ChunkErrorReload />
+        <PortalFlagMount />
         <CalendarSystemProvider>
           <ConfirmProvider>
             <ToastProvider>{children}</ToastProvider>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { PORTAL_URL, rememberPortal } from './PortalFlag';
 
 type NavChild = { href: string; label: string; icon: (props: IconProps) => JSX.Element; adminOnly: boolean };
 // A grouped item's own page is no longer reached by clicking the group row —
@@ -66,6 +67,8 @@ type Props = {
 
 export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
   const pathname = usePathname();
+  const [fromPortal, setFromPortal] = useState(false);
+  useEffect(() => setFromPortal(rememberPortal()), []);
   const items = NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin');
 
   // At most one dropdown is open: opening another closes the current one. It is
@@ -131,6 +134,16 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
           rail ? 'lg:w-16' : 'lg:w-60'
         } ${drawerOpen ? 'translate-x-0' : ''}`}
       >
+        {fromPortal && (
+          <a
+            href={PORTAL_URL}
+            className="mx-3 mt-3 flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-sky-300 hover:text-white"
+            title="Back to AIBIZTECH"
+          >
+            <span aria-hidden="true">←</span>
+            <span className={`whitespace-nowrap ${hideWhenRail}`}>Back to AIBIZTECH</span>
+          </a>
+        )}
         <div className="flex flex-col items-center gap-0.5 overflow-hidden px-3 pb-1 pt-2 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
