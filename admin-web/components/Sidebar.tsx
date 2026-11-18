@@ -147,7 +147,7 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
         <div className="flex flex-col items-center gap-0.5 overflow-hidden px-3 pb-1 pt-2 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/logo-mark.png"
+            src="/attendance/logo-mark.png"
             alt="Attendance Nepal"
             className={`h-28 w-28 shrink-0 object-contain transition-all duration-200 ${rail ? 'lg:h-[30px] lg:w-[30px]' : ''}`}
           />

@@ -303,3 +303,7 @@ html, body {
     transform: translateY(-8px);
   }
 }
+
+/* Shown inside the AIBIZTECH portal: the portal sidebar replaces this app's own */
+html[data-framed] aside.bg-sidebar { display: none !important; }
+html[data-framed] .fixed.inset-0.bg-black\/40 { display: none !important; }

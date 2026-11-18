@@ -13,7 +13,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Inside the AIBIZTECH portal (shown in a frame) the portal's own sidebar already lists these pages, so ours is hidden */}
+        <script dangerouslySetInnerHTML={{ __html: "try{if(window.self!==window.top)document.documentElement.setAttribute('data-framed','1')}catch(e){document.documentElement.setAttribute('data-framed','1')}" }} />
+      </head>
       <body>
         <ChunkErrorReload />
         <PortalFlagMount />
