@@ -118,6 +118,22 @@ export function addDays(iso: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Whole days from `from` to `to` (both YYYY-MM-DD); negative when `to` is the earlier one. */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86400000);
+}
+
+/** How far a day is from today, in words: "today", "tomorrow", "yesterday", "in 5 days", "3 days ago", "in 6 weeks". */
+export function relativeDayLabel(date: string, today: string): string {
+  const n = daysBetween(today, date);
+  if (n === 0) return 'today';
+  if (n === 1) return 'tomorrow';
+  if (n === -1) return 'yesterday';
+  const abs = Math.abs(n);
+  const span = abs >= 28 ? `${Math.round(abs / 7)} weeks` : `${abs} days`;
+  return n > 0 ? `in ${span}` : `${span} ago`;
+}
+
 /** "Sun" / "Sunday" for a date key, in the viewer's language. */
 export function weekdayName(iso: string, style: 'short' | 'long' = 'short'): string {
   const [y, m, d] = iso.split('-').map(Number);

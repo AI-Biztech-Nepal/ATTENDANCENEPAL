@@ -26,7 +26,7 @@ import {
   taskSlot,
   weekdayName,
 } from '@/lib/taskSchedule';
-import type { Employee, LeaveRequest, PointRedemption, Task, TaskStatus, TaskTimeLog } from '@/lib/types';
+import type { CompanyHoliday, Employee, LeaveRequest, PointRedemption, Task, TaskStatus, TaskTimeLog } from '@/lib/types';
 
 type Tab = 'schedule' | 'redemptions' | 'leaderboard';
 /** What the key above the timetable can filter by: a task status, or people on leave. */
@@ -51,6 +51,9 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
+  const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
+  // One line saying what the last Assign / Pick a time did, shown above the timetable for a few seconds.
+  const [notice, setNotice] = useState<string | null>(null);
   const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
 
   const [date, setDate] = useState(todayIso);
@@ -90,6 +93,12 @@ export default function TasksPage() {
       .eq('status', 'approved')
       .gte('end_date', addDays(todayIso, -60))
       .then(({ data }) => setLeaves((data as LeaveRequest[] | null) ?? []));
+    // Company holidays from today on, so the Assign form can point one out when a future day is picked.
+    supabase
+      .from('company_holidays')
+      .select('*')
+      .gte('holiday_date', todayIso)
+      .then(({ data }) => setHolidays((data as CompanyHoliday[] | null) ?? []));
     // Which tasks have a timer running right now, for the green dot on a block.
     supabase
       .from('task_time_logs')
@@ -112,6 +121,12 @@ export default function TasksPage() {
       .eq('employee_id', hoursEmployeeId)
       .then(({ data }) => setHoursLogs((data as TaskTimeLog[] | null) ?? []));
   }, [hoursEmployeeId]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 8000);
+    return () => clearTimeout(id);
+  }, [notice]);
 
   // "Now" on the timetable moves once a minute. Read after mount so the server and browser never disagree.
   useEffect(() => {
@@ -304,6 +319,11 @@ export default function TasksPage() {
 
       {tab === 'schedule' && (
         <div role="tabpanel" id="panel-schedule" aria-labelledby="tab-schedule" className="space-y-4">
+          {notice && (
+            <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800">
+              {notice}
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -578,10 +598,15 @@ export default function TasksPage() {
           tasks={tasks}
           leaves={leaves}
           knownTitles={knownTitles}
+          today={todayIso}
+          holidays={holidays}
           initial={assign}
           onClose={closeAssign}
-          onSaved={() => {
+          onSaved={saved => {
             setAssign(null);
+            // Go to the day it was put on, so a task given to a future day does not seem to have vanished.
+            setDate(saved.date);
+            setNotice(saved.message);
             reload();
           }}
         />

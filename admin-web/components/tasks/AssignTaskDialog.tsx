@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import DatePicker from '@/components/DatePicker';
+import { formatAdDate, otherCalendarHint } from '@/lib/calendar';
+import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
   DAY_END_HOUR,
   SLOT_HOURS,
+  addDays,
   findClash,
   formatDuration,
   formatHourFull,
@@ -13,10 +16,12 @@ import {
   hourToTime,
   isOnLeave,
   placementsFor,
+  relativeDayLabel,
   taskSlot,
+  weekdayName,
   type Slot,
 } from '@/lib/taskSchedule';
-import type { Employee, LeaveRequest, Task } from '@/lib/types';
+import type { CompanyHoliday, Employee, LeaveRequest, Task } from '@/lib/types';
 import DayStrip from './DayStrip';
 
 export type AssignInitial = {
@@ -36,11 +41,21 @@ type Props = {
   leaves: LeaveRequest[];
   /** Titles used before, newest first, for the "reuse a title" suggestions. */
   knownTitles: string[];
+  /** Today's date (Nepal), YYYY-MM-DD — what "tomorrow" and "in 5 days" are measured from. */
+  today: string;
+  /** Company holidays from today on, so a holiday can be pointed out when it is picked. */
+  holidays: CompanyHoliday[];
   initial: AssignInitial;
   onClose: () => void;
-  /** The task was saved; the page reloads its data. */
-  onSaved: () => void;
+  /** The task was saved: the day it is on (so the timetable can go there) and a sentence saying what happened. */
+  onSaved: (saved: { date: string; message: string }) => void;
 };
+
+/** The "Today, Tomorrow, then the next five days" row under the date box. */
+const QUICK_DAYS = 7;
+const CHIP = 'min-h-[36px] rounded-full border px-3 text-[12.5px] font-semibold';
+const CHIP_ON = 'border-teal-700 bg-teal-50 text-teal-900 ring-1 ring-teal-700';
+const CHIP_OFF = 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
 
 const LABEL = 'mb-1.5 block text-xs font-bold text-slate-700';
 const FIELD = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm font-semibold text-ink';
@@ -57,7 +72,8 @@ function firstFreeStart(tasks: Task[], employeeId: string, date: string, ignoreI
  * click on a free hour (employee, day and start hour already filled in), or from "Pick a time" on a task that has
  * none yet. It checks the slot as you type — no overlap with the employee's other tasks, nobody on leave — and the
  * database enforces the same, so a stale screen can't double-book anyone. */
-export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles, initial, onClose, onSaved }: Props) {
+export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles, today, holidays, initial, onClose, onSaved }: Props) {
+  const { system } = useCalendarSystem();
   const scheduleTask = initial.scheduleTask;
   const [employeeId, setEmployeeId] = useState(initial.employeeId);
   const [title, setTitle] = useState(scheduleTask?.title ?? '');
@@ -113,6 +129,14 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
 
   const canSave = !!employeeId && !!date && (!!scheduleTask || title.trim().length > 0) && !problem && !saving;
 
+  // The date block: one-tap days, a plain-words reading of the chosen day, and anything worth knowing about it.
+  const quickDays = useMemo(() => Array.from({ length: QUICK_DAYS }, (_, i) => addDays(today, i)), [today]);
+  const dayNumber = (d: string) => formatAdDate(d, system).split(' ')[0];
+  const dayHint = date ? otherCalendarHint(date, system) : '';
+  const holiday = date
+    ? holidays.find(h => h.holiday_date === date && (h.applies_to === 'all' || h.applies_to === employee?.gender)) ?? null
+    : null;
+
   function changeStart(h: number) {
     setStart(h);
     if (end <= h) setEnd(Math.min(DAY_END_HOUR, h + 1));
@@ -145,7 +169,10 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
       setError(failure);
       return;
     }
-    onSaved();
+    onSaved({
+      date,
+      message: `${scheduleTask ? 'Scheduled' : 'Assigned'} "${scheduleTask?.title ?? title.trim()}" for ${employee?.name ?? 'the employee'} · ${weekdayName(date)} ${formatAdDate(date, system)} · ${formatSlot(slot)}`,
+    });
   }
 
   return (
@@ -248,11 +275,35 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
           </div>
         )}
 
-        <div className="mb-3 grid grid-cols-1 gap-3.5 sm:grid-cols-[1.3fr_1fr_1fr]">
-          <div>
-            <span className={LABEL}>Date</span>
-            <DatePicker value={date} onChange={v => v && setDate(v)} ariaLabel="Date" className="h-11 rounded-[10px] border-slate-300 font-semibold" />
+        <div className="mb-3">
+          <span className={LABEL}>Date</span>
+          <DatePicker value={date} onChange={v => v && setDate(v)} ariaLabel="Date" className="h-11 rounded-[10px] border-slate-300 font-semibold" />
+          <div role="group" aria-label="Quick dates" className="mt-2 flex flex-wrap gap-1.5">
+            {quickDays.map((d, i) => (
+              <button key={d} type="button" aria-pressed={date === d} onClick={() => setDate(d)} className={`${CHIP} ${date === d ? CHIP_ON : CHIP_OFF}`}>
+                {i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : `${weekdayName(d)} ${dayNumber(d)}`}
+              </button>
+            ))}
           </div>
+          {date && (
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">
+              {weekdayName(date, 'long')}, {relativeDayLabel(date, today)}
+              {dayHint ? ` · ${dayHint}` : ''}
+            </p>
+          )}
+          {date && date < today && (
+            <p role="status" className="mt-1 text-xs font-semibold text-amber-800">
+              This day has already passed.
+            </p>
+          )}
+          {holiday && (
+            <p role="status" className="mt-1 text-xs font-semibold text-amber-800">
+              {holiday.name} is a holiday. You can still assign work.
+            </p>
+          )}
+        </div>
+
+        <div className="mb-3 grid grid-cols-2 gap-3.5">
           <div>
             <label htmlFor="assign-from" className={LABEL}>From</label>
             <select id="assign-from" value={start} onChange={e => changeStart(Number(e.target.value))} className={FIELD}>
