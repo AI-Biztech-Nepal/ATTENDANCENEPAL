@@ -120,7 +120,8 @@ export default function TaskTimetable({
         <div className="overflow-x-auto">
           <div className="relative min-w-[1180px]">
             <div className="grid grid-cols-[256px_minmax(0,1fr)] border-b border-slate-200 bg-slate-50">
-              <div className="flex items-end px-5 pb-3 text-xs font-extrabold uppercase tracking-[0.06em] text-slate-600">Employee</div>
+              {/* Same top padding as the hour headings (room for the "Now" tag above them), and centred like them. */}
+              <div className="flex items-center px-5 pb-2.5 pt-[26px] text-xs font-extrabold uppercase tracking-[0.06em] text-slate-600">Employee</div>
               <div className="grid grid-cols-9">
                 {SLOT_HOURS.map(h => (
                   <div key={h} className="border-l border-slate-200 px-1.5 pb-2.5 pt-[26px] text-center">

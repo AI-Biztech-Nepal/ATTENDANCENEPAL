@@ -32,14 +32,8 @@ type Tab = 'schedule' | 'redemptions' | 'leaderboard';
 /** What the key above the timetable can filter by: a task status, or people on leave. */
 type Filter = TaskStatus | 'leave';
 
-/** The status buttons, in the order the key shows them, with the swatch each one wears. */
-const STATUS_FILTERS: { status: TaskStatus; swatch: string }[] = [
-  { status: 'pending', swatch: 'border-slate-300 bg-slate-100' },
-  { status: 'in_progress', swatch: 'border-sky-300 bg-sky-100' },
-  { status: 'submitted', swatch: 'border-amber-300 bg-amber-100' },
-  { status: 'approved', swatch: 'border-emerald-300 bg-emerald-100' },
-  { status: 'rejected', swatch: 'border-rose-300 bg-rose-100' },
-];
+/** The status buttons, in the order they sit after "All". */
+const STATUS_FILTERS: TaskStatus[] = ['pending', 'in_progress', 'submitted', 'approved', 'rejected'];
 
 const PRIMARY = 'rounded-[10px] bg-teal-700 text-sm font-extrabold text-white hover:bg-teal-800';
 const SELECT = 'h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-ink';
@@ -139,7 +133,7 @@ export default function TasksPage() {
     [activeEmployees, department]
   );
 
-  const statuses = useMemo(() => STATUS_FILTERS.map(f => f.status).filter(s => filters.has(s)), [filters]);
+  const statuses = useMemo(() => STATUS_FILTERS.filter(s => filters.has(s)), [filters]);
   const showLeave = filters.has('leave');
   // The numbers on the filter buttons: tasks per status on the day shown, and how many people are on leave that day.
   const dayCounts = useMemo(() => {
@@ -154,6 +148,8 @@ export default function TasksPage() {
     }
     return { counts, leave };
   }, [rowEmployees, tasks, leaves, date]);
+  // "All" counts every task on the day shown, whatever its status.
+  const dayTotal = STATUS_FILTERS.reduce((sum, s) => sum + dayCounts.counts[s], 0);
 
   const submittedTasks = useMemo(
     () => tasks.filter(t => t.status === 'submitted').sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? '')),
@@ -354,24 +350,17 @@ export default function TasksPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5">
             <div role="group" aria-label="Filter the timetable by status" className="flex flex-wrap items-center gap-2">
-              {STATUS_FILTERS.map(({ status, swatch }) => (
+              <FilterButton on={filters.size === 0} onClick={clearFilters} count={dayTotal}>
+                All
+              </FilterButton>
+              {STATUS_FILTERS.map(status => (
                 <FilterButton key={status} on={filters.has(status)} onClick={() => toggleFilter(status)} count={dayCounts.counts[status]}>
-                  <i className={`h-3.5 w-3.5 rounded border ${swatch}`} />
                   {STATUS_LABEL[status]}
                 </FilterButton>
               ))}
               <FilterButton on={showLeave} onClick={() => toggleFilter('leave')} count={dayCounts.leave}>
-                <i
-                  className="h-3.5 w-3.5 rounded border border-slate-300"
-                  style={{ backgroundImage: 'repeating-linear-gradient(135deg,#cbd5e1 0,#cbd5e1 2px,#f1f5f9 2px,#f1f5f9 5px)' }}
-                />
                 On leave
               </FilterButton>
-              {filters.size > 0 && (
-                <button type="button" onClick={clearFilters} className="min-h-[36px] px-2 text-[13px] font-extrabold text-teal-700 hover:underline">
-                  Show all
-                </button>
-              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <button
