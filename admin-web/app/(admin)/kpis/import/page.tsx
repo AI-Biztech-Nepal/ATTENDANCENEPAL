@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import Link from 'next/link';
 import { usePageTitle } from '@/lib/pageTitle';
+import { isKpiOn, kpiLabel } from '@/lib/kpiSettings';
+import { publishKpiSettings, useKpiSettings } from '@/lib/useKpiSettings';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatAdDate } from '@/lib/calendar';
 import { nepalTodayIso } from '@/lib/shift';
@@ -42,6 +45,8 @@ export default function ImportPage() {
   usePageTitle('KPIs');
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
+  // Which KPIs this company uses, what it calls them and its people (KPIs > Settings).
+  const { settings, words } = useKpiSettings();
   const today = useMemo(nepalTodayIso, []);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -64,8 +69,10 @@ export default function ImportPage() {
   const [done, setDone] = useState('');
 
   const [windowDays, setWindowDays] = useState('45');
-  const [savedDays, setSavedDays] = useState(45);
   const [windowNote, setWindowNote] = useState('');
+
+  // The saved window (from Settings, or from here) is what the box shows until it is edited.
+  useEffect(() => setWindowDays(String(settings.repeatDays)), [settings.repeatDays]);
 
   const loadPast = useCallback(() => {
     supabase
@@ -92,17 +99,6 @@ export default function ImportPage() {
       .from('employees')
       .select('id, name, employee_code, status')
       .then(({ data }) => live && setPeople(((data as (EmployeeRef & { status: string })[] | null) ?? []).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))));
-    supabase
-      .from('kpi_settings')
-      .select('repeat_window_days')
-      .limit(1)
-      .then(({ data }) => {
-        const days = (data as { repeat_window_days: number }[] | null)?.[0]?.repeat_window_days;
-        if (live && days) {
-          setWindowDays(String(days));
-          setSavedDays(days);
-        }
-      });
     loadPast();
     return () => {
       live = false;
@@ -169,14 +165,14 @@ export default function ImportPage() {
       setWindowNote('Use a whole number of days from 1 to 365.');
       return;
     }
-    if (n === savedDays || !companyId) {
+    if (n === settings.repeatDays || !companyId) {
       setWindowNote('');
       return;
     }
     const { error: e } = await supabase.from('kpi_settings').upsert({ company_id: companyId, repeat_window_days: n }, { onConflict: 'company_id' });
     if (e) setWindowNote(`Could not save: ${e.message}`);
     else {
-      setSavedDays(n);
+      publishKpiSettings({ ...settings, repeatDays: n });
       setWindowNote('Saved.');
     }
   }
@@ -267,6 +263,7 @@ export default function ImportPage() {
   const dateInfo = useMemo(() => (file && dateCol >= 0 ? detectDateOrder(file.table.rows.map(r => r[dateCol])) : null), [file, dateCol]);
   const slashDates = useMemo(() => !!file && dateCol >= 0 && file.table.rows.some(r => /^\d{1,2}[-/. ]\d{1,2}[-/. ]\d{2,4}/.test(r[dateCol])), [file, dateCol]);
   const dayText = (d: string) => formatAdDate(d, system);
+  const fills = (['services', 'rebooking', 'utilisation'] as const).filter(id => isKpiOn(id, settings));
   const stepNo = !file ? 1 : missing.length > 0 || (c?.import ?? 0) === 0 ? 2 : 3;
 
   const steps = ['Upload the file', 'Match the columns', 'Check and import'];
@@ -349,7 +346,7 @@ export default function ImportPage() {
             </p>
           )}
           <p className="m-0 mt-4 rounded-[10px] bg-slate-100 px-3.5 py-3 text-[13px] leading-normal text-slate-700">
-            Customer names and phone numbers are never imported. A customer is only a code, used to tell who came back.
+            {words.t('Customer names and phone numbers are never imported. A customer is only a code, used to tell who came back.')}
           </p>
         </section>
       ) : (
@@ -382,7 +379,7 @@ export default function ImportPage() {
                     <select aria-label={`Use ${h} for`} value={roles[i] ?? 'ignore'} onChange={e => changeRole(i, e.target.value as ColumnRole)} className={SELECT}>
                       {ROLES.map(r => (
                         <option key={r} value={r}>
-                          {ROLE_LABEL[r]}
+                          {words.t(ROLE_LABEL[r])}
                         </option>
                       ))}
                     </select>
@@ -398,7 +395,7 @@ export default function ImportPage() {
 
               {roles.includes('minutes') && (
                 <div className="mt-4 flex flex-wrap items-center gap-2.5 text-[13px] text-slate-700">
-                  <label htmlFor="import-unit" className="font-bold">The time with the customer is in</label>
+                  <label htmlFor="import-unit" className="font-bold">{words.t('The time with the customer is in')}</label>
                   <select id="import-unit" value={unit} onChange={e => setUnit(e.target.value as 'minutes' | 'hours')} className="h-10 rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-semibold text-ink">
                     <option value="minutes">minutes</option>
                     <option value="hours">hours</option>
@@ -442,52 +439,69 @@ export default function ImportPage() {
               )}
               {personalWarning && (
                 <p role="alert" className="m-0 mt-4 rounded-[10px] border border-amber-200 bg-amber-50 px-3.5 py-3 text-[13px] font-semibold leading-normal text-amber-900">
-                  The column used for the customer code looks like names, phone numbers or email addresses. Choose a customer ID column instead, or set it to &quot;Do not import&quot;. Codes are scrambled before they are saved, but it is better not to send them at all.
+                  {words.t('The column used for the customer code looks like names, phone numbers or email addresses. Choose a customer ID column instead, or set it to "Do not import". Codes are scrambled before they are saved, but it is better not to send them at all.')}
                 </p>
               )}
               <p className="m-0 mt-4 rounded-[10px] bg-slate-100 px-3.5 py-3 text-[13px] leading-normal text-slate-700">
-                Customer names and phone numbers are never imported. A customer is only a code, used to tell who came back.
+                {words.t('Customer names and phone numbers are never imported. A customer is only a code, used to tell who came back.')}
               </p>
             </section>
 
             <div className="flex min-w-0 flex-[2_1_380px] flex-col gap-5">
               <section aria-labelledby="fills-heading" className={`${CARD} px-6 pb-2 pt-5`}>
                 <h2 id="fills-heading" className="m-0 mb-1.5 text-base font-extrabold text-ink">What this fills in</h2>
-                <div className="border-t border-slate-200 py-3.5">
-                  <div className="text-sm font-bold text-ink">Services performed</div>
-                  <div className="mt-0.5 text-[13px] leading-normal text-slate-600">Completed services per employee, per month.</div>
-                </div>
-                <div className="border-t border-slate-200 py-3.5">
-                  <div className="text-sm font-bold text-ink">Rebooking rate</div>
-                  <div className="mt-0.5 text-[13px] leading-normal text-slate-600">Customers who came back, out of the customers served that month.</div>
-                  <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[13px] text-slate-700">
-                    <label htmlFor="rb-days">Counts as back if they return within</label>
-                    <input
-                      id="rb-days"
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={365}
-                      value={windowDays}
-                      onChange={e => {
-                        setWindowDays(e.target.value);
-                        setWindowNote('');
-                      }}
-                      onBlur={saveWindow}
-                      className="h-10 w-[72px] rounded-[10px] border border-slate-300 px-2.5 text-sm font-bold text-ink"
-                    />
-                    days
+                {fills.length === 0 && (
+                  <p className="m-0 border-t border-slate-200 py-3.5 text-[13px] leading-normal text-slate-600">
+                    None of the KPIs this file fills in are turned on. You can turn them on in{' '}
+                    <Link href="/kpis/settings" className="font-bold text-accent hover:underline">
+                      Settings
+                    </Link>
+                    .
+                  </p>
+                )}
+                {isKpiOn('services', settings) && (
+                  <div className="border-t border-slate-200 py-3.5">
+                    <div className="text-sm font-bold text-ink">{kpiLabel('services', settings)}</div>
+                    <div className="mt-0.5 text-[13px] leading-normal text-slate-600">Completed services per employee, per month.</div>
                   </div>
-                  {windowNote && (
-                    <p role={windowNote === 'Saved.' ? 'status' : 'alert'} className={`m-0 mt-1.5 text-xs font-semibold ${windowNote === 'Saved.' ? 'text-emerald-800' : 'text-critical-text'}`}>
-                      {windowNote}
-                    </p>
-                  )}
-                </div>
-                <div className="border-t border-slate-200 py-3.5">
-                  <div className="text-sm font-bold text-ink">Hour utilisation per day</div>
-                  <div className="mt-0.5 text-[13px] leading-normal text-slate-600">Time with customers, out of a 9-hour working day, averaged over the days worked.</div>
-                </div>
+                )}
+                {isKpiOn('rebooking', settings) && (
+                  <div className="border-t border-slate-200 py-3.5">
+                    <div className="text-sm font-bold text-ink">{kpiLabel('rebooking', settings)}</div>
+                    <div className="mt-0.5 text-[13px] leading-normal text-slate-600">{words.t('Customers who came back, out of the customers served that month.')}</div>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[13px] text-slate-700">
+                      <label htmlFor="rb-days">Counts as back if they return within</label>
+                      <input
+                        id="rb-days"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        max={365}
+                        value={windowDays}
+                        onChange={e => {
+                          setWindowDays(e.target.value);
+                          setWindowNote('');
+                        }}
+                        onBlur={saveWindow}
+                        className="h-10 w-[72px] rounded-[10px] border border-slate-300 px-2.5 text-sm font-bold text-ink"
+                      />
+                      days
+                    </div>
+                    {windowNote && (
+                      <p role={windowNote === 'Saved.' ? 'status' : 'alert'} className={`m-0 mt-1.5 text-xs font-semibold ${windowNote === 'Saved.' ? 'text-emerald-800' : 'text-critical-text'}`}>
+                        {windowNote}
+                      </p>
+                    )}
+                  </div>
+                )}
+                {isKpiOn('utilisation', settings) && (
+                  <div className="border-t border-slate-200 py-3.5">
+                    <div className="text-sm font-bold text-ink">{kpiLabel('utilisation', settings)}</div>
+                    <div className="mt-0.5 text-[13px] leading-normal text-slate-600">
+                      {words.t(`Time with customers, out of a ${settings.hoursPerDay}-hour working day, averaged over the days worked.`)}
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section aria-labelledby="check-heading" className={`${CARD} px-6 pb-5 pt-5`}>

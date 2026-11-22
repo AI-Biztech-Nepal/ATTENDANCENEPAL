@@ -1,10 +1,10 @@
 'use client';
 
-import { KPI_GROUPS, attendanceRates, type AttendanceKpi, type KpiGroup, type KpiGroupId } from '@/lib/kpi';
+import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
+import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
 import { KPI_COLORS, Pie, Ring } from './KpiCharts';
 
 const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
-const groupOf = (id: KpiGroupId): KpiGroup => KPI_GROUPS.find(g => g.id === id)!;
 
 function Card({ eyebrow, name, className = '', footer, children }: {
   eyebrow: string;
@@ -53,7 +53,10 @@ function Message({ title, text }: { title: string; text?: string }) {
 
 /** Attendance and punctuality: the month's working days as a pie of on time / late / absent, with the two
  * percentages beside it. The one KPI that is real so far; the others below wait for their input. */
-export function AttendanceCard({ current, previous, previousName, loading, notStarted, className = '' }: {
+export function AttendanceCard({ eyebrow, name, current, previous, previousName, loading, notStarted, className = '' }: {
+  /** The group's name and the KPI's name, as this company set them (see visibleGroups). */
+  eyebrow: string;
+  name: string;
   current: AttendanceKpi | null;
   previous: AttendanceKpi | null;
   /** The month before, as it is written under the KPI ("October", "Kartik"). */
@@ -62,9 +65,6 @@ export function AttendanceCard({ current, previous, previousName, loading, notSt
   notStarted: boolean;
   className?: string;
 }) {
-  const eyebrow = groupOf('attendance').title;
-  const name = 'Attendance and punctuality';
-
   let body: React.ReactNode;
   if (loading || !current) body = <Message title="Loading…" />;
   else if (!current.tracked) body = <Message title="Not tracked" text="This person is excused from attendance." />;
@@ -119,8 +119,7 @@ export function AttendanceCard({ current, previous, previousName, loading, notSt
 
 /** A KPI whose input does not exist yet: the card keeps its place on the page with a dash (and an empty ring
  * where the finished card has one), and says where the numbers will come from. */
-export function PendingCard({ groupId, name, ring = false, className = '' }: { groupId: KpiGroupId; name: string; ring?: boolean; className?: string }) {
-  const group = groupOf(groupId);
+export function PendingCard({ group, name, ring = false, className = '' }: { group: KpiGroup; name: string; ring?: boolean; className?: string }) {
   return (
     <Card eyebrow={group.title} name={name} className={className}>
       <div className="flex h-full min-h-[150px] flex-col items-center justify-center gap-2 py-2 text-center">
@@ -139,16 +138,21 @@ export function PendingCard({ groupId, name, ring = false, className = '' }: { g
   );
 }
 
-const COLLEAGUES = ['Feedback from peers', 'Feedback from immediate manager', 'Feedback from C-level', 'Feedback from training and compliance'];
+const COLLEAGUES: { id: KpiId; label: string }[] = [
+  { id: 'peers', label: 'Feedback from peers' },
+  { id: 'manager', label: 'Feedback from immediate manager' },
+  { id: 'clevel', label: 'Feedback from C-level' },
+  { id: 'training', label: 'Feedback from training and compliance' },
+];
 
 /** The four colleague-feedback KPIs on one scale of 0 to 5. Empty until reviews exist. */
-export function ColleagueCard({ className = '' }: { className?: string }) {
-  const group = groupOf('colleagues');
+export function ColleagueCard({ group, settings, className = '' }: { group: KpiGroup; settings: KpiSettings; className?: string }) {
+  const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label }));
   return (
     <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={`${group.source}. Not connected yet. Comments will be seen by management only.`}>
       <div className="flex flex-col">
-        {COLLEAGUES.map(label => (
-          <div key={label} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">
+        {rows.map(({ id, label }) => (
+          <div key={id} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">
             <div className="text-sm font-bold text-ink sm:w-[250px]">{label}</div>
             <div aria-hidden="true" className="h-3 min-w-[120px] flex-1 rounded-full bg-slate-100" />
             <div className="w-[74px] text-right text-2xl font-extrabold leading-none text-slate-400">

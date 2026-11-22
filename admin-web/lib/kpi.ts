@@ -14,6 +14,7 @@ import {
 } from './shift';
 import { leaveDatesByEmployee, weekOffDatesByGender } from './weekOff';
 import type { CalendarAnchor, CalendarSystem } from './calendar';
+import { isKpiOn, kpiLabel, wordsFor, type KpiId, type KpiSettings } from './kpiSettings';
 
 // ---------------------------------------------------------------------------
 // What the KPI page shows. No total, no score, no ranking: every KPI stands on
@@ -86,6 +87,33 @@ export const KPI_GROUPS: KpiGroup[] = [
     waiting: 'Peers, manager, C-level and training and compliance fill in once colleague reviews are given.',
   },
 ];
+
+/** What fills a group in, for the "fill in once ..." line. */
+const WAITING_TAIL: Record<KpiGroupId, string> = {
+  attendance: '',
+  services: 'your booking data is imported',
+  customers: 'customer forms are typed in',
+  colleagues: 'colleague reviews are given',
+};
+
+/** "Peers, manager, C-level and training and compliance": the first name as it is, the others in lower case
+ * unless they are names of their own ("C-level", "NPS", "Sales Calls"). */
+function nameList(names: string[]): string {
+  const parts = names.map((n, i) => (i > 0 && /^[A-Z][a-z]+( [a-z]+)*$/.test(n) ? n.charAt(0).toLowerCase() + n.slice(1) : n));
+  return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+/** The groups as this company sees them (Settings): the KPIs it turned off are left out (a group with none left is
+ * gone), the others carry the names it gave them, and "customer" is the word it uses for its people. */
+export function visibleGroups(settings: KpiSettings): KpiGroup[] {
+  const words = wordsFor(settings.word);
+  return KPI_GROUPS.flatMap(g => {
+    const columns = g.columns.filter(c => isKpiOn(c.id as KpiId, settings)).map(c => ({ ...c, label: kpiLabel(c.id as KpiId, settings) }));
+    if (columns.length === 0) return [];
+    const waiting = g.connected ? '' : `${nameList(columns.map(c => c.label))} ${columns.length === 1 ? 'fills' : 'fill'} in once ${words.t(WAITING_TAIL[g.id])}.`;
+    return [{ ...g, title: words.t(g.title), source: words.t(g.source), emptyNote: words.t(g.emptyNote), columns, waiting }];
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Attendance and punctuality

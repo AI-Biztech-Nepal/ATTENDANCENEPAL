@@ -2,6 +2,7 @@
 
 import DatePicker from '@/components/DatePicker';
 import { COMMENT_MAX, REFERENCE_MAX, type FeedbackDraft } from '@/lib/customerFeedback';
+import { useKpiSettings } from '@/lib/useKpiSettings';
 import type { Employee } from '@/lib/types';
 
 export type StaffOption = Pick<Employee, 'id' | 'name' | 'department'>;
@@ -22,13 +23,14 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
   employeeRef?: React.Ref<HTMLSelectElement>;
   ratingRef?: React.Ref<HTMLInputElement>;
 }) {
+  const { words } = useKpiSettings();
   const set = (patch: Partial<FeedbackDraft>) => onChange({ ...draft, ...patch });
   const optional = <span className="font-medium text-slate-600">(optional)</span>;
   return (
     <>
       <div className="mb-3.5">
         <label htmlFor={`${idPrefix}-employee`} className={LABEL}>
-          Who served the customer
+          {words.t('Who served the customer')}
         </label>
         <select id={`${idPrefix}-employee`} ref={employeeRef} value={draft.employeeId} onChange={e => set({ employeeId: e.target.value })} className={FIELD}>
           <option value="">Select employee…</option>
@@ -110,7 +112,7 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
           onChange={e => set({ comment: e.target.value })}
           className="w-full resize-y rounded-[10px] border border-slate-300 bg-white px-3 py-2.5 text-sm leading-normal text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         />
-        <p className="m-0 mt-1.5 text-xs text-slate-600">Copy the comment as written. Do not add a customer&apos;s name or phone number.</p>
+        <p className="m-0 mt-1.5 text-xs text-slate-600">{words.t("Copy the comment as written. Do not add a customer's name or phone number.")}</p>
       </div>
     </>
   );

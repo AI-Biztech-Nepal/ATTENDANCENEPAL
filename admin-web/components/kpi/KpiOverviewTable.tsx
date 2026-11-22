@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import Avatar from '@/components/Avatar';
-import { KPI_GROUPS, attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
+import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
 import type { Employee } from '@/lib/types';
 
 type Props = {
+  /** The KPI groups to show, as this company set them up (see visibleGroups). */
+  groups: KpiGroup[];
   employees: Employee[];
   attendance: Map<string, AttendanceKpi>;
   loading: boolean;
@@ -15,15 +17,16 @@ type Props = {
   monthStart: string;
 };
 
-const COLUMN_COUNT = 1 + KPI_GROUPS.reduce((n, g) => n + g.columns.length, 0);
-
 /** One row per person, the KPIs across, grouped by where their numbers come from. Nothing is added up
  * or compared: a dash means there is nothing to show yet. */
-export default function KpiOverviewTable({ employees, attendance, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, loading, notStarted, monthStart }: Props) {
+  const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
+  // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
+  const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
   return (
     <section aria-label="KPIs by employee" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1270px] border-collapse text-left">
+        <table style={{ minWidth }} className="w-full border-collapse text-left">
           <thead>
             <tr className="bg-slate-50">
               <th
@@ -33,7 +36,7 @@ export default function KpiOverviewTable({ employees, attendance, loading, notSt
               >
                 Employee
               </th>
-              {KPI_GROUPS.map(g => (
+              {groups.map(g => (
                 <th key={g.id} colSpan={g.columns.length} scope="colgroup" className="border-l border-slate-200 px-3 pb-1.5 pt-3 align-top text-xs font-extrabold text-ink">
                   {g.title}
                   <div className="mt-0.5 text-[11px] font-semibold text-slate-600">{g.source}</div>
@@ -42,7 +45,7 @@ export default function KpiOverviewTable({ employees, attendance, loading, notSt
               ))}
             </tr>
             <tr className="border-b border-slate-200 bg-slate-50">
-              {KPI_GROUPS.flatMap(g =>
+              {groups.flatMap(g =>
                 g.columns.map((c, i) => (
                   <th
                     key={c.id}
@@ -59,13 +62,13 @@ export default function KpiOverviewTable({ employees, attendance, loading, notSt
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={COLUMN_COUNT} className="px-5 py-10 text-center text-sm text-slate-600">
+                <td colSpan={columnCount} className="px-5 py-10 text-center text-sm text-slate-600">
                   Loading…
                 </td>
               </tr>
             ) : employees.length === 0 ? (
               <tr>
-                <td colSpan={COLUMN_COUNT} className="px-5 py-10 text-center text-sm text-slate-600">
+                <td colSpan={columnCount} className="px-5 py-10 text-center text-sm text-slate-600">
                   No employees to show.
                 </td>
               </tr>
@@ -85,7 +88,7 @@ export default function KpiOverviewTable({ employees, attendance, loading, notSt
                         </div>
                       </div>
                     </th>
-                    {KPI_GROUPS.map(g =>
+                    {groups.map(g =>
                       g.id === 'attendance' ? (
                         <AttendanceCell key={g.id} kpi={kpi} notStarted={notStarted} />
                       ) : (

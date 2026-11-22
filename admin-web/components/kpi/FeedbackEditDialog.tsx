@@ -6,6 +6,7 @@ import { useConfirm } from '@/components/ConfirmDialog';
 import FeedbackFields, { type StaffOption } from '@/components/kpi/FeedbackFields';
 import { draftFromRow, feedbackRow, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
 import type { CustomerFeedback } from '@/lib/types';
+import { useKpiSettings } from '@/lib/useKpiSettings';
 
 /** Change or delete a form that was typed in. Anyone with access to the page can fix a typing mistake: the
  * employee, the date and every answer can be changed. */
@@ -18,6 +19,7 @@ export default function FeedbackEditDialog({ row, staff, today, onClose, onChang
   onChanged: () => void;
 }) {
   const confirm = useConfirm();
+  const { words } = useKpiSettings();
   const [draft, setDraft] = useState<FeedbackDraft>(() => draftFromRow(row));
   const [busy, setBusy] = useState<'save' | 'delete' | null>(null);
   const [error, setError] = useState('');
@@ -34,7 +36,7 @@ export default function FeedbackEditDialog({ row, staff, today, onClose, onChang
     e.preventDefault();
     if (busy) return;
     const problem = validateFeedback(draft, today);
-    if (problem) return setError(problem);
+    if (problem) return setError(words.t(problem));
     setBusy('save');
     setError('');
     // .select() so a row the security rules hide (or one already deleted) is noticed instead of "saving" nothing.
@@ -48,7 +50,7 @@ export default function FeedbackEditDialog({ row, staff, today, onClose, onChang
   async function remove() {
     if (busy) return;
     const who = staff.find(s => s.id === row.employee_id)?.name ?? 'this employee';
-    if (!(await confirm(`Delete this customer form for ${who}? It will no longer count toward their KPIs. This cannot be undone.`, { title: 'Delete form', confirmLabel: 'Delete', tone: 'danger' }))) return;
+    if (!(await confirm(words.t(`Delete this customer form for ${who}? It will no longer count toward their KPIs. This cannot be undone.`), { title: 'Delete form', confirmLabel: 'Delete', tone: 'danger' }))) return;
     setBusy('delete');
     setError('');
     const { data, error: deleteError } = await supabase.from('customer_feedback').delete().eq('id', row.id).select('id');
@@ -66,10 +68,10 @@ export default function FeedbackEditDialog({ row, staff, today, onClose, onChang
         onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Edit a customer form"
+        aria-label={words.t('Edit a customer form')}
         className="my-auto w-full max-w-[560px] rounded-xl bg-white p-6 shadow-2xl"
       >
-        <h2 className="m-0 text-lg font-extrabold text-ink">Edit a customer form</h2>
+        <h2 className="m-0 text-lg font-extrabold text-ink">{words.t('Edit a customer form')}</h2>
         <p className="m-0 mb-4 mt-1 text-[13px] text-slate-600">Change what was typed in, or delete the form if it should not count.</p>
         <FeedbackFields draft={draft} onChange={setDraft} staff={staff} idPrefix="edit-feedback" />
         {error && (

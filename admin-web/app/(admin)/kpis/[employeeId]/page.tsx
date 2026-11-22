@@ -6,8 +6,10 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { usePageTitle } from '@/lib/pageTitle';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
-import { otherCalendarSpan, parseMonthParam } from '@/lib/kpi';
+import { otherCalendarSpan, parseMonthParam, visibleGroups, type KpiGroupId } from '@/lib/kpi';
+import { isKpiOn, kpiLabel, type KpiId } from '@/lib/kpiSettings';
 import { useEmployeeKpi } from '@/lib/useEmployeeKpi';
+import { useKpiSettings } from '@/lib/useKpiSettings';
 import Avatar from '@/components/Avatar';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import { AttendanceCard, ColleagueCard, PendingCard } from '@/components/kpi/EmployeeKpiCards';
@@ -40,6 +42,15 @@ function EmployeeKpi() {
   const otherSpan = useMemo(() => otherCalendarSpan(system, start, end), [system, start, end]);
 
   const { loading, error, notFound, employee, current, previous: previousKpi, today } = useEmployeeKpi(employeeId, { start, end }, previous);
+  // Which KPIs this company uses, and what it calls them (KPIs > Settings).
+  const { settings, loaded } = useKpiSettings();
+  const groups = useMemo(() => visibleGroups(settings), [settings]);
+  const group = (id: KpiGroupId) => groups.find(g => g.id === id);
+  const on = (id: KpiId) => isKpiOn(id, settings);
+  const customers = group('customers');
+  const services = group('services');
+  const colleagues = group('colleagues');
+  const attendance = group('attendance');
   // "KPIs" above the name once it is known; until then just "KPIs", not the same word twice.
   usePageTitle(employee ? employee.name : 'KPIs', employee ? 'KPIs' : '');
 
@@ -88,20 +99,24 @@ function EmployeeKpi() {
       </section>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <AttendanceCard
-          className="md:col-span-2"
-          current={current}
-          previous={previousKpi}
-          previousName={previousName}
-          loading={loading}
-          notStarted={start > today}
-        />
-        <PendingCard className="md:col-span-2" groupId="services" name="Number of services performed" />
-        <PendingCard groupId="services" name="Rebooking rate" ring />
-        <PendingCard groupId="services" name="Hour utilisation per day" ring />
-        <PendingCard groupId="customers" name="Customer feedback" />
-        <PendingCard groupId="customers" name="NPS" ring />
-        <ColleagueCard className="md:col-span-2 xl:col-span-4" />
+        {attendance && (
+          <AttendanceCard
+            className="md:col-span-2"
+            eyebrow={attendance.title}
+            name={kpiLabel('attendance', settings)}
+            current={current}
+            previous={previousKpi}
+            previousName={previousName}
+            loading={loading || !loaded}
+            notStarted={start > today}
+          />
+        )}
+        {services && on('services') && <PendingCard className="md:col-span-2" group={services} name={kpiLabel('services', settings, 'Number of services performed')} />}
+        {services && on('rebooking') && <PendingCard group={services} name={kpiLabel('rebooking', settings)} ring />}
+        {services && on('utilisation') && <PendingCard group={services} name={kpiLabel('utilisation', settings)} ring />}
+        {customers && on('feedback') && <PendingCard group={customers} name={kpiLabel('feedback', settings)} />}
+        {customers && on('nps') && <PendingCard group={customers} name={kpiLabel('nps', settings)} ring />}
+        {colleagues && <ColleagueCard className="md:col-span-2 xl:col-span-4" group={colleagues} settings={settings} />}
       </div>
 
       <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up, ranked or compared.</p>

@@ -9,6 +9,7 @@ import { buildMonth, formatAdDate, monthDateRange, stepAnchor, todayAnchor } fro
 import { nepalTodayIso } from '@/lib/shift';
 import { weekdayName } from '@/lib/taskSchedule';
 import { otherCalendarSpan } from '@/lib/kpi';
+import { useKpiSettings } from '@/lib/useKpiSettings';
 import { FEEDBACK_COLUMNS, FEEDBACK_PAGE_SIZE, emptyDraft, feedbackRow, rangeText, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
 import type { CustomerFeedback, Employee } from '@/lib/types';
 import KpiTabs from '@/components/kpi/KpiTabs';
@@ -28,6 +29,8 @@ export default function CustomerFeedbackPage() {
   const { system } = useCalendarSystem();
   const today = useMemo(nepalTodayIso, []);
   const companyName = useCompanyName();
+  // What this company calls the people it serves (KPIs > Settings).
+  const { words } = useKpiSettings();
 
   const [people, setPeople] = useState<Person[]>([]);
   const staff = useMemo(() => people.filter(p => p.status === 'active'), [people]);
@@ -101,7 +104,7 @@ export default function CustomerFeedbackPage() {
     if (saving) return;
     const problem = validateFeedback(draft, today);
     if (problem) {
-      setFormError(problem);
+      setFormError(words.t(problem));
       setNotice('');
       return;
     }
@@ -152,7 +155,7 @@ export default function CustomerFeedbackPage() {
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <p className="m-0 max-w-[680px] text-[13.5px] leading-relaxed text-slate-600">
-            Customers fill in a paper form. Type each form in here, so it counts toward the right employee&apos;s KPIs. Customer feedback and NPS both come from this form.
+            {words.t("Customers fill in a paper form. Type each form in here, so it counts toward the right employee's KPIs. Customer feedback and NPS both come from this form.")}
           </p>
           <button
             type="button"
@@ -176,7 +179,7 @@ export default function CustomerFeedbackPage() {
             <h2 id="type-in-heading" className="m-0 mb-1 text-lg font-extrabold text-ink">
               Type in a paper form
             </h2>
-            <p className="m-0 mb-[18px] text-[13px] leading-normal text-slate-600">Type the numbers the customer circled. Leave a box empty if they skipped it.</p>
+            <p className="m-0 mb-[18px] text-[13px] leading-normal text-slate-600">{words.t('Type the numbers the customer circled. Leave a box empty if they skipped it.')}</p>
 
             <FeedbackFields draft={draft} onChange={d => setDraft(d)} staff={staff} idPrefix="feedback" employeeRef={employeeRef} ratingRef={ratingRef} />
 

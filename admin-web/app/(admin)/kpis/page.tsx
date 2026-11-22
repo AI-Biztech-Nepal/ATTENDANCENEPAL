@@ -5,8 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import { usePageTitle } from '@/lib/pageTitle';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
-import { KPI_GROUPS, otherCalendarSpan, parseMonthParam } from '@/lib/kpi';
+import { otherCalendarSpan, parseMonthParam, visibleGroups } from '@/lib/kpi';
 import { useKpiOverview } from '@/lib/useKpiOverview';
+import { useKpiSettings } from '@/lib/useKpiSettings';
 import KpiOverviewTable from '@/components/kpi/KpiOverviewTable';
 import KpiTabs from '@/components/kpi/KpiTabs';
 import MonthStepper from '@/components/kpi/MonthStepper';
@@ -41,6 +42,9 @@ function Kpis() {
   const isThisMonth = thisMonth.start === start;
 
   const { loading, error, employees, attendance, today } = useKpiOverview(start, end);
+  // Which KPIs this company uses, and what it calls them (KPIs > Settings).
+  const { settings, loaded } = useKpiSettings();
+  const groups = useMemo(() => visibleGroups(settings), [settings]);
 
   const departments = useMemo(
     () => [...new Set(employees.map(e => e.department).filter((d): d is string => !!d))].sort((a, b) => a.localeCompare(b)),
@@ -49,7 +53,7 @@ function Kpis() {
   // A department that is not in the new month's list (or after a reload) is the same as "all".
   const activeDepartment = departments.includes(department) ? department : '';
   const shown = useMemo(() => (activeDepartment ? employees.filter(e => e.department === activeDepartment) : employees), [employees, activeDepartment]);
-  const waiting = KPI_GROUPS.filter(g => !g.connected);
+  const waiting = groups.filter(g => !g.connected);
 
   return (
     <div className="flex flex-col gap-4">
@@ -96,7 +100,7 @@ function Kpis() {
         </p>
       )}
 
-      <KpiOverviewTable employees={shown} attendance={attendance} loading={loading} notStarted={start > today} monthStart={start} />
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
 
       {waiting.length > 0 && (
         <section aria-labelledby="not-connected" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">
