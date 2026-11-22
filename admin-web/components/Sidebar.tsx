@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-type NavChild = { href: string; label: string; icon: (props: IconProps) => JSX.Element; adminOnly: boolean };
+type NavChild = { href: string; label: string; icon: (props: IconProps) => JSX.Element; adminOnly: boolean; /** Also current on every page under this path, so a person's KPI page keeps KPIs highlighted. */ prefix?: string };
 // A grouped item's own page is no longer reached by clicking the group row —
 // the row only opens/closes the group. `selfLabel` is the name that landing
 // page gets as the first entry inside the dropdown (its own page header).
@@ -16,6 +16,8 @@ type NavItem = {
   selfLabel?: string;
   children?: NavChild[];
 };
+
+const isCurrent = (c: NavChild, pathname: string) => pathname === c.href || (!!c.prefix && pathname.startsWith(c.prefix));
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: HomeIcon, adminOnly: false },
@@ -39,7 +41,7 @@ const NAV_ITEMS: NavItem[] = [
     adminOnly: false,
     selfLabel: 'Employee Directory',
     children: [
-      { href: '/kpis', label: 'KPIs', icon: KpiIcon, adminOnly: false },
+      { href: '/kpis', label: 'KPIs', icon: KpiIcon, adminOnly: false, prefix: '/kpis/' },
       { href: '/shifts', label: 'Shifts', icon: CalendarIcon, adminOnly: true },
       { href: '/branches', label: 'Branch/Depart', icon: BranchIcon, adminOnly: true },
       { href: '/employees?filter=Resigned', label: 'Resigned', icon: ResignedIcon, adminOnly: true },
@@ -99,7 +101,7 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
   // one open slot, so choosing a page in another group switches the dropdown to
   // that group. It runs on navigation only, so it never fights a manual toggle.
   useEffect(() => {
-    const group = NAV_ITEMS.find(i => i.href === pathname || i.children?.some(c => c.href === pathname));
+    const group = NAV_ITEMS.find(i => i.href === pathname || i.children?.some(c => isCurrent(c, pathname)));
     if (group) setOpenHref(group.href);
   }, [pathname]);
 
@@ -178,7 +180,7 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
             // the page-load auto-expand opened stays drawn shut.
             const childrenVisible = isOpen && !rail;
             const active = pathname === item.href;
-            const childActive = childItems.some(c => c.href === pathname);
+            const childActive = childItems.some(c => isCurrent(c, pathname));
             const Icon = item.icon;
             return (
               <div key={item.href}>
@@ -240,7 +242,7 @@ export default function Sidebar({ role, drawerOpen, onCloseDrawer }: Props) {
                     <div className="overflow-hidden">
                       <div className="ml-4 mt-1 flex flex-col gap-1 border-l border-white/10 pl-3">
                         {childItems.map(c => {
-                          const cActive = pathname === c.href;
+                          const cActive = isCurrent(c, pathname);
                           const CIcon = c.icon;
                           return (
                             <Link

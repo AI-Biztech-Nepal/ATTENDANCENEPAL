@@ -1,22 +1,36 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { usePageTitle } from '@/lib/pageTitle';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
-import { KPI_GROUPS, otherCalendarSpan } from '@/lib/kpi';
+import { KPI_GROUPS, otherCalendarSpan, parseMonthParam } from '@/lib/kpi';
 import { useKpiOverview } from '@/lib/useKpiOverview';
 import KpiOverviewTable from '@/components/kpi/KpiOverviewTable';
+import MonthStepper from '@/components/kpi/MonthStepper';
 
 // Every employee against every KPI for one month. Each KPI stands on its own: there is no total, no
 // ranking and no weighting, and people are listed by name. Attendance is read from the attendance
 // records; the other groups show a dash until their input exists (see KPI_GROUPS in lib/kpi.ts).
+// A name opens that person's own KPI page (/kpis/[employeeId]) for the same month.
 export default function KpisPage() {
+  // useSearchParams needs a Suspense boundary, like the other pages that read the address.
+  return (
+    <Suspense fallback={null}>
+      <Kpis />
+    </Suspense>
+  );
+}
+
+function Kpis() {
   usePageTitle('KPIs');
   const { system } = useCalendarSystem();
+  const params = useSearchParams();
   // The month is an AD anchor, so switching AD/BS keeps the same point in time and re-reads it as
-  // whichever calendar's month it falls in (the same approach as the Attendance Calendar).
-  const [anchor, setAnchor] = useState(todayAnchor);
+  // whichever calendar's month it falls in (the same approach as the Attendance Calendar). It starts on
+  // the month a person's page came from (`?date=`), so "All employees' KPIs" returns to the same month.
+  const [anchor, setAnchor] = useState(() => parseMonthParam(params.get('date')) ?? todayAnchor());
   const [department, setDepartment] = useState('');
 
   const { start, end } = useMemo(() => monthDateRange(system, anchor), [system, anchor]);
@@ -39,18 +53,12 @@ export default function KpisPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <MonthButton label="Previous month" onClick={() => setAnchor(a => stepAnchor(system, a, -1))}>
-            <path d="m15 6-6 6 6 6" />
-          </MonthButton>
-          <div className="min-w-[170px]" aria-live="polite">
-            <div className="text-lg font-extrabold text-ink">{label}</div>
-            {otherSpan && <div className="text-[12.5px] text-slate-600">{otherSpan}</div>}
-          </div>
-          <MonthButton label="Next month" onClick={() => setAnchor(a => stepAnchor(system, a, 1))}>
-            <path d="m9 6 6 6-6 6" />
-          </MonthButton>
-        </div>
+        <MonthStepper
+          label={label}
+          subtitle={otherSpan}
+          onPrevious={() => setAnchor(a => stepAnchor(system, a, -1))}
+          onNext={() => setAnchor(a => stepAnchor(system, a, 1))}
+        />
         {!isThisMonth && (
           <button
             type="button"
@@ -85,7 +93,7 @@ export default function KpisPage() {
         </p>
       )}
 
-      <KpiOverviewTable employees={shown} attendance={attendance} loading={loading} notStarted={start > today} />
+      <KpiOverviewTable employees={shown} attendance={attendance} loading={loading} notStarted={start > today} monthStart={start} />
 
       {waiting.length > 0 && (
         <section aria-labelledby="not-connected" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">
@@ -101,20 +109,5 @@ export default function KpisPage() {
         </section>
       )}
     </div>
-  );
-}
-
-function MonthButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-    >
-      <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        {children}
-      </svg>
-    </button>
   );
 }

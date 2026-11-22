@@ -1,0 +1,163 @@
+'use client';
+
+import { KPI_GROUPS, attendanceRates, type AttendanceKpi, type KpiGroup, type KpiGroupId } from '@/lib/kpi';
+import { KPI_COLORS, Pie, Ring } from './KpiCharts';
+
+const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
+const groupOf = (id: KpiGroupId): KpiGroup => KPI_GROUPS.find(g => g.id === id)!;
+
+function Card({ eyebrow, name, className = '', footer, children }: {
+  eyebrow: string;
+  name: string;
+  className?: string;
+  footer?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section aria-label={name} className={`flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
+      <div className="text-[11.5px] font-extrabold uppercase tracking-wider text-slate-600">{eyebrow}</div>
+      <h2 className="m-0 mb-3 mt-0.5 text-[15px] font-extrabold text-ink">{name}</h2>
+      <div className="flex-1">{children}</div>
+      {footer && <div className="mt-auto pt-3 text-xs text-slate-600">{footer}</div>}
+    </section>
+  );
+}
+
+function LegendRow({ color, label, value }: { color: string; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2 text-[13px] text-slate-700">
+      <i className="block h-3 w-3 shrink-0 rounded-[3px]" style={{ background: color }} />
+      <span className="flex-1">{label}</span>
+      <b className="tabular-nums text-ink">{value}</b>
+    </div>
+  );
+}
+
+function Stat({ big, label }: { big: string; label: string }) {
+  return (
+    <div>
+      <div className="text-[30px] font-extrabold leading-[1.1] tabular-nums text-ink">{big}</div>
+      <div className="mt-0.5 text-[12.5px] font-bold text-ink">{label}</div>
+    </div>
+  );
+}
+
+function Message({ title, text }: { title: string; text?: string }) {
+  return (
+    <div className="flex h-full min-h-[120px] flex-col items-center justify-center gap-1 py-4 text-center">
+      <div className="text-sm font-bold text-slate-700">{title}</div>
+      {text && <div className="text-xs text-slate-600">{text}</div>}
+    </div>
+  );
+}
+
+/** Attendance and punctuality: the month's working days as a pie of on time / late / absent, with the two
+ * percentages beside it. The one KPI that is real so far; the others below wait for their input. */
+export function AttendanceCard({ current, previous, previousName, loading, notStarted, className = '' }: {
+  current: AttendanceKpi | null;
+  previous: AttendanceKpi | null;
+  /** The month before, as it is written under the KPI ("October", "Kartik"). */
+  previousName: string;
+  loading: boolean;
+  notStarted: boolean;
+  className?: string;
+}) {
+  const eyebrow = groupOf('attendance').title;
+  const name = 'Attendance and punctuality';
+
+  let body: React.ReactNode;
+  if (loading || !current) body = <Message title="Loading…" />;
+  else if (!current.tracked) body = <Message title="Not tracked" text="This person is excused from attendance." />;
+  else if (current.expectedDays === 0) body = <Message title="Nothing to show yet" text={notStarted ? 'This month has not started.' : 'No working days yet this month.'} />;
+  else {
+    const rates = attendanceRates(current);
+    const onTime = current.presentDays - current.lateDays;
+    const absent = current.expectedDays - current.presentDays;
+    body = (
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-5">
+        <Pie
+          size={168}
+          label
+          aria={`Of ${dayCount(current.expectedDays)} of work: ${onTime} on time, ${current.lateDays} late, ${absent} absent`}
+          slices={[
+            { value: onTime, color: KPI_COLORS.good },
+            { value: current.lateDays, color: KPI_COLORS.warn },
+            { value: absent, color: KPI_COLORS.bad },
+          ]}
+        />
+        <div className="flex min-w-[170px] flex-1 flex-col gap-2.5">
+          <LegendRow color={KPI_COLORS.good} label="On time" value={dayCount(onTime)} />
+          <LegendRow color={KPI_COLORS.warn} label="Late" value={dayCount(current.lateDays)} />
+          <LegendRow color={KPI_COLORS.bad} label="Absent" value={dayCount(absent)} />
+          <p className="m-0 mt-1 text-xs leading-normal text-slate-600">
+            Out of {dayCount(current.expectedDays)} of work. Leave, week-offs and holidays are not counted.
+            {current.leaveDays > 0 && ` On leave: ${dayCount(current.leaveDays)}.`}
+          </p>
+        </div>
+        <div className="flex flex-col gap-3.5">
+          <Stat big={`${rates.present}%`} label="present" />
+          <Stat big={rates.onTime == null ? '–' : `${rates.onTime}%`} label="on time" />
+        </div>
+      </div>
+    );
+  }
+
+  let footer: string | null = null;
+  if (!loading && previous?.tracked) {
+    if (previous.expectedDays === 0) footer = `${previousName}: no working days`;
+    else {
+      const r = attendanceRates(previous);
+      footer = `${previousName}: ${r.present}% present, ${r.onTime == null ? '–' : `${r.onTime}%`} on time`;
+    }
+  }
+  return (
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+      {body}
+    </Card>
+  );
+}
+
+/** A KPI whose input does not exist yet: the card keeps its place on the page with a dash (and an empty ring
+ * where the finished card has one), and says where the numbers will come from. */
+export function PendingCard({ groupId, name, ring = false, className = '' }: { groupId: KpiGroupId; name: string; ring?: boolean; className?: string }) {
+  const group = groupOf(groupId);
+  return (
+    <Card eyebrow={group.title} name={name} className={className}>
+      <div className="flex h-full min-h-[150px] flex-col items-center justify-center gap-2 py-2 text-center">
+        {ring ? (
+          <Ring pct={0} size={120} stroke={14} aria={`${name}: not connected yet`} big="–" />
+        ) : (
+          <div aria-hidden="true" className="text-[34px] font-extrabold leading-none text-slate-400">
+            –
+          </div>
+        )}
+        <div className="text-sm font-bold text-slate-700">Not connected yet</div>
+        <div className="text-xs text-slate-600">{group.source}</div>
+        <span className="sr-only">{group.emptyNote}</span>
+      </div>
+    </Card>
+  );
+}
+
+const COLLEAGUES = ['Feedback from peers', 'Feedback from immediate manager', 'Feedback from C-level', 'Feedback from training and compliance'];
+
+/** The four colleague-feedback KPIs on one scale of 0 to 5. Empty until reviews exist. */
+export function ColleagueCard({ className = '' }: { className?: string }) {
+  const group = groupOf('colleagues');
+  return (
+    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={`${group.source}. Not connected yet. Comments will be seen by management only.`}>
+      <div className="flex flex-col">
+        {COLLEAGUES.map(label => (
+          <div key={label} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">
+            <div className="text-sm font-bold text-ink sm:w-[250px]">{label}</div>
+            <div aria-hidden="true" className="h-3 min-w-[120px] flex-1 rounded-full bg-slate-100" />
+            <div className="w-[74px] text-right text-2xl font-extrabold leading-none text-slate-400">
+              <span aria-hidden="true">–</span>
+              <span className="sr-only">{group.emptyNote}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}

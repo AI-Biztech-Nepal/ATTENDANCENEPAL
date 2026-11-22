@@ -11,13 +11,15 @@ type Props = {
   loading: boolean;
   /** The month being shown has not begun, so there is nothing to count yet. */
   notStarted: boolean;
+  /** The month's first day (AD), sent along so a person's page opens on the same month. */
+  monthStart: string;
 };
 
 const COLUMN_COUNT = 1 + KPI_GROUPS.reduce((n, g) => n + g.columns.length, 0);
 
 /** One row per person, the KPIs across, grouped by where their numbers come from. Nothing is added up
  * or compared: a dash means there is nothing to show yet. */
-export default function KpiOverviewTable({ employees, attendance, loading, notStarted }: Props) {
+export default function KpiOverviewTable({ employees, attendance, loading, notStarted, monthStart }: Props) {
   return (
     <section aria-label="KPIs by employee" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
@@ -76,7 +78,7 @@ export default function KpiOverviewTable({ employees, attendance, loading, notSt
                       <div className="flex items-center gap-3">
                         <Avatar name={emp.name} photoUrl={emp.profile_photo_url} className="h-9 w-9 text-[13px]" />
                         <div className="min-w-0">
-                          <Link href={`/employees/${emp.id}`} className="block truncate text-sm font-bold text-ink hover:text-accent hover:underline">
+                          <Link href={`/kpis/${emp.id}?date=${monthStart}`} className="block truncate text-sm font-bold text-ink hover:text-accent hover:underline">
                             {emp.name}
                           </Link>
                           <div className="truncate text-xs text-slate-600">{subtitle(emp, kpi)}</div>
@@ -98,7 +100,7 @@ export default function KpiOverviewTable({ employees, attendance, loading, notSt
         </table>
       </div>
       <p className="m-0 border-t border-slate-200 bg-slate-50 px-5 py-3 text-[12.5px] leading-relaxed text-slate-600">
-        Click a name to open that person&apos;s profile. Attendance counts the working days so far: week-offs, holidays and approved leave are left out.
+        Click a name to open that person&apos;s KPIs. Attendance counts the working days so far: week-offs, holidays and approved leave are left out.
       </p>
     </section>
   );

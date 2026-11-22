@@ -13,7 +13,7 @@ import {
   type DailyShiftByDate,
 } from './shift';
 import { leaveDatesByEmployee, weekOffDatesByGender } from './weekOff';
-import type { CalendarSystem } from './calendar';
+import type { CalendarAnchor, CalendarSystem } from './calendar';
 
 // ---------------------------------------------------------------------------
 // What the KPI page shows. No total, no score, no ranking: every KPI stands on
@@ -256,4 +256,15 @@ export function otherCalendarSpan(system: CalendarSystem, start: string, end: st
   } catch {
     return '';
   }
+}
+
+/** The month a link points at, as `?date=YYYY-MM-DD` (any day inside it; the KPI list sends the month's first day),
+ * back to the AD anchor the month steppers use. Null when it is missing or not a real date. */
+export function parseMonthParam(value: string | null | undefined): CalendarAnchor | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  if (!m) return null;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(y, mo - 1, d);
+  if (date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) return null;
+  return { year: y, month: mo - 1, day: d };
 }
