@@ -14,7 +14,7 @@ import {
   slotLength,
   type Placement,
 } from '@/lib/taskSchedule';
-import type { Employee, LeaveRequest, Task } from '@/lib/types';
+import type { Employee, LeaveRequest, Task, TaskStatus } from '@/lib/types';
 import DayStrip from './DayStrip';
 import { BLOCK_TONE, STATUS_LABEL, blockStatusText, isOverdue } from './taskStyles';
 
@@ -35,7 +35,9 @@ function hourFromClick(e: MouseEvent<HTMLElement>) {
   return DAY_START_HOUR + idx;
 }
 
-type Row = { emp: Employee; placements: Placement[]; booked: number; onLeave: boolean };
+/** `placements` is everything the employee has that day (it feeds "6 h of 9 h booked"); `visible` is what the
+ * status filter lets through, and is what gets drawn. */
+type Row = { emp: Employee; placements: Placement[]; visible: Placement[]; booked: number; onLeave: boolean };
 
 type Props = {
   employees: Employee[];
@@ -52,20 +54,61 @@ type Props = {
   onOpenTask: (task: Task) => void;
   /** Open the Assign dialog for this employee, at this start hour (null = pick the first free hour). */
   onAssign: (employeeId: string, startHour: number | null) => void;
+  /** Statuses picked in the filter. Empty = no status filter (everything shows). */
+  statuses: TaskStatus[];
+  /** The "On leave" filter is on. */
+  showLeave: boolean;
+  onClearFilters: () => void;
 };
 
 /** The Tasks page's main view: employees down the side, the working hours 9 AM to 6 PM across, and a block for
  * every task that fills the hours it was assigned for. Below `md` the same day reads as one card per employee. */
-export default function TaskTimetable({ employees, tasks, leaves, date, today, nowPct, nowLabel, runningTaskIds, onOpenTask, onAssign }: Props) {
-  const rows: Row[] = employees.map(emp => {
+export default function TaskTimetable({
+  employees,
+  tasks,
+  leaves,
+  date,
+  today,
+  nowPct,
+  nowLabel,
+  runningTaskIds,
+  onOpenTask,
+  onAssign,
+  statuses,
+  showLeave,
+  onClearFilters,
+}: Props) {
+  const filtering = statuses.length > 0 || showLeave;
+  const allRows: Row[] = employees.map(emp => {
     const placements = placementsFor(tasks, emp.id, date);
-    return { emp, placements, booked: bookedHours(placements), onLeave: isOnLeave(leaves, emp.id, date) };
+    const visible = statuses.length > 0 ? placements.filter(p => statuses.includes(p.task.status)) : placements;
+    return { emp, placements, visible, booked: bookedHours(placements), onLeave: isOnLeave(leaves, emp.id, date) };
   });
+  // With a filter on, only the people it is about stay: someone on leave (if "On leave" is picked) or someone
+  // with at least one task in a picked status that day.
+  const rows = filtering
+    ? allRows.filter(r => (showLeave && r.onLeave) || (statuses.length > 0 && !r.onLeave && r.visible.length > 0))
+    : allRows;
 
-  if (rows.length === 0) {
+  if (employees.length === 0) {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
         No employees to show.
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+        <p className="text-sm font-semibold text-slate-700">Nothing matches the filter on this day.</p>
+        <button
+          type="button"
+          onClick={onClearFilters}
+          className="mt-3 min-h-[44px] rounded-lg border border-teal-700 px-5 text-[13px] font-extrabold text-teal-700 hover:bg-teal-50"
+        >
+          Show all
+        </button>
       </div>
     );
   }
@@ -88,7 +131,7 @@ export default function TaskTimetable({ employees, tasks, leaves, date, today, n
               </div>
             </div>
 
-            {rows.map(({ emp, placements, booked, onLeave }, rowIndex) => (
+            {rows.map(({ emp, placements, visible, booked, onLeave }, rowIndex) => (
               <div key={emp.id} className={`grid min-h-[84px] grid-cols-[256px_minmax(0,1fr)] border-slate-200 ${rowIndex === 0 ? '' : 'border-t'}`}>
                 <div className="group relative flex items-center gap-3 px-5 py-3">
                   <Avatar name={emp.name} photoUrl={emp.profile_photo_url} className="h-9 w-9 text-[13px]" />
@@ -127,7 +170,7 @@ export default function TaskTimetable({ employees, tasks, leaves, date, today, n
                         + Free all day · click a slot to assign
                       </div>
                     )}
-                    {placements.map(p => (
+                    {visible.map(p => (
                       <TimetableBlock
                         key={p.task.id}
                         placement={p}
@@ -159,7 +202,7 @@ export default function TaskTimetable({ employees, tasks, leaves, date, today, n
 
       {/* Phone: one card per employee. */}
       <div className="space-y-3 md:hidden">
-        {rows.map(({ emp, placements, booked, onLeave }) => (
+        {rows.map(({ emp, placements, visible, booked, onLeave }) => (
           <article key={emp.id} className={`rounded-xl border border-slate-200 p-4 shadow-sm ${onLeave ? 'bg-slate-50' : 'bg-white'}`}>
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2.5">
@@ -180,14 +223,14 @@ export default function TaskTimetable({ employees, tasks, leaves, date, today, n
               </div>
             ) : (
               <>
-                {placements.length > 0 && (
+                {visible.length > 0 && (
                   <div className="mt-3.5">
-                    <DayStrip placements={placements} label={`${emp.name}'s day, 9 AM to 6 PM: ${booked} of ${DAY_HOURS} hours booked`} />
+                    <DayStrip placements={visible} label={`${emp.name}'s day, 9 AM to 6 PM: ${booked} of ${DAY_HOURS} hours booked`} />
                   </div>
                 )}
-                {placements.length > 0 && (
+                {visible.length > 0 && (
                   <ul className="mt-2.5">
-                    {placements.map(p => {
+                    {visible.map(p => {
                       const tone = BLOCK_TONE[p.task.status];
                       const label = blockStatusText(p.task, today, 3);
                       return (

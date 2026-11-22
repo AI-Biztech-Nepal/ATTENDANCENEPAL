@@ -20,13 +20,26 @@ import {
   addDays,
   formatHourFull,
   formatSlot,
+  isOnLeave,
   nowPercent,
+  placementsFor,
   taskSlot,
   weekdayName,
 } from '@/lib/taskSchedule';
-import type { Employee, LeaveRequest, PointRedemption, Task, TaskTimeLog } from '@/lib/types';
+import type { Employee, LeaveRequest, PointRedemption, Task, TaskStatus, TaskTimeLog } from '@/lib/types';
 
 type Tab = 'schedule' | 'redemptions' | 'leaderboard';
+/** What the key above the timetable can filter by: a task status, or people on leave. */
+type Filter = TaskStatus | 'leave';
+
+/** The status buttons, in the order the key shows them, with the swatch each one wears. */
+const STATUS_FILTERS: { status: TaskStatus; swatch: string }[] = [
+  { status: 'pending', swatch: 'border-slate-300 bg-slate-100' },
+  { status: 'in_progress', swatch: 'border-sky-300 bg-sky-100' },
+  { status: 'submitted', swatch: 'border-amber-300 bg-amber-100' },
+  { status: 'approved', swatch: 'border-emerald-300 bg-emerald-100' },
+  { status: 'rejected', swatch: 'border-rose-300 bg-rose-100' },
+];
 
 const PRIMARY = 'rounded-[10px] bg-teal-700 text-sm font-extrabold text-white hover:bg-teal-800';
 const SELECT = 'h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-ink';
@@ -50,6 +63,8 @@ export default function TasksPage() {
   const [department, setDepartment] = useState('');
   const [nowMin, setNowMin] = useState<number | null>(null);
   const [showReviewList, setShowReviewList] = useState(false);
+  // The key above the timetable is a set of toggles: none picked = show everything.
+  const [filters, setFilters] = useState<Set<Filter>>(new Set());
   const [assign, setAssign] = useState<AssignInitial | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -124,6 +139,22 @@ export default function TasksPage() {
     [activeEmployees, department]
   );
 
+  const statuses = useMemo(() => STATUS_FILTERS.map(f => f.status).filter(s => filters.has(s)), [filters]);
+  const showLeave = filters.has('leave');
+  // The numbers on the filter buttons: tasks per status on the day shown, and how many people are on leave that day.
+  const dayCounts = useMemo(() => {
+    const counts: Record<TaskStatus, number> = { pending: 0, in_progress: 0, submitted: 0, approved: 0, rejected: 0 };
+    let leave = 0;
+    for (const emp of rowEmployees) {
+      if (isOnLeave(leaves, emp.id, date)) {
+        leave += 1;
+        continue;
+      }
+      for (const p of placementsFor(tasks, emp.id, date)) counts[p.task.status] += 1;
+    }
+    return { counts, leave };
+  }, [rowEmployees, tasks, leaves, date]);
+
   const submittedTasks = useMemo(
     () => tasks.filter(t => t.status === 'submitted').sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? '')),
     [tasks]
@@ -135,6 +166,11 @@ export default function TasksPage() {
         .filter(t => !taskSlot(t) && isOpen(t.status))
         .sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999') || a.title.localeCompare(b.title)),
     [tasks]
+  );
+  // The same status filter narrows this list too, so the page doesn't show a Pending task while "In progress" is picked.
+  const unscheduledShown = useMemo(
+    () => (statuses.length > 0 ? unscheduledTasks.filter(t => statuses.includes(t.status)) : unscheduledTasks),
+    [unscheduledTasks, statuses]
   );
   const selectedTask = selectedId ? tasks.find(t => t.id === selectedId) ?? null : null;
 
@@ -163,6 +199,16 @@ export default function TasksPage() {
     [redemptions, redemptionFilter]
   );
   const pendingRedemptions = redemptions.filter(r => r.status === 'pending').length;
+
+  function toggleFilter(f: Filter) {
+    setFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(f)) next.delete(f);
+      else next.add(f);
+      return next;
+    });
+  }
+  const clearFilters = useCallback(() => setFilters(new Set()), []);
 
   function openAssign(employeeId: string, startHour: number | null) {
     setAssign({ employeeId, date, startHour, scheduleTask: null });
@@ -307,29 +353,26 @@ export default function TasksPage() {
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5">
-            <ul className="flex flex-wrap items-center gap-x-[18px] gap-y-2 text-[12.5px] text-slate-700" aria-label="Colour key">
-              {(
-                [
-                  ['pending', 'border-slate-300 bg-slate-100'],
-                  ['in_progress', 'border-sky-300 bg-sky-100'],
-                  ['submitted', 'border-amber-300 bg-amber-100'],
-                  ['approved', 'border-emerald-300 bg-emerald-100'],
-                  ['rejected', 'border-rose-300 bg-rose-100'],
-                ] as const
-              ).map(([status, swatch]) => (
-                <li key={status} className="flex items-center gap-[7px]">
+            <div role="group" aria-label="Filter the timetable by status" className="flex flex-wrap items-center gap-2">
+              {STATUS_FILTERS.map(({ status, swatch }) => (
+                <FilterButton key={status} on={filters.has(status)} onClick={() => toggleFilter(status)} count={dayCounts.counts[status]}>
                   <i className={`h-3.5 w-3.5 rounded border ${swatch}`} />
                   {STATUS_LABEL[status]}
-                </li>
+                </FilterButton>
               ))}
-              <li className="flex items-center gap-[7px]">
+              <FilterButton on={showLeave} onClick={() => toggleFilter('leave')} count={dayCounts.leave}>
                 <i
                   className="h-3.5 w-3.5 rounded border border-slate-300"
                   style={{ backgroundImage: 'repeating-linear-gradient(135deg,#cbd5e1 0,#cbd5e1 2px,#f1f5f9 2px,#f1f5f9 5px)' }}
                 />
                 On leave
-              </li>
-            </ul>
+              </FilterButton>
+              {filters.size > 0 && (
+                <button type="button" onClick={clearFilters} className="min-h-[36px] px-2 text-[13px] font-extrabold text-teal-700 hover:underline">
+                  Show all
+                </button>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
@@ -344,10 +387,10 @@ export default function TasksPage() {
               <a
                 href="#not-scheduled"
                 className={`flex min-h-[36px] items-center rounded-full border border-slate-300 bg-white px-3.5 text-[13px] font-bold text-slate-700 ${
-                  unscheduledTasks.length === 0 ? 'pointer-events-none opacity-60' : ''
+                  unscheduledShown.length === 0 ? 'pointer-events-none opacity-60' : ''
                 }`}
               >
-                {unscheduledTasks.length} not scheduled
+                {unscheduledShown.length} not scheduled
               </a>
             </div>
           </div>
@@ -388,16 +431,19 @@ export default function TasksPage() {
             runningTaskIds={runningTaskIds}
             onOpenTask={t => setSelectedId(t.id)}
             onAssign={openAssign}
+            statuses={statuses}
+            showLeave={showLeave}
+            onClearFilters={clearFilters}
           />
 
-          {unscheduledTasks.length > 0 && (
+          {unscheduledShown.length > 0 && (
             <section id="not-scheduled" aria-labelledby="not-scheduled-title" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 id="not-scheduled-title" className="text-base font-extrabold text-ink">Not scheduled yet</h2>
                 <p className="text-[13px] text-slate-600">Tasks with no time slot. They are not on the timetable until you pick one.</p>
               </div>
               <ul className="mt-3">
-                {unscheduledTasks.map(t => (
+                {unscheduledShown.map(t => (
                   <li key={t.id} className="flex flex-wrap items-center gap-x-5 gap-y-2.5 border-t border-slate-200 py-3.5">
                     <button type="button" onClick={() => setSelectedId(t.id)} className="min-w-[220px] flex-[2_1_240px] text-left">
                       <span className="block text-sm font-bold text-ink">{t.title}</span>
@@ -552,6 +598,33 @@ export default function TasksPage() {
         />
       )}
     </>
+  );
+}
+
+/** One toggle in the key above the timetable: its swatch, its name, and how many that is on the day shown. */
+function FilterButton({
+  on,
+  onClick,
+  count,
+  children,
+}: {
+  on: boolean;
+  onClick: () => void;
+  count: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      className={`flex min-h-[36px] items-center gap-2 rounded-full border px-3 text-[12.5px] font-semibold ${
+        on ? 'border-teal-700 bg-teal-50 text-teal-900 ring-1 ring-teal-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+      }`}
+    >
+      {children}
+      <span className={`rounded-full px-1.5 text-[11.5px] font-extrabold tabular-nums ${on ? 'bg-teal-700 text-white' : 'bg-slate-100 text-slate-700'}`}>{count}</span>
+    </button>
   );
 }
 
