@@ -12,6 +12,7 @@ import ConfigWarning from './ConfigWarning';
 import CalendarSystemSwitch from './CalendarSystemSwitch';
 import EmployeeBell from './EmployeeBell';
 import { useMyNotifications } from '@/lib/employeeNotifications';
+import { useReviewsToGive } from '@/lib/useReviewsToGive';
 import BodyFontClass from './BodyFontClass';
 
 const TABS = [
@@ -21,6 +22,8 @@ const TABS = [
   { href: '/my-tasks', label: 'My Tasks', icon: TaskTabIcon },
   { href: '/my-profile', label: 'Profile', icon: ProfileTabIcon },
 ];
+// Colleague feedback to give. It is in the menu only while this person is asked for some (or is on that page).
+const FEEDBACK_TAB = { href: '/my-feedback', label: 'Feedback', icon: FeedbackTabIcon };
 
 /**
  * The employee pages' frame, mounted ONCE by app/(employee)/layout.tsx and kept
@@ -57,6 +60,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
   const [isHr, setIsHr] = useState(false);
   // One fetch for both headers (phone and computer); reloaded as the person moves around the portal.
   const notifications = useMyNotifications(pathname);
+  const feedbackToGive = useReviewsToGive(pathname);
 
   useEffect(() => {
     if (!supabaseConfigured) return;
@@ -122,6 +126,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
       .join('')
       .toUpperCase() || 'E';
   const isHome = pathname === '/checkin';
+  const tabs = (feedbackToGive.items?.length ?? 0) > 0 || pathname === FEEDBACK_TAB.href ? [...TABS.slice(0, -1), FEEDBACK_TAB, TABS[TABS.length - 1]] : TABS;
   const account = { name, designation, photoUrl, initials, isHr, onSignOut: handleSignOut };
 
   return (
@@ -131,7 +136,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
       <BodyFontClass className={`${manrope.className} theme-employee`} />
 
       {/* Computer: the sidebar, the owner console's look and behaviour */}
-      <DesktopSidebar pathname={pathname} />
+      <DesktopSidebar pathname={pathname} tabs={tabs} />
 
       {/* Phone: the green header (the page's own hero continues the band) */}
       <header className="bg-brand lg:hidden">
@@ -190,7 +195,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
         aria-label="Employee pages"
         className="fixed inset-x-0 bottom-0 z-20 flex border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] pt-1.5 lg:hidden"
       >
-        {TABS.map(tab => {
+        {tabs.map(tab => {
           const active = pathname === tab.href;
           const Icon = tab.icon;
           return (
@@ -225,7 +230,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
  * Two additions the console doesn't need: a click or tap anywhere else folds it
  * (a touch screen never sends a mouse-leave), and tabbing into the rail opens it.
  */
-function DesktopSidebar({ pathname }: { pathname: string }) {
+function DesktopSidebar({ pathname, tabs }: { pathname: string; tabs: typeof TABS }) {
   const [expanded, setExpanded] = useState(false);
   const asideRef = useRef<HTMLElement>(null);
   const rail = !expanded;
@@ -277,7 +282,7 @@ function DesktopSidebar({ pathname }: { pathname: string }) {
           rail ? 'px-1.5' : 'px-3'
         }`}
       >
-        {TABS.map(tab => {
+        {tabs.map(tab => {
           const active = pathname === tab.href;
           const Icon = tab.icon;
           return (
@@ -444,6 +449,14 @@ function TaskTabIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true">
       <rect x="4" y="4" width="16" height="16" rx="2" />
       <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 2.5 2.5L16 9" />
+    </svg>
+  );
+}
+function FeedbackTabIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 5h16v11H9l-5 4V5Z" />
+      <path strokeLinecap="round" d="M8 9.5h8M8 12.5h5" />
     </svg>
   );
 }

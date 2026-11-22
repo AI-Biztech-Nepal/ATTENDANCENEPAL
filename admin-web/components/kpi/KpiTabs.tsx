@@ -8,6 +8,7 @@ import { usePathname } from 'next/navigation';
 const SECTIONS = [
   { href: '/kpis', label: 'Overview' },
   { href: '/kpis/feedback', label: 'Customer feedback' },
+  { href: '/kpis/reviews', label: 'Colleague reviews' },
 ];
 
 export default function KpiTabs() {
