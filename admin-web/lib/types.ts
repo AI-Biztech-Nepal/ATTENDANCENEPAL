@@ -125,17 +125,6 @@ export type EmployeeWorkExperience = {
   end_date: string | null;
 };
 
-export type PointRedemption = {
-  id: string;
-  employee_id: string;
-  points_requested: number;
-  note: string | null;
-  status: 'pending' | 'approved' | 'rejected';
-  reviewed_by: string | null;
-  reviewed_at: string | null;
-  created_at: string;
-};
-
 export type Profile = {
   id: string;
   employee_id: string | null;
@@ -252,7 +241,6 @@ export type Task = {
   description: string | null;
   assigned_to: string;
   assigned_by: string | null;
-  points: number;
   status: TaskStatus;
   source: TaskSource;
   /** The slot the task is scheduled for on `due_date` ("09:00:00"), or null when it has none yet. */
@@ -274,15 +262,6 @@ export type TaskTimeLog = {
   started_at: string;
   ended_at: string | null;
   created_at: string;
-};
-
-export type LeaderboardRow = {
-  employee_id: string;
-  name: string;
-  department: string | null;
-  total_points: number;
-  tasks_completed: number;
-  profile_photo_url: string | null;
 };
 
 export type CompanyHoliday = {

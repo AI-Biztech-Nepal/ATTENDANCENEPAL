@@ -7,7 +7,6 @@ import { colors } from '../theme';
 import Badge from '../components/Badge';
 import { formatAdDate } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
-import Leaderboard from '../components/Leaderboard';
 
 const STATUS_TONE: Record<TaskStatus, 'good' | 'warning' | 'critical' | 'info' | 'neutral'> = {
   pending: 'neutral',
@@ -18,7 +17,7 @@ const STATUS_TONE: Record<TaskStatus, 'good' | 'warning' | 'critical' | 'info' |
 };
 const FILTERS: (TaskStatus | 'All')[] = ['All', 'pending', 'in_progress', 'submitted', 'approved', 'rejected'];
 
-const EMPTY_FORM = { employee_id: '', title: '', description: '', points: '10', due_date: '' };
+const EMPTY_FORM = { employee_id: '', title: '', description: '', due_date: '' };
 
 export default function TasksScreen() {
   const { system } = useCalendarSystem();
@@ -31,7 +30,6 @@ export default function TasksScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [employeePickerOpen, setEmployeePickerOpen] = useState(false);
   const [reviewingTask, setReviewingTask] = useState<Task | null>(null);
-  const [reviewPoints, setReviewPoints] = useState('');
   const [reviewNote, setReviewNote] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -73,7 +71,6 @@ export default function TasksScreen() {
       assigned_by: data.user?.id,
       title: form.title,
       description: form.description || null,
-      points: Number(form.points) || 0,
       due_date: form.due_date,
     });
     setSaving(false);
@@ -88,7 +85,6 @@ export default function TasksScreen() {
 
   function openReview(t: Task) {
     setReviewingTask(t);
-    setReviewPoints(String(t.points));
     setReviewNote('');
   }
 
@@ -100,7 +96,6 @@ export default function TasksScreen() {
       .from('tasks')
       .update({
         status,
-        points: status === 'approved' ? Number(reviewPoints) || reviewingTask.points : reviewingTask.points,
         review_note: reviewNote || null,
         reviewed_by: data.user?.id,
         reviewed_at: new Date().toISOString(),
@@ -158,9 +153,7 @@ export default function TasksScreen() {
                 {t.review_note}
               </Text>
             ) : null}
-            <Text style={styles.meta}>
-              {t.points} pts · Due {t.due_date ? formatAdDate(t.due_date, system) : '—'}
-            </Text>
+            <Text style={styles.meta}>Due {t.due_date ? formatAdDate(t.due_date, system) : '—'}</Text>
             {t.status === 'submitted' ? (
               <TouchableOpacity style={styles.reviewBtn} onPress={() => openReview(t)}>
                 <Text style={styles.reviewBtnText}>Review</Text>
@@ -169,11 +162,6 @@ export default function TasksScreen() {
           </View>
         )}
         ListEmptyComponent={<Text style={styles.empty}>No {filter !== 'All' ? filter.replace('_', ' ') : ''} tasks.</Text>}
-        ListFooterComponent={
-          <View style={{ marginTop: 8 }}>
-            <Leaderboard />
-          </View>
-        }
       />
 
       <Modal visible={showForm} transparent animationType="fade" onRequestClose={() => setShowForm(false)}>
@@ -190,8 +178,6 @@ export default function TasksScreen() {
             <TextInput style={styles.input} value={form.title} onChangeText={v => setForm(f => ({ ...f, title: v }))} placeholder="e.g. Website development" />
             <Text style={styles.formLabel}>Description (optional)</Text>
             <TextInput style={[styles.input, { height: 70 }]} multiline value={form.description} onChangeText={v => setForm(f => ({ ...f, description: v }))} />
-            <Text style={styles.formLabel}>Points</Text>
-            <TextInput style={styles.input} keyboardType="numeric" value={form.points} onChangeText={v => setForm(f => ({ ...f, points: v }))} />
             <Text style={styles.formLabel}>Deadline (YYYY-MM-DD)</Text>
             <TextInput style={styles.input} value={form.due_date} onChangeText={v => setForm(f => ({ ...f, due_date: v }))} placeholder="2026-08-20" />
             {formError && <Text style={styles.errorText}>{formError}</Text>}
@@ -244,8 +230,6 @@ export default function TasksScreen() {
                     {reviewingTask.work_notes}
                   </Text>
                 ) : null}
-                <Text style={styles.formLabel}>Points to award</Text>
-                <TextInput style={styles.input} keyboardType="numeric" value={reviewPoints} onChangeText={setReviewPoints} />
                 <Text style={styles.formLabel}>Review note (optional)</Text>
                 <TextInput style={[styles.input, { height: 60 }]} multiline value={reviewNote} onChangeText={setReviewNote} />
                 <View style={styles.formActions}>

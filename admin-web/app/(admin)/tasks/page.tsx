@@ -4,9 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
 import Avatar from '@/components/Avatar';
-import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
-import Leaderboard from '@/components/Leaderboard';
 import TaskHoursChart from '@/components/TaskHoursChart';
 import AssignTaskDialog, { type AssignInitial } from '@/components/tasks/AssignTaskDialog';
 import TaskDetailPanel from '@/components/tasks/TaskDetailPanel';
@@ -26,9 +24,9 @@ import {
   taskSlot,
   weekdayName,
 } from '@/lib/taskSchedule';
-import type { CompanyHoliday, Employee, LeaveRequest, PointRedemption, Task, TaskStatus, TaskTimeLog } from '@/lib/types';
+import type { CompanyHoliday, Employee, LeaveRequest, Task, TaskStatus, TaskTimeLog } from '@/lib/types';
 
-type Tab = 'schedule' | 'redemptions' | 'leaderboard';
+type Tab = 'schedule' | 'hours';
 /** What the key above the timetable can filter by: a task status, or people on leave. */
 type Filter = TaskStatus | 'leave';
 
@@ -41,7 +39,7 @@ const ROUND_BTN = 'flex h-11 w-11 items-center justify-center rounded-full borde
 
 /** The Tasks page: a day timetable — employees down the side, the working hours 9 to 6 across, a block for every task
  * at the hours it was assigned for. A block opens the full detail (and the review); a free hour, or the Assign task
- * button, opens the assign dialog. Point redemptions and the leaderboard/hours sit on their own tabs, unchanged. */
+ * button, opens the assign dialog. The hours worked sit on their own tab. */
 export default function TasksPage() {
   usePageTitle('Tasks');
   const { system } = useCalendarSystem();
@@ -68,10 +66,6 @@ export default function TasksPage() {
   const [hoursEmployeeId, setHoursEmployeeId] = useState('');
   const [hoursLogs, setHoursLogs] = useState<TaskTimeLog[]>([]);
 
-  const [redemptions, setRedemptions] = useState<PointRedemption[]>([]);
-  const [redemptionFilter, setRedemptionFilter] = useState<'pending' | 'approved' | 'rejected' | 'All'>('pending');
-  const [busyRedemptionId, setBusyRedemptionId] = useState<string | null>(null);
-  const [redemptionError, setRedemptionError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     supabase.from('tasks').select('*').order('created_at', { ascending: false }).then(({ data }) => setTasks((data as Task[] | null) ?? []));
@@ -105,11 +99,6 @@ export default function TasksPage() {
       .select('task_id')
       .is('ended_at', null)
       .then(({ data }) => setRunningTaskIds(new Set(((data as { task_id: string }[] | null) ?? []).map(r => r.task_id))));
-    supabase
-      .from('point_redemptions')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .then(({ data }) => setRedemptions((data as PointRedemption[] | null) ?? []));
   }, [todayIso]);
   useEffect(reload, [reload]);
 
@@ -205,12 +194,6 @@ export default function TasksPage() {
   const hoursTaskTotals = useMemo(() => totalsByTask(hoursLogs), [hoursLogs]);
   const employeeTasks = useMemo(() => tasks.filter(t => t.assigned_to === hoursEmployeeId), [tasks, hoursEmployeeId]);
 
-  const filteredRedemptions = useMemo(
-    () => (redemptionFilter === 'All' ? redemptions : redemptions.filter(r => r.status === redemptionFilter)),
-    [redemptions, redemptionFilter]
-  );
-  const pendingRedemptions = redemptions.filter(r => r.status === 'pending').length;
-
   function toggleFilter(f: Filter) {
     setFilters(prev => {
       const next = new Set(prev);
@@ -231,13 +214,12 @@ export default function TasksPage() {
   }
 
   // Approve or reject a submitted task. Resolves to an error message, or null when it worked.
-  async function review(task: Task, status: 'approved' | 'rejected', points: number, note: string): Promise<string | null> {
+  async function review(task: Task, status: 'approved' | 'rejected', note: string): Promise<string | null> {
     const { data } = await supabase.auth.getUser();
     const { error } = await supabase
       .from('tasks')
       .update({
         status,
-        points: status === 'approved' ? points : task.points,
         review_note: note || null,
         reviewed_by: data.user?.id,
         reviewed_at: new Date().toISOString(),
@@ -246,29 +228,6 @@ export default function TasksPage() {
     if (error) return error.message;
     reload();
     return null;
-  }
-
-  async function reviewRedemption(id: string, status: 'approved' | 'rejected') {
-    setBusyRedemptionId(id);
-    setRedemptionError(null);
-    let error;
-    if (status === 'approved') {
-      // Re-checks the employee's current points balance atomically at approval time — a plain update here could drive
-      // the balance negative if e.g. two pending requests together exceed it.
-      ({ error } = await supabase.rpc('approve_point_redemption', { p_redemption_id: id }));
-    } else {
-      const { data } = await supabase.auth.getUser();
-      ({ error } = await supabase
-        .from('point_redemptions')
-        .update({ status, reviewed_by: data.user?.id, reviewed_at: new Date().toISOString() })
-        .eq('id', id));
-    }
-    setBusyRedemptionId(null);
-    if (error) {
-      setRedemptionError(error.message);
-      return;
-    }
-    reload();
   }
 
   const closeDetail = useCallback(() => setSelectedId(null), []);
@@ -293,27 +252,13 @@ export default function TasksPage() {
         <button
           type="button"
           role="tab"
-          id="tab-redemptions"
-          aria-selected={tab === 'redemptions'}
-          aria-controls="panel-redemptions"
-          onClick={() => setTab('redemptions')}
-          className={`${TAB_BASE} -mb-px ${tab === 'redemptions' ? 'border-teal-700 font-extrabold text-teal-700' : 'border-transparent font-bold text-slate-600 hover:text-ink'}`}
+          id="tab-hours"
+          aria-selected={tab === 'hours'}
+          aria-controls="panel-hours"
+          onClick={() => setTab('hours')}
+          className={`${TAB_BASE} -mb-px ${tab === 'hours' ? 'border-teal-700 font-extrabold text-teal-700' : 'border-transparent font-bold text-slate-600 hover:text-ink'}`}
         >
-          Point redemptions{' '}
-          {pendingRedemptions > 0 && (
-            <span className="rounded-full bg-amber-100 px-2 py-px text-xs font-extrabold text-amber-800">{pendingRedemptions} pending</span>
-          )}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="tab-leaderboard"
-          aria-selected={tab === 'leaderboard'}
-          aria-controls="panel-leaderboard"
-          onClick={() => setTab('leaderboard')}
-          className={`${TAB_BASE} -mb-px ${tab === 'leaderboard' ? 'border-teal-700 font-extrabold text-teal-700' : 'border-transparent font-bold text-slate-600 hover:text-ink'}`}
-        >
-          Leaderboard and hours
+          Hours
         </button>
       </div>
 
@@ -458,7 +403,7 @@ export default function TasksPage() {
                       <span className="block text-sm font-bold text-ink">{t.title}</span>
                       <span className="mt-0.5 block text-[12.5px] text-slate-600">
                         {t.source === 'self' ? 'Self-assigned · ' : ''}
-                        {t.due_date ? `Due ${weekdayName(t.due_date)} ${formatAdDate(t.due_date, system)}` : 'No due date'} · {t.points} pts
+                        {t.due_date ? `Due ${weekdayName(t.due_date)} ${formatAdDate(t.due_date, system)}` : 'No due date'}
                       </span>
                     </button>
                     <div className="flex flex-[1_1_180px] items-center gap-2.5">
@@ -480,66 +425,9 @@ export default function TasksPage() {
         </div>
       )}
 
-      {tab === 'redemptions' && (
-        <div role="tabpanel" id="panel-redemptions" aria-labelledby="tab-redemptions" className="rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="mb-3 text-sm font-semibold text-ink">Point Redemptions</h2>
-          {redemptionError && <p className="mb-3 text-sm text-critical">{redemptionError}</p>}
-          <div className="mb-4 flex flex-wrap gap-2">
-            {(['All', 'pending', 'approved', 'rejected'] as const).map(f => (
-              <button
-                key={f}
-                onClick={() => setRedemptionFilter(f)}
-                className={`rounded-full px-4 py-1.5 text-xs font-medium capitalize ${
-                  redemptionFilter === f ? 'bg-accent text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
-                }`}
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-          {filteredRedemptions.length === 0 ? (
-            <p className="text-sm text-slate-400">No {redemptionFilter !== 'All' ? redemptionFilter : ''} redemption requests.</p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {filteredRedemptions.map(r => (
-                <div key={r.id} className="flex flex-wrap items-center gap-3 py-3">
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-ink">
-                      {employeeName(r.employee_id)} · {r.points_requested} pts
-                    </div>
-                    {r.note && <div className="text-xs text-slate-400">{r.note}</div>}
-                  </div>
-                  {r.status === 'pending' ? (
-                    <div className="flex gap-2">
-                      <button
-                        disabled={busyRedemptionId === r.id}
-                        onClick={() => reviewRedemption(r.id, 'approved')}
-                        className="rounded-md bg-good px-3 py-1 text-xs font-semibold text-white hover:bg-good/90 disabled:opacity-50"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        disabled={busyRedemptionId === r.id}
-                        onClick={() => reviewRedemption(r.id, 'rejected')}
-                        className="rounded-md border border-slate-200 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  ) : (
-                    <Badge tone={r.status === 'approved' ? 'good' : 'critical'}>{r.status}</Badge>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === 'leaderboard' && (
-        <div role="tabpanel" id="panel-leaderboard" aria-labelledby="tab-leaderboard">
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_360px]">
-            <Leaderboard />
+      {tab === 'hours' && (
+        <div role="tabpanel" id="panel-hours" aria-labelledby="tab-hours">
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[360px_minmax(0,1fr)] lg:items-start">
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="mb-3 max-w-xs">
                 <label htmlFor="hours-employee" className="mb-1 block text-xs font-medium text-slate-600">Hours worked by</label>
@@ -573,9 +461,9 @@ export default function TasksPage() {
                 </div>
               )}
             </div>
-          </div>
-          <div className="mt-5">
-            <TaskHoursChart logs={hoursLogs} tasks={employeeTasks} />
+            <div className="min-w-0">
+              <TaskHoursChart logs={hoursLogs} tasks={employeeTasks} />
+            </div>
           </div>
         </div>
       )}

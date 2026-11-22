@@ -6,7 +6,6 @@ import { colors } from '../theme';
 import Badge from '../components/Badge';
 import { formatAdDate } from '../lib/calendar';
 import { useCalendarSystem } from '../lib/CalendarSystemContext';
-import Leaderboard from '../components/Leaderboard';
 import SimpleBarChart from '../components/SimpleBarChart';
 
 const STATUS_TONE: Record<TaskStatus, 'good' | 'warning' | 'critical' | 'info' | 'neutral'> = {
@@ -115,6 +114,8 @@ export default function MyTasksScreen() {
       due_date: dueDate || null,
       assigned_to: employeeId,
       assigned_by: userId,
+      // Nothing shows points any more, but the database's security rule only lets an employee create a task
+      // that carries 0 of them, so the insert still says so.
       points: 0,
       status: 'pending',
       source: 'self',
@@ -173,10 +174,11 @@ export default function MyTasksScreen() {
                 <Badge tone={STATUS_TONE[t.status]}>{t.status.replace('_', ' ')}</Badge>
               </View>
               {t.description ? <Text style={styles.desc}>{t.description}</Text> : null}
-              <Text style={styles.meta}>
-                {t.points} pts{t.due_date ? ` · Due ${formatAdDate(t.due_date, system)}` : ''}
-                {hours > 0 ? ` · ${hours} hrs logged` : ''}
-              </Text>
+              {t.due_date || hours > 0 ? (
+                <Text style={styles.meta}>
+                  {[t.due_date ? `Due ${formatAdDate(t.due_date, system)}` : null, hours > 0 ? `${hours} hrs logged` : null].filter(Boolean).join(' · ')}
+                </Text>
+              ) : null}
               {t.review_note ? (
                 <Text style={styles.feedback}>
                   <Text style={{ fontWeight: '700' }}>Feedback: </Text>
@@ -235,7 +237,6 @@ export default function MyTasksScreen() {
                 />
               </View>
             )}
-            <Leaderboard highlightEmployeeId={employeeId ?? undefined} />
           </View>
         }
       />
@@ -244,7 +245,6 @@ export default function MyTasksScreen() {
         <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowForm(false)}>
           <TouchableOpacity activeOpacity={1} style={styles.formSheet}>
             <Text style={styles.formTitle}>New Task</Text>
-            <Text style={styles.formHint}>Self-created tasks start with 0 points — HR can award points when they review it.</Text>
             <Text style={styles.label}>Title</Text>
             <TextInput style={styles.input} value={title} onChangeText={setTitle} />
             <Text style={styles.label}>Description (optional)</Text>
@@ -296,7 +296,6 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', padding: 20 },
   formSheet: { backgroundColor: colors.white, borderRadius: 16, padding: 20 },
   formTitle: { fontSize: 16, fontWeight: '700', color: colors.ink, marginBottom: 4 },
-  formHint: { fontSize: 11, color: colors.slate500, marginBottom: 8 },
   label: { fontSize: 12, fontWeight: '600', color: colors.slate500, marginBottom: 4, marginTop: 8 },
   input: { borderWidth: 1, borderColor: colors.slate200, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: colors.ink },
   errorText: { color: colors.criticalText, fontSize: 12, marginTop: 8 },

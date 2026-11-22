@@ -17,7 +17,7 @@ type Props = {
   today: string;
   onClose: () => void;
   /** Approve or reject. Resolves to an error message, or null when it worked. */
-  onReview: (task: Task, status: 'approved' | 'rejected', points: number, note: string) => Promise<string | null>;
+  onReview: (task: Task, status: 'approved' | 'rejected', note: string) => Promise<string | null>;
   /** "Pick a time" for a task that has no slot yet. */
   onPickTime: (task: Task) => void;
 };
@@ -26,14 +26,13 @@ const LABEL = 'mb-1.5 block text-xs font-bold text-slate-700';
 const FIELD = 'w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm text-ink';
 
 /** Everything about one task, in a panel that slides in from the right when its block (or row) is clicked: when,
- * who, points, the description, the time actually tracked, the employee's note — and, for a submitted task, the
+ * who, the description, the time actually tracked, the employee's note — and, for a submitted task, the
  * review. It replaces the separate Review dialog; the approve/reject rules are unchanged. */
 export default function TaskDetailPanel({ task, employee, today, onClose, onReview, onPickTime }: Props) {
   const { system } = useCalendarSystem();
   const closeRef = useRef<HTMLButtonElement>(null);
   const [logs, setLogs] = useState<TaskTimeLog[]>([]);
   const [now, setNow] = useState<number | null>(null);
-  const [points, setPoints] = useState(task.points);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'approved' | 'rejected' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +71,7 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
   async function review(status: 'approved' | 'rejected') {
     setBusy(status);
     setError(null);
-    const message = await onReview(task, status, points, note);
+    const message = await onReview(task, status, note);
     setBusy(null);
     if (message) setError(message);
     else onClose();
@@ -146,9 +145,6 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
 
           <dt className="border-b border-slate-100 py-3.5 text-[13px] font-bold text-slate-600">Created</dt>
           <dd className="border-b border-slate-100 py-3.5 font-semibold text-ink">{formatAdDate(localDateKey(task.created_at), system)}</dd>
-
-          <dt className="border-b border-slate-100 py-3.5 text-[13px] font-bold text-slate-600">Points</dt>
-          <dd className="border-b border-slate-100 py-3.5 font-bold text-ink">{task.points} pts</dd>
         </dl>
 
         {task.description && (
@@ -215,17 +211,6 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
           <section aria-labelledby="task-detail-review" className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
             <h3 id="task-detail-review" className="mb-3.5 text-[15px] font-extrabold text-ink">Review</h3>
             {error && <p role="alert" className="mb-3 text-sm text-critical-text">{error}</p>}
-            <div className="mb-3.5">
-              <label htmlFor="task-detail-points" className={LABEL}>Points to award</label>
-              <input
-                id="task-detail-points"
-                type="number"
-                min={0}
-                value={points}
-                onChange={e => setPoints(Number(e.target.value))}
-                className={`${FIELD} h-11 w-36`}
-              />
-            </div>
             <div className="mb-4">
               <label htmlFor="task-detail-note-input" className={LABEL}>
                 Review note <span className="font-medium text-slate-600">(optional)</span>

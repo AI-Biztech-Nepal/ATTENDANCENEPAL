@@ -7,7 +7,6 @@ import Badge from '@/components/Badge';
 import DatePicker from '@/components/DatePicker';
 import TaskHoursChart from '@/components/TaskHoursChart';
 import FormDialog from '@/components/employee/FormDialog';
-import PointsCard from '@/components/employee/PointsCard';
 import { PageBody } from '@/components/employee/parts';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -41,8 +40,8 @@ function formatElapsed(startedAt: string, now: number) {
 }
 
 /** The employee's own tasks, laid out like the owner console's Tasks page: filter pills, the task
- * table beside the points and leaderboard, then the hours. Instead of Review, each task carries
- * what the employee does with it — accept it, hold or resume the timer, complete it. */
+ * table, then the hours. Instead of Review, each task carries what the employee does with it —
+ * accept it, hold or resume the timer, complete it. */
 export default function MyTasksPage() {
   usePageTitle('My Tasks');
   const { system } = useCalendarSystem();
@@ -144,6 +143,8 @@ export default function MyTasksPage() {
       due_date: taskForm.due_date || null,
       assigned_to: employeeId,
       assigned_by: userId,
+      // Nothing shows points any more, but the database's security rule only lets an employee create a task
+      // that carries 0 of them, so the insert still says so.
       points: 0,
       status: 'pending',
       source: 'self',
@@ -292,11 +293,9 @@ export default function MyTasksPage() {
         </p>
       )}
 
-      {/* One grid for the whole page: the long leaderboard on the right spans every row, so the chart and
-          hours card slot in under the tasks instead of leaving that column empty beside it. The last row
-          is the stretchy one, so the leaderboard's extra height doesn't open gaps between the left cards. */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:grid-rows-[auto_auto_1fr] lg:items-start">
-        <div className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm lg:col-start-1 lg:row-start-1">
+      {/* The task table across the page; the hours chart and the hours by task sit side by side under it. */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start">
+        <div className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
           <div className="divide-y divide-slate-100 md:hidden">
             {filtered.map(t => (
               <div key={t.id} className={`p-4 ${runningLog?.task_id === t.id ? 'bg-accent/5' : ''}`}>
@@ -304,9 +303,7 @@ export default function MyTasksPage() {
                   <div className="min-w-0">{taskBody(t)}</div>
                   <div className="shrink-0">{statusCell(t)}</div>
                 </div>
-                <div className="mt-2 text-xs text-slate-500">
-                  {t.points} pts · Due {formatAdDate(t.due_date, system)}
-                </div>
+                <div className="mt-2 text-xs text-slate-500">Due {formatAdDate(t.due_date, system)}</div>
                 <div className="mt-3">{actions(t)}</div>
               </div>
             ))}
@@ -318,7 +315,6 @@ export default function MyTasksPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                   <th className="px-5 py-3 font-medium">Task</th>
-                  <th className="w-20 px-5 py-3 font-medium">Points</th>
                   <th className="w-28 px-5 py-3 font-medium">Due</th>
                   <th className="w-36 px-5 py-3 font-medium">Status</th>
                   <th className="w-56 px-5 py-3 font-medium">Actions</th>
@@ -328,7 +324,6 @@ export default function MyTasksPage() {
                 {filtered.map(t => (
                   <tr key={t.id} className={`border-b border-slate-100 align-top last:border-0 ${runningLog?.task_id === t.id ? 'bg-accent/5' : ''}`}>
                     <td className="px-5 py-3 text-slate-600">{taskBody(t)}</td>
-                    <td className="px-5 py-3 text-slate-600">{t.points}</td>
                     <td className="px-5 py-3 text-slate-600">{formatAdDate(t.due_date, system)}</td>
                     <td className="px-5 py-3">{statusCell(t)}</td>
                     <td className="px-5 py-3">{actions(t)}</td>
@@ -336,7 +331,7 @@ export default function MyTasksPage() {
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
+                    <td colSpan={4} className="px-5 py-8 text-center text-slate-400">
                       {emptyText}
                     </td>
                   </tr>
@@ -346,15 +341,11 @@ export default function MyTasksPage() {
           </div>
         </div>
 
-        <div className="lg:col-start-2 lg:row-span-3 lg:row-start-1">
-          <PointsCard employeeId={employeeId} />
-        </div>
-
-        <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+        <div className="min-w-0">
           <TaskHoursChart logs={logs} tasks={tasks} />
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 lg:col-start-1 lg:row-start-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
           <h2 className="mb-3 text-sm font-semibold text-ink">Hours by Task</h2>
           {taskTotals.length === 0 ? (
             <p className="text-sm text-slate-400">No time logged yet. Accept a task to start the timer.</p>
@@ -382,7 +373,6 @@ export default function MyTasksPage() {
       {showTaskForm && (
         <FormDialog
           title="New Task"
-          note="Self-created tasks start with 0 points — HR can award points when they review it."
           onSubmit={handleCreateTask}
           onClose={() => setShowTaskForm(false)}
           saving={creatingTask}

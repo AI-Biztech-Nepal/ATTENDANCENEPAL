@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 
 /** The small add / request pop-ups on the employee pages — the same dialog the owner console's
- * pages use (redeem points, education, upload, new task, a leave request). */
+ * pages use (education, upload, new task, a leave request). */
 export default function FormDialog({
   title,
   note,

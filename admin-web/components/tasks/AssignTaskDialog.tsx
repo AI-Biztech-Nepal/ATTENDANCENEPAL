@@ -78,7 +78,6 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
   const [employeeId, setEmployeeId] = useState(initial.employeeId);
   const [title, setTitle] = useState(scheduleTask?.title ?? '');
   const [description, setDescription] = useState('');
-  const [points, setPoints] = useState(10);
   const [date, setDate] = useState(initial.date);
   const [start, setStart] = useState(() =>
     initial.startHour ?? (initial.employeeId ? firstFreeStart(tasks, initial.employeeId, initial.date, scheduleTask?.id) : SLOT_HOURS[0])
@@ -159,7 +158,6 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
         assigned_by: data.user?.id,
         title: title.trim(),
         description: description.trim() || null,
-        points,
         ...when,
       });
       failure = insertError?.message;
@@ -350,21 +348,6 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
           <p role="alert" className="mb-4 text-sm font-semibold text-critical-text">
             {problem}
           </p>
-        )}
-
-        {!scheduleTask && (
-          <div className="mb-2 max-w-[200px]">
-            <label htmlFor="assign-points" className={LABEL}>Points</label>
-            <input
-              id="assign-points"
-              type="number"
-              min={0}
-              required
-              value={points}
-              onChange={e => setPoints(Number(e.target.value))}
-              className={FIELD}
-            />
-          </div>
         )}
 
         {error && <p role="alert" className="mt-3 text-sm text-critical-text">{error}</p>}

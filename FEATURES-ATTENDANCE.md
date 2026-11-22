@@ -27,7 +27,6 @@ the default, never as off.
 |---|---|---|---|---|
 | `attendance.devices` | Biometric devices (ZKTeco) | | on | **DB** `devices`, `device_command_queue`, `device_sync_events`; `queue_device_userinfo_sync`, `devices_with_punches`. **API** `admin-web/app/api/bridge-credentials`; the `zkteco-bridge` worker. **Web** `/devices`, the dashboard's "Devices n/m online" line and "Biometric devices" section (device names on punches stay: that is attribution). **Mobile** Devices screen, More-tile online count. |
 | `attendance.tasks` | Tasks | | on | **DB** `tasks`, `task_time_logs`; `start_task`, `start_task_timer`, `stop_task_timer`, `submit_task`. **Web** `/tasks`, `/my-tasks`. **Mobile** Tasks tile, My Tasks tab. |
-| `attendance.points` | Points and rewards | `attendance.tasks` | on | **DB** `point_redemptions`; `approve_point_redemption`, `get_leaderboard`. **Web** redemptions on `/tasks`, `PointsCard`, `Leaderboard`. **Mobile** `Leaderboard`, redemption flows in the Tasks screens. Points are the sum of approved task points, hence the dependency. |
 | `attendance.hr_records` | HR file (documents, history, conduct, performance, CV) | | on | **DB** `employee_documents` (+ storage bucket `employee-documents`), `employee_history`, `employee_conduct_records`, `employee_appraisals`, `employee_awards`, `employee_education`, `employee_work_experience`, `employee_training`; `update_my_hr_profile`, `log_employee_history`. **Web** HR sections of `/employees/[id]` and `/my-profile`. **Mobile** `components/hr/*`, `components/employee/My*Cards`. |
 | `attendance.hr_alerts` | Contract-end alerts | `attendance.hr_records` | on | **DB** `hr_alert_log`. **API** Edge Function `notify-hr-alerts` (daily). **Mobile** `HrAlertsProvider`, `lib/hrAlerts.ts`. |
 | `attendance.payroll` | Payroll and salary | | on | **DB** `employees.salary`, `employees.allowance`, `employees.ssf_no`; company rates (`pf_rate`, `ssf_rate`, `ssf_employer_rate`, `tds_rate`, `overtime_rate`, `ot_*`, `payroll_format`, `payroll_report_columns`). **Web** `/payroll`, `/payroll/[employeeId]`, `/salary-structure`, `/my-payroll`, `StaffSalarySheet`, `PayrollColumnsMenu`. **Mobile** Payroll tabs (admin and employee), `AdminPayrollDetailScreen`. |
@@ -52,7 +51,7 @@ A flag only fits what can be off without breaking the rest of the service. These
 ## 3. Corrections to the brief's example keys
 
 - `attendance.holidays` → **core** (above). Drop it.
-- `attendance.points` → needs `attendance.tasks`.
+- `attendance.points` → **removed**. Points, rewards and the leaderboard were taken out of every screen (web and phone) on 2026-11-22, so there is nothing to switch. The database objects (`point_redemptions`, `approve_point_redemption`, `get_leaderboard`, `tasks.points`) are left in place and unused. `tasks.points` has to stay for now: an employee's own new task is only allowed when it carries `points = 0`.
 - `attendance.payroll` → narrower than it reads: pay and salary screens only; the daily summary engine keeps running.
 
 ## 4. How each layer would enforce it here
@@ -94,8 +93,6 @@ insert into core.features (key, service_key, name, description, requires, defaul
    'Connect fixed fingerprint terminals (ZKTeco) and sync their punches.', '{}', true),
   ('attendance.tasks',       'attendance', 'Tasks',
    'Assign tasks to employees and track the time they spend.', '{}', true),
-  ('attendance.points',      'attendance', 'Points and rewards',
-   'Employees earn points for approved tasks and can redeem them.', '{attendance.tasks}', true),
   ('attendance.hr_records',  'attendance', 'HR file',
    'Documents, work history, conduct, performance and CV for each employee.', '{}', true),
   ('attendance.hr_alerts',   'attendance', 'Contract-end alerts',
