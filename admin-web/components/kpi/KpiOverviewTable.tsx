@@ -1,0 +1,149 @@
+'use client';
+
+import Link from 'next/link';
+import Avatar from '@/components/Avatar';
+import { KPI_GROUPS, attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
+import type { Employee } from '@/lib/types';
+
+type Props = {
+  employees: Employee[];
+  attendance: Map<string, AttendanceKpi>;
+  loading: boolean;
+  /** The month being shown has not begun, so there is nothing to count yet. */
+  notStarted: boolean;
+};
+
+const COLUMN_COUNT = 1 + KPI_GROUPS.reduce((n, g) => n + g.columns.length, 0);
+
+/** One row per person, the KPIs across, grouped by where their numbers come from. Nothing is added up
+ * or compared: a dash means there is nothing to show yet. */
+export default function KpiOverviewTable({ employees, attendance, loading, notStarted }: Props) {
+  return (
+    <section aria-label="KPIs by employee" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1270px] border-collapse text-left">
+          <thead>
+            <tr className="bg-slate-50">
+              <th
+                rowSpan={2}
+                scope="col"
+                className="w-[210px] border-b border-slate-200 bg-slate-50 px-5 py-3.5 align-bottom md:sticky md:left-0 md:z-10 text-xs font-extrabold uppercase tracking-wider text-slate-600"
+              >
+                Employee
+              </th>
+              {KPI_GROUPS.map(g => (
+                <th key={g.id} colSpan={g.columns.length} scope="colgroup" className="border-l border-slate-200 px-3 pb-1.5 pt-3 align-top text-xs font-extrabold text-ink">
+                  {g.title}
+                  <div className="mt-0.5 text-[11px] font-semibold text-slate-600">{g.source}</div>
+                  {!g.connected && <div className="mt-1 text-[11px] font-bold text-slate-600">Not connected yet</div>}
+                </th>
+              ))}
+            </tr>
+            <tr className="border-b border-slate-200 bg-slate-50">
+              {KPI_GROUPS.flatMap(g =>
+                g.columns.map((c, i) => (
+                  <th
+                    key={c.id}
+                    scope="col"
+                    style={{ width: c.width }}
+                    className={`px-3 pb-3 pt-1.5 text-xs font-bold text-slate-700 ${i === 0 ? 'border-l border-slate-200' : ''}`}
+                  >
+                    {c.label}
+                  </th>
+                ))
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={COLUMN_COUNT} className="px-5 py-10 text-center text-sm text-slate-600">
+                  Loading…
+                </td>
+              </tr>
+            ) : employees.length === 0 ? (
+              <tr>
+                <td colSpan={COLUMN_COUNT} className="px-5 py-10 text-center text-sm text-slate-600">
+                  No employees to show.
+                </td>
+              </tr>
+            ) : (
+              employees.map(emp => {
+                const kpi = attendance.get(emp.id);
+                return (
+                  <tr key={emp.id} className="border-t border-slate-100">
+                    <th scope="row" className="bg-white px-5 py-3.5 text-left font-normal md:sticky md:left-0 md:z-10">
+                      <div className="flex items-center gap-3">
+                        <Avatar name={emp.name} photoUrl={emp.profile_photo_url} className="h-9 w-9 text-[13px]" />
+                        <div className="min-w-0">
+                          <Link href={`/employees/${emp.id}`} className="block truncate text-sm font-bold text-ink hover:text-accent hover:underline">
+                            {emp.name}
+                          </Link>
+                          <div className="truncate text-xs text-slate-600">{subtitle(emp, kpi)}</div>
+                        </div>
+                      </div>
+                    </th>
+                    {KPI_GROUPS.map(g =>
+                      g.id === 'attendance' ? (
+                        <AttendanceCell key={g.id} kpi={kpi} notStarted={notStarted} />
+                      ) : (
+                        g.columns.map((c, i) => <EmptyCell key={c.id} group={g} first={i === 0} />)
+                      )
+                    )}
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p className="m-0 border-t border-slate-200 bg-slate-50 px-5 py-3 text-[12.5px] leading-relaxed text-slate-600">
+        Click a name to open that person&apos;s profile. Attendance counts the working days so far: week-offs, holidays and approved leave are left out.
+      </p>
+    </section>
+  );
+}
+
+function subtitle(emp: Employee, kpi: AttendanceKpi | undefined) {
+  const parts: string[] = [];
+  if (emp.department) parts.push(emp.department);
+  if (kpi && !kpi.tracked) parts.push('Excused from attendance');
+  else if (kpi && kpi.leaveDays > 0) parts.push(`${kpi.leaveDays} ${kpi.leaveDays === 1 ? 'day' : 'days'} on leave`);
+  return parts.join(' · ') || ' ';
+}
+
+function AttendanceCell({ kpi, notStarted }: { kpi: AttendanceKpi | undefined; notStarted: boolean }) {
+  const cell = 'border-l border-slate-100 px-3 py-3.5';
+  if (!kpi || !kpi.tracked || kpi.expectedDays === 0) {
+    const note = !kpi ? '' : !kpi.tracked ? 'Not tracked' : notStarted ? 'Month has not started' : 'No working days yet';
+    return (
+      <td className={cell}>
+        <div className="text-[15px] font-bold text-slate-600">–</div>
+        <div className="text-[11.5px] text-slate-600">{note}</div>
+      </td>
+    );
+  }
+  const { present, onTime } = attendanceRates(kpi);
+  const title = `Present ${kpi.presentDays} of ${kpi.expectedDays} working days, ${kpi.presentDays - kpi.lateDays} of ${kpi.presentDays} on time`;
+  return (
+    <td className={cell} title={title}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">
+        {present}% <span className="text-[11.5px] font-medium text-slate-600">present</span>
+      </div>
+      <div className="mt-0.5 text-[13px] font-bold tabular-nums text-ink">
+        {onTime == null ? '–' : `${onTime}%`} <span className="text-[11.5px] font-medium text-slate-600">on time</span>
+      </div>
+    </td>
+  );
+}
+
+function EmptyCell({ group, first }: { group: KpiGroup; first: boolean }) {
+  return (
+    <td className={`px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`}>
+      <div className="text-[15px] font-bold text-slate-600">
+        <span aria-hidden="true">–</span>
+        <span className="sr-only">{group.emptyNote}</span>
+      </div>
+    </td>
+  );
+}

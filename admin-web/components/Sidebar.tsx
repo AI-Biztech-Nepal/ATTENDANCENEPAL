@@ -39,6 +39,7 @@ const NAV_ITEMS: NavItem[] = [
     adminOnly: false,
     selfLabel: 'Employee Directory',
     children: [
+      { href: '/kpis', label: 'KPIs', icon: KpiIcon, adminOnly: false },
       { href: '/shifts', label: 'Shifts', icon: CalendarIcon, adminOnly: true },
       { href: '/branches', label: 'Branch/Depart', icon: BranchIcon, adminOnly: true },
       { href: '/employees?filter=Resigned', label: 'Resigned', icon: ResignedIcon, adminOnly: true },
@@ -370,6 +371,13 @@ function StructureIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 9h18M9 9v11" />
+    </svg>
+  );
+}
+function KpiIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
     </svg>
   );
 }
