@@ -9,6 +9,7 @@ const SECTIONS = [
   { href: '/kpis', label: 'Overview' },
   { href: '/kpis/feedback', label: 'Customer feedback' },
   { href: '/kpis/reviews', label: 'Colleague reviews' },
+  { href: '/kpis/import', label: 'Import' },
 ];
 
 export default function KpiTabs() {
