@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import { usePageTitle } from '@/lib/pageTitle';
+import { useParams } from 'next/navigation';
 import { isKpiOn, kpiLabel } from '@/lib/kpiSettings';
 import { publishKpiSettings, useKpiSettings } from '@/lib/useKpiSettings';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -27,7 +27,6 @@ import {
   type EmployeeRef,
   type Table,
 } from '@/lib/serviceImport';
-import KpiTabs from '@/components/kpi/KpiTabs';
 import { useConfirm } from '@/components/ConfirmDialog';
 
 type PastImport = { id: string; file_name: string; rows_read: number; rows_imported: number; first_date: string | null; last_date: string | null; created_at: string };
@@ -37,14 +36,14 @@ const ROLES: ColumnRole[] = ['employee', 'date', 'service', 'minutes', 'customer
 const SELECT = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-semibold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
 const CARD = 'rounded-xl border border-slate-200 bg-white shadow-sm';
 
-// Service import: the booking system's file (a CSV) is read here in the browser. The admin says what each column is, names
+// Service import (for the whole company: the same on every person's page): the booking system's file (a CSV) is read here in the browser. The admin says what each column is, names
 // the file does not match to an employee are matched by hand, and the rows are saved. Customer names, phone numbers
 // and IDs are never kept: only a scrambled code, enough to tell that two services were for the same customer. Rows
 // that were already imported (an export that overlaps an earlier one) are left out, and a whole import can be removed.
 export default function ImportPage() {
-  usePageTitle('KPIs');
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
+  const { employeeId } = useParams<{ employeeId: string }>();
   // Which KPIs this company uses, what it calls them and its people (KPIs > Settings).
   const { settings, words } = useKpiSettings();
   const today = useMemo(nepalTodayIso, []);
@@ -284,8 +283,6 @@ export default function ImportPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <KpiTabs />
-
       <ol aria-label="Steps" className="m-0 flex list-none flex-wrap gap-x-7 gap-y-2.5 p-0 text-[13.5px]">
         {steps.map((s, i) => {
           const n = i + 1;
@@ -453,7 +450,7 @@ export default function ImportPage() {
                 {fills.length === 0 && (
                   <p className="m-0 border-t border-slate-200 py-3.5 text-[13px] leading-normal text-slate-600">
                     None of the KPIs this file fills in are turned on. You can turn them on in{' '}
-                    <Link href="/kpis/settings" className="font-bold text-accent hover:underline">
+                    <Link href={`/kpis/${employeeId}/settings`} className="font-bold text-accent hover:underline">
                       Settings
                     </Link>
                     .

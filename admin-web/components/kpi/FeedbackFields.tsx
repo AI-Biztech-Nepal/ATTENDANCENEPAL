@@ -15,7 +15,9 @@ const NUMBER = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3
 /** The boxes of one customer form: who served them, the date on the paper, what it was for, the two numbers
  * the customer circled, and the comment. Shared by the typing card and the edit dialog; `idPrefix` keeps the
  * ids of the two apart. A customer may skip a question, so the numbers and the comment can be left empty. */
-export default function FeedbackFields({ draft, onChange, staff, idPrefix, employeeRef, ratingRef }: {
+export default function FeedbackFields({ draft, onChange, staff, idPrefix, employeeRef, ratingRef, employeeLocked = false }: {
+  /** The employee is fixed (the form is typed in on that person's own page). */
+  employeeLocked?: boolean;
   draft: FeedbackDraft;
   onChange: (next: FeedbackDraft) => void;
   staff: StaffOption[];
@@ -32,7 +34,7 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
         <label htmlFor={`${idPrefix}-employee`} className={LABEL}>
           {words.t('Who served the customer')}
         </label>
-        <select id={`${idPrefix}-employee`} ref={employeeRef} value={draft.employeeId} onChange={e => set({ employeeId: e.target.value })} className={FIELD}>
+        <select id={`${idPrefix}-employee`} ref={employeeRef} value={draft.employeeId} disabled={employeeLocked} onChange={e => set({ employeeId: e.target.value })} className={FIELD}>
           <option value="">Select employee…</option>
           {staff.map(s => (
             <option key={s.id} value={s.id}>

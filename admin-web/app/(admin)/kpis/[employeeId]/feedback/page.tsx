@@ -1,18 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { usePageTitle } from '@/lib/pageTitle';
 import { useCompanyName } from '@/lib/companyName';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildMonth, formatAdDate, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
 import { nepalTodayIso } from '@/lib/shift';
 import { weekdayName } from '@/lib/taskSchedule';
-import { otherCalendarSpan } from '@/lib/kpi';
+import { otherCalendarSpan, parseMonthParam } from '@/lib/kpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
+import { useMonthInUrl } from '@/lib/useMonthInUrl';
 import { FEEDBACK_COLUMNS, FEEDBACK_PAGE_SIZE, emptyDraft, feedbackRow, rangeText, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
 import type { CustomerFeedback, Employee } from '@/lib/types';
-import KpiTabs from '@/components/kpi/KpiTabs';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import FeedbackFields, { type StaffOption } from '@/components/kpi/FeedbackFields';
 import FeedbackEditDialog from '@/components/kpi/FeedbackEditDialog';
@@ -22,10 +22,20 @@ type Person = Pick<Employee, 'id' | 'name' | 'department' | 'status'>;
 
 // Customers do not use the app: they fill in a paper form, and staff type each one in here. The same form
 // counts toward two KPIs, the 1-5 service rating (customer feedback) and the 0-10 would-recommend number (NPS).
-// The page has the typing card, the forms typed in for a month (change or delete one with Edit), and a blank
-// form to print.
+// This is one person's section: the typing card is for the forms about them, and the list shows only theirs
+// for a month (change or delete one with Edit). A blank form to print is here too.
 export default function CustomerFeedbackPage() {
-  usePageTitle('KPIs');
+  // useSearchParams needs a Suspense boundary, like the other pages that read the address.
+  return (
+    <Suspense fallback={null}>
+      <FeedbackSection />
+    </Suspense>
+  );
+}
+
+function FeedbackSection() {
+  const { employeeId } = useParams<{ employeeId: string }>();
+  const params = useSearchParams();
   const { system } = useCalendarSystem();
   const today = useMemo(nepalTodayIso, []);
   const companyName = useCompanyName();
@@ -33,20 +43,20 @@ export default function CustomerFeedbackPage() {
   const { words } = useKpiSettings();
 
   const [people, setPeople] = useState<Person[]>([]);
-  const staff = useMemo(() => people.filter(p => p.status === 'active'), [people]);
+  // Only this person: a form typed in here is about them, even if they have left.
+  const staff = useMemo(() => people.filter(p => p.id === employeeId), [people, employeeId]);
+  const blank = useCallback(() => ({ ...emptyDraft(today), employeeId }), [today, employeeId]);
 
   // --- the typing card ---
-  const [draft, setDraft] = useState<FeedbackDraft>(() => emptyDraft(today));
+  const [draft, setDraft] = useState<FeedbackDraft>(() => ({ ...emptyDraft(today), employeeId }));
   const [keep, setKeep] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [notice, setNotice] = useState('');
-  const employeeRef = useRef<HTMLSelectElement>(null);
   const ratingRef = useRef<HTMLInputElement>(null);
 
   // --- the forms typed in for a month ---
-  const [anchor, setAnchor] = useState(todayAnchor);
-  const [listEmployee, setListEmployee] = useState('');
+  const [anchor, setAnchor] = useState(() => parseMonthParam(params.get('date')) ?? todayAnchor());
   const [page, setPage] = useState(0);
   // `page` is the page these rows belong to, so the footer always describes what is on screen even while the next page loads.
   const [list, setList] = useState<{ rows: CustomerFeedback[]; total: number; page: number } | null>(null);
@@ -57,6 +67,7 @@ export default function CustomerFeedbackPage() {
   const { start, end } = useMemo(() => monthDateRange(system, anchor), [system, anchor]);
   const label = useMemo(() => buildMonth(system, anchor).label, [system, anchor]);
   const otherSpan = useMemo(() => otherCalendarSpan(system, start, end), [system, start, end]);
+  useMonthInUrl(start);
 
   useEffect(() => {
     supabase
@@ -67,9 +78,13 @@ export default function CustomerFeedbackPage() {
 
   useEffect(() => {
     let live = true;
-    let q = supabase.from('customer_feedback').select(FEEDBACK_COLUMNS, { count: 'exact' }).gte('given_on', start).lte('given_on', end);
-    if (listEmployee) q = q.eq('employee_id', listEmployee);
-    q.order('given_on', { ascending: false })
+    supabase
+      .from('customer_feedback')
+      .select(FEEDBACK_COLUMNS, { count: 'exact' })
+      .eq('employee_id', employeeId)
+      .gte('given_on', start)
+      .lte('given_on', end)
+      .order('given_on', { ascending: false })
       .order('created_at', { ascending: false })
       .range(page * FEEDBACK_PAGE_SIZE, page * FEEDBACK_PAGE_SIZE + FEEDBACK_PAGE_SIZE - 1)
       .then(({ data, count, error }: { data: unknown; count: number | null; error: { message: string } | null }) => {
@@ -88,7 +103,7 @@ export default function CustomerFeedbackPage() {
     return () => {
       live = false;
     };
-  }, [start, end, listEmployee, page, reloadKey]);
+  }, [start, end, employeeId, page, reloadKey]);
 
   useEffect(() => {
     if (!notice) return;
@@ -117,17 +132,17 @@ export default function CustomerFeedbackPage() {
       return;
     }
     setNotice(`Saved for ${personName(draft.employeeId)} · ${dayText(draft.date)}.`);
-    // Ready for the next paper form: the answers are cleared, and the employee and date stay when asked to.
-    setDraft(keep ? { ...emptyDraft(today), employeeId: draft.employeeId, date: draft.date } : emptyDraft(today));
+    // Ready for the next paper form: the answers are cleared, and the date stays when asked to.
+    setDraft(keep ? { ...blank(), date: draft.date } : blank());
     setReloadKey(k => k + 1);
-    requestAnimationFrame(() => (keep ? ratingRef : employeeRef).current?.focus());
+    requestAnimationFrame(() => ratingRef.current?.focus());
   }
 
   function clear() {
-    setDraft(emptyDraft(today));
+    setDraft(blank());
     setFormError('');
     setNotice('');
-    employeeRef.current?.focus();
+    ratingRef.current?.focus();
   }
 
   const closeEdit = useCallback(() => setEditing(null), []);
@@ -146,13 +161,10 @@ export default function CustomerFeedbackPage() {
   const total = list?.total ?? 0;
   const rows = list?.rows ?? [];
   const lastPage = Math.max(0, Math.ceil(total / FEEDBACK_PAGE_SIZE) - 1);
-  const FILTER = 'h-10 rounded-[10px] border border-slate-300 bg-white pl-3 pr-8 text-[13px] font-semibold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
 
   return (
     <>
       <div className="flex flex-col gap-5 print:hidden">
-        <KpiTabs />
-
         <div className="flex flex-wrap items-start justify-between gap-3">
           <p className="m-0 max-w-[680px] text-[13.5px] leading-relaxed text-slate-600">
             {words.t("Customers fill in a paper form. Type each form in here, so it counts toward the right employee's KPIs. Customer feedback and NPS both come from this form.")}
@@ -181,11 +193,11 @@ export default function CustomerFeedbackPage() {
             </h2>
             <p className="m-0 mb-[18px] text-[13px] leading-normal text-slate-600">{words.t('Type the numbers the customer circled. Leave a box empty if they skipped it.')}</p>
 
-            <FeedbackFields draft={draft} onChange={d => setDraft(d)} staff={staff} idPrefix="feedback" employeeRef={employeeRef} ratingRef={ratingRef} />
+            <FeedbackFields draft={draft} onChange={d => setDraft(d)} staff={staff} idPrefix="feedback" ratingRef={ratingRef} employeeLocked />
 
             <label className="mb-4 flex items-center gap-2.5 text-[13px] text-slate-700">
               <input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} className="h-[18px] w-[18px] accent-teal-700" />
-              Keep the employee and date for the next form
+              Keep the date for the next form
             </label>
 
             {formError && (
@@ -232,22 +244,6 @@ export default function CustomerFeedbackPage() {
                   }}
                 />
               </div>
-              <select
-                aria-label="Employee"
-                value={listEmployee}
-                onChange={e => {
-                  setListEmployee(e.target.value);
-                  setPage(0);
-                }}
-                className={FILTER}
-              >
-                <option value="">All employees</option>
-                {people.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
             </div>
 
             {listError && (
@@ -260,7 +256,7 @@ export default function CustomerFeedbackPage() {
               <table className="w-full min-w-[640px] border-collapse text-left">
                 <thead>
                   <tr className="border-y border-slate-200 bg-slate-50">
-                    {['Date', 'Employee', 'Rating', 'Recommend', 'Comment'].map((h, i) => (
+                    {['Date', 'Rating', 'Recommend', 'Comment'].map((h, i) => (
                       <th key={h} scope="col" className={`py-[11px] text-xs font-extrabold uppercase tracking-wider text-slate-600 ${i === 0 ? 'px-6' : 'px-3'}`}>
                         {h}
                       </th>
@@ -271,21 +267,20 @@ export default function CustomerFeedbackPage() {
                 <tbody>
                   {!list ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-600">
+                      <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-600">
                         Loading…
                       </td>
                     </tr>
                   ) : rows.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-600">
-                        {listEmployee ? 'No forms typed in for this employee in' : 'No forms typed in for'} {label}.
+                      <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-600">
+                        No forms typed in for this employee in {label}.
                       </td>
                     </tr>
                   ) : (
                     rows.map(r => (
                       <tr key={r.id} className="border-b border-slate-100 last:border-0">
                         <td className="whitespace-nowrap px-6 py-[13px] text-[13px] text-slate-700">{dayText(r.given_on)}</td>
-                        <td className="px-3 py-[13px] text-[13.5px] font-bold text-ink">{personName(r.employee_id)}</td>
                         <td className="px-3 py-[13px] text-sm font-extrabold tabular-nums text-ink">{r.rating ?? <Dash />}</td>
                         <td className="px-3 py-[13px] text-sm font-extrabold tabular-nums text-ink">{r.recommend ?? <Dash />}</td>
                         <td className="px-3 py-[13px] text-[13px] text-slate-700">

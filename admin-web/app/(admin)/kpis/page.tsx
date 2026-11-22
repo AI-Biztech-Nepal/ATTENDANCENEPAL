@@ -9,7 +9,6 @@ import { otherCalendarSpan, parseMonthParam, visibleGroups } from '@/lib/kpi';
 import { useKpiOverview } from '@/lib/useKpiOverview';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import KpiOverviewTable from '@/components/kpi/KpiOverviewTable';
-import KpiTabs from '@/components/kpi/KpiTabs';
 import MonthStepper from '@/components/kpi/MonthStepper';
 
 // Every employee against every KPI for one month. Each KPI stands on its own: there is no total, no
@@ -57,8 +56,6 @@ function Kpis() {
 
   return (
     <div className="flex flex-col gap-4">
-      <KpiTabs />
-
       <div className="flex flex-wrap items-center gap-3">
         <MonthStepper
           label={label}

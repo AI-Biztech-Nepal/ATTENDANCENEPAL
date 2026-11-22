@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { usePageTitle } from '@/lib/pageTitle';
 import {
   KPI_IDS,
   KPI_INFO,
@@ -18,17 +17,15 @@ import {
   type SettingsDraft,
 } from '@/lib/kpiSettings';
 import { publishKpiSettings, useKpiSettings } from '@/lib/useKpiSettings';
-import KpiTabs from '@/components/kpi/KpiTabs';
 
 const CARD = 'rounded-xl border border-slate-200 bg-white shadow-sm';
 const INPUT = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm font-semibold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:bg-slate-50 disabled:text-slate-500';
 const COLUMNS = 'sm:grid-cols-[72px_minmax(0,1fr)_230px_190px]';
 
-// KPIs > Settings: what the company calls the people it serves, which KPIs it uses and what it calls them, and the
+// KPI settings (for the whole company: the same on every person's page): what the company calls the people it serves, which KPIs it uses and what it calls them, and the
 // numbers the KPIs are worked out with. Saved to kpi_settings; every KPI page reads it (useKpiSettings). Each KPI
 // still stands on its own: there is no total score, no ranking and no weighting to set here.
 export default function KpiSettingsPage() {
-  usePageTitle('KPIs');
   const { settings, loaded } = useKpiSettings();
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [draft, setDraft] = useState<SettingsDraft>(() => draftFromSettings(settings));
@@ -111,8 +108,6 @@ export default function KpiSettingsPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <KpiTabs />
-
       <p className="m-0 max-w-[760px] text-[13.5px] leading-relaxed text-slate-600">
         Every company is different. Choose which KPIs you use and what you call them. Each KPI is shown on its own: there is no total score, no ranking and no weighting.
       </p>

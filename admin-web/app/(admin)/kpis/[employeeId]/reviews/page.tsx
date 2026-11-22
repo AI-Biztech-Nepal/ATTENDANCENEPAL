@@ -1,14 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { fetchAll } from '@/lib/leaveBalance';
-import { usePageTitle } from '@/lib/pageTitle';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildMonth, formatAdDate, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
 import { nepalTodayIso } from '@/lib/shift';
 import { weekdayName } from '@/lib/taskSchedule';
-import { otherCalendarSpan } from '@/lib/kpi';
+import { otherCalendarSpan, parseMonthParam } from '@/lib/kpi';
+import { useMonthInUrl } from '@/lib/useMonthInUrl';
 import { useReviewsToGive } from '@/lib/useReviewsToGive';
 import {
   DEFAULT_PEER_LIMIT,
@@ -16,7 +17,6 @@ import {
   RELATION_LABEL,
   buildAssignments,
   describeAssignments,
-  forText,
   givenStatus,
   overlaps,
   roundProgress,
@@ -27,7 +27,6 @@ import {
   type ReviewRound,
   type ReviewToGive,
 } from '@/lib/colleagueReviews';
-import KpiTabs from '@/components/kpi/KpiTabs';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import GiveFeedbackDialog from '@/components/kpi/GiveFeedbackDialog';
 import ReviewRulesDialog from '@/components/kpi/ReviewRulesDialog';
@@ -37,19 +36,31 @@ const SHOWN = 8;
 const CHUNK = 500;
 
 // Colleague reviews: once a month the company asks colleagues for feedback on each other (peers, the manager, the
-// C-level executive, training and compliance). This page starts the month's round, shows who still owes feedback,
-// and holds the rules for who is asked. Employees give their feedback on their own portal; an admin or HR account
+// C-level executive, training and compliance). On one person's page this shows how far the reviews about them have
+// got and who still owes them. The month's round (start it, close it) and the rules for who is asked are for the
+// whole company and are here too. Employees give their feedback on their own portal; an admin or HR account
 // that is chosen as a giver gives it here, under "For you to give". The person reviewed never sees who said what.
 export default function ColleagueReviewsPage() {
-  usePageTitle('KPIs');
+  // useSearchParams needs a Suspense boundary, like the other pages that read the address.
+  return (
+    <Suspense fallback={null}>
+      <ReviewsSection />
+    </Suspense>
+  );
+}
+
+function ReviewsSection() {
+  const { employeeId } = useParams<{ employeeId: string }>();
+  const params = useSearchParams();
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
   const today = useMemo(nepalTodayIso, []);
 
-  const [anchor, setAnchor] = useState(todayAnchor);
+  const [anchor, setAnchor] = useState(() => parseMonthParam(params.get('date')) ?? todayAnchor());
   const { start, end } = useMemo(() => monthDateRange(system, anchor), [system, anchor]);
   const label = useMemo(() => buildMonth(system, anchor).label, [system, anchor]);
   const otherSpan = useMemo(() => otherCalendarSpan(system, start, end), [system, start, end]);
+  useMonthInUrl(start);
 
   const [people, setPeople] = useState<ReviewPerson[]>([]);
   const [peerLimit, setPeerLimit] = useState(DEFAULT_PEER_LIMIT);
@@ -132,9 +143,12 @@ export default function ColleagueReviewsPage() {
   const nameOf = useCallback((id: string) => people.find(p => p.id === id)?.name ?? 'Someone who has left', [people]);
   const dayText = (d: string) => `${weekdayName(d)} ${formatAdDate(d, system)}`;
 
-  const progress = roundProgress(reviews ?? []);
+  // This person's part of the round: the reviews about them.
+  const personName = people.find(p => p.id === employeeId)?.name ?? 'this person';
+  const about = useMemo(() => (reviews ?? []).filter(r => r.subject_id === employeeId), [reviews, employeeId]);
+  const progress = roundProgress(about);
   const pct = progress.total > 0 ? Math.round((progress.given / progress.total) * 100) : 0;
-  const lines = useMemo(() => stillToGive(reviews ?? [], nameOf, nameOf), [reviews, nameOf]);
+  const lines = useMemo(() => stillToGive(about, nameOf, nameOf), [about, nameOf]);
   const shownLines = showAll ? lines : lines.slice(0, SHOWN);
   const myItems = (mine.items ?? []).filter(i => round && i.round_id === round.id);
 
@@ -208,8 +222,6 @@ export default function ColleagueReviewsPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <KpiTabs />
-
       {loadError && (
         <p role="alert" className="m-0 rounded-xl border border-critical/30 bg-critical-bg px-4 py-3 text-sm font-semibold text-critical-text">
           {loadError}
@@ -272,7 +284,7 @@ export default function ColleagueReviewsPage() {
                 {reviews ? `${progress.given} of ${progress.total}` : '…'}
               </span>
               <span className="text-[13.5px] text-slate-600">
-                reviews given · {progress.waiting} still waiting · feedback is asked once a month
+                reviews about {personName} given · {progress.waiting} still waiting · feedback is asked once a month
                 {round.status === 'closed' ? ' · round closed' : round.due_on ? ` · please give by ${dayText(round.due_on)}` : ''}
               </span>
             </div>
@@ -296,16 +308,16 @@ export default function ColleagueReviewsPage() {
       {round && (
         <div className="flex flex-wrap items-start gap-5">
           <section aria-labelledby="still-heading" className={`${CARD} min-w-0 flex-[3_1_620px] overflow-hidden pt-5`}>
-            <h2 id="still-heading" className="m-0 mb-3 px-6 text-[17px] font-extrabold text-ink">
+            <h2 id="still-heading" className="m-0 px-6 text-[17px] font-extrabold text-ink">
               {round.status === 'closed' ? 'Not given' : 'Still to give'}
             </h2>
+            <p className="m-0 mb-3 mt-1 px-6 text-[13px] text-slate-600">Feedback about {personName}</p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[600px] border-collapse text-left">
                 <thead>
                   <tr className="border-y border-slate-200 bg-slate-50">
                     <th scope="col" className={`${TH} px-6`}>Giver</th>
                     <th scope="col" className={`${TH} px-3`}>Gives as</th>
-                    <th scope="col" className={`${TH} px-3`}>For</th>
                     <th scope="col" className={`${TH} px-3`}>Status</th>
                     <th scope="col" aria-label="Action" className={`${TH} px-6`} />
                   </tr>
@@ -313,12 +325,12 @@ export default function ColleagueReviewsPage() {
                 <tbody>
                   {reviews === null ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-600">Loading…</td>
+                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-600">Loading…</td>
                     </tr>
                   ) : lines.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-600">
-                        {progress.total === 0 ? 'This round asked for no reviews.' : 'Every review has been given.'}
+                      <td colSpan={4} className="px-6 py-8 text-center text-sm text-slate-600">
+                        {progress.total === 0 ? `This round asked for no reviews about ${personName}.` : 'Every review has been given.'}
                       </td>
                     </tr>
                   ) : (
@@ -326,7 +338,6 @@ export default function ColleagueReviewsPage() {
                       <tr key={`${l.reviewerId}|${l.relation}`} className="border-b border-slate-100 last:border-0">
                         <td className="px-6 py-[13px] text-[13.5px] font-bold text-ink">{nameOf(l.reviewerId)}</td>
                         <td className="px-3 py-[13px] text-[13px] text-slate-700">{RELATION_LABEL[l.relation]}</td>
-                        <td className="px-3 py-[13px] text-[13.5px] text-ink">{forText(l.pendingSubjects)}</td>
                         <td className="px-3 py-[13px] text-[13px] text-slate-700">{givenStatus(l)}</td>
                         <td className="px-6 py-[13px] text-right">
                           {open && l.reviewerId === me.employeeId && (
