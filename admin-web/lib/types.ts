@@ -255,6 +255,9 @@ export type Task = {
   points: number;
   status: TaskStatus;
   source: TaskSource;
+  /** The slot the task is scheduled for on `due_date` ("09:00:00"), or null when it has none yet. */
+  start_time: string | null;
+  end_time: string | null;
   due_date: string | null;
   work_notes: string | null;
   review_note: string | null;
