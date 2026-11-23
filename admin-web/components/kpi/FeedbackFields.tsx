@@ -1,6 +1,7 @@
 'use client';
 
 import DatePicker from '@/components/DatePicker';
+import { Question, circleClasses } from '@/components/kpi/FormParts';
 import { COMMENT_MAX, REFERENCE_MAX, type FeedbackDraft } from '@/lib/customerFeedback';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import type { Employee } from '@/lib/types';
@@ -28,31 +29,12 @@ function Circles({ from, to, value, onPick, name, words }: { from: number; to: n
             aria-pressed={on}
             aria-label={words ? `${n}, ${words[i]}` : String(n)}
             onClick={() => onPick(on ? '' : String(n))}
-            className={`flex h-10 w-10 items-center justify-center rounded-full border text-sm font-extrabold tabular-nums transition-colors ${
-              on ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-teal-700 hover:text-teal-700'
-            }`}
+            className={circleClasses(on)}
           >
             {n}
           </button>
         );
       })}
-    </div>
-  );
-}
-
-/** One numbered question of the form, in a box like the paper's. */
-function Question({ n, htmlFor, title, range, children }: { n: number; htmlFor: string; title: string; range?: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-3.5 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-      <label htmlFor={htmlFor} className="mb-2.5 flex items-start gap-2.5 text-[13px] font-extrabold leading-snug text-ink">
-        <span aria-hidden="true" className="mt-px flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-ink text-[11px] text-white">
-          {n}
-        </span>
-        <span>
-          {title} {range && <span className="font-medium text-slate-600">{range}</span>}
-        </span>
-      </label>
-      {children}
     </div>
   );
 }

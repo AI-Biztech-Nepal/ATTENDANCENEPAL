@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { RATING_WORDS, validateGive, COMMENT_MAX, type ReviewRelation, type ReviewToGive } from '@/lib/colleagueReviews';
+import { Question, circleClasses } from '@/components/kpi/FormParts';
 
 /** How the giver is described in the sentence above the question. */
 const GIVING_AS: Record<ReviewRelation, string> = {
@@ -15,7 +16,8 @@ const GIVING_AS: Record<ReviewRelation, string> = {
 const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
 
 /**
- * Gives colleague feedback, one person after another: a rating from 1 to 5 and an optional comment. `items` is the
+ * Gives colleague feedback, one person after another, on a form built like the customer review form (numbered questions in
+ * boxes, round numbers with a word under each): 1. a rating from 1 to 5, 2. an optional comment. `items` is the
  * list to walk through (the dialog keeps its own copy), `start` is where to begin. "Send" saves and moves on to the
  * next person; "Skip for now" moves on without saving. The person reviewed is never told who gave it. Used on the
  * employee portal and on the admin Colleague reviews page.
@@ -87,7 +89,7 @@ export default function GiveFeedbackDialog({ items, start = 0, onClose, onChange
         role="dialog"
         aria-modal="true"
         aria-labelledby="give-feedback-title"
-        className="my-auto w-full max-w-[560px] rounded-xl bg-white p-7 shadow-2xl"
+        className="my-auto w-full max-w-[560px] rounded-xl bg-white p-5 shadow-2xl sm:p-7"
       >
         <div className="flex items-center justify-between gap-3 text-[13px] font-bold text-slate-600">
           <span>Feedback · {item.round_title}</span>
@@ -104,39 +106,37 @@ export default function GiveFeedbackDialog({ items, start = 0, onClose, onChange
         <h2 id="give-feedback-title" className="mb-1.5 mt-5 text-[22px] font-extrabold tracking-tight text-ink">
           Feedback for {item.subject_name}
         </h2>
-        <p className="m-0 mb-5 text-[13.5px] leading-relaxed text-slate-600">
+        <p className="m-0 mb-4 text-[13.5px] leading-relaxed text-slate-600">
           You are giving this as <b className="text-ink">{GIVING_AS[item.relation]}</b>. Management reads your comment. {name} never sees your name.
         </p>
 
-        <fieldset className="m-0 mb-5 border-0 p-0">
-          <legend className="mb-2.5 p-0 text-[15px] font-extrabold text-ink">Overall, how was working with {name} this month?</legend>
-          <div className="grid grid-cols-5 gap-2">
-            {RATING_WORDS.map((word, i) => {
-              const n = i + 1;
-              const on = rating === n;
-              return (
-                <button
-                  key={n}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => {
-                    setRating(n);
-                    setError('');
-                  }}
-                  className={`min-h-[64px] rounded-[10px] border px-1 ${on ? 'border-accent bg-accent/10 text-ink shadow-[0_0_0_1px_rgb(var(--accent))]' : 'border-slate-300 bg-white text-ink hover:bg-slate-50'}`}
-                >
-                  <span className="block text-xl font-extrabold">{n}</span>
-                  <span className={`mt-0.5 block text-[11.5px] ${on ? 'font-semibold text-accent' : 'text-slate-600'}`}>{word}</span>
-                </button>
-              );
-            })}
-          </div>
-        </fieldset>
+        <Question n={1} id="give-feedback-q1" title={`Overall, how was working with ${name} this month?`} range="Rating, 1 to 5">
+          <fieldset aria-labelledby="give-feedback-q1" className="m-0 border-0 p-0">
+            <div className="grid grid-cols-5 gap-1.5">
+              {RATING_WORDS.map((word, i) => {
+                const n = i + 1;
+                const on = rating === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => {
+                      setRating(n);
+                      setError('');
+                    }}
+                    className="group flex min-h-[72px] flex-col items-center gap-1 rounded-[10px] px-0.5 py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                  >
+                    <span className={circleClasses(on, 'h-11 w-11 text-lg')}>{n}</span>
+                    <span className={`text-center text-[11.5px] leading-tight ${on ? 'font-extrabold text-teal-700' : 'text-slate-600'}`}>{word}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        </Question>
 
-        <div className="mb-5">
-          <label htmlFor="give-feedback-note" className="mb-1.5 block text-[13px] font-bold text-slate-700">
-            Anything to add? <span className="font-medium text-slate-600">(optional)</span>
-          </label>
+        <Question n={2} htmlFor="give-feedback-note" title="Anything to add?" range="Comment (optional)">
           <textarea
             id="give-feedback-note"
             rows={4}
@@ -146,13 +146,15 @@ export default function GiveFeedbackDialog({ items, start = 0, onClose, onChange
             className="w-full resize-y rounded-[10px] border border-slate-300 bg-white px-3 py-2.5 text-sm leading-normal text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
           />
           <p className="m-0 mt-1.5 text-xs text-slate-600">What went well, and what could be better. Be specific and kind.</p>
-        </div>
+        </Question>
 
         {error && (
           <p role="alert" className="m-0 mb-3 text-sm font-semibold text-critical-text">
             {error}
           </p>
         )}
+
+        <p className="m-0 mb-4 text-center text-[12.5px] text-slate-600">Thank you for taking the time to give honest feedback.</p>
 
         <div className="flex items-center justify-between gap-2.5">
           <button type="button" onClick={skip} disabled={saving} className="min-h-[44px] px-1 text-sm font-bold text-slate-600 hover:text-ink disabled:opacity-50">
