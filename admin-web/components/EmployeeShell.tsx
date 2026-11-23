@@ -19,6 +19,7 @@ const TABS = [
   { href: '/my-calendar', label: 'Calendar', icon: CalendarTabIcon },
   { href: '/my-payroll', label: 'Payroll', icon: PayrollTabIcon },
   { href: '/my-tasks', label: 'My Tasks', icon: TaskTabIcon },
+  { href: '/my-kpis', label: 'My KPIs', icon: KpiTabIcon },
   { href: '/my-profile', label: 'Profile', icon: ProfileTabIcon },
 ];
 // Feedback: what colleagues and customers said about this person, and giving feedback to colleagues. Everyone has it.
@@ -447,6 +448,13 @@ function TaskTabIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true">
       <rect x="4" y="4" width="16" height="16" rx="2" />
       <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 2.5 2.5L16 9" />
+    </svg>
+  );
+}
+function KpiTabIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 20V10M10 20V4M16 20v-7M22 20H2" />
     </svg>
   );
 }

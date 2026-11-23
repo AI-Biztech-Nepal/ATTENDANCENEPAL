@@ -49,4 +49,5 @@ export const MIGRATION = {
   forms: '20261122140000_customer_feedback.sql',
   reviews: '20261123140000_colleague_feedback.sql',
   own: '20261123120000_own_kpis.sql',
+  mine: '20261123160000_employee_kpi_read.sql',
 } as const;

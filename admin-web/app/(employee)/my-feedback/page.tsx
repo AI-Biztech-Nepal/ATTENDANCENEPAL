@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useMemo, useState } from 'react';
 import { usePageTitle } from '@/lib/pageTitle';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
 import { otherCalendarSpan } from '@/lib/kpi';
 import { useFeedbackGiving, useMyCustomerForms, useMyFeedback } from '@/lib/useFeedback';
+import { useMyEmployeeId } from '@/lib/useMyKpi';
 import { PageBody } from '@/components/employee/parts';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import { CustomerFormsReport, FeedbackReport } from '@/components/kpi/FeedbackReport';
@@ -24,23 +24,10 @@ export default function MyFeedbackPage() {
   const otherSpan = useMemo(() => otherCalendarSpan(system, start, end), [system, start, end]);
 
   // undefined = not read yet, null = this account is not linked to an employee.
-  const [employeeId, setEmployeeId] = useState<string | null | undefined>(undefined);
+  const employeeId = useMyEmployeeId();
   const [refresh, setRefresh] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const [note, setNote] = useState('');
-
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) return;
-      const { data } = await supabase.from('profiles').select('employee_id').eq('id', auth.user.id).single();
-      if (live) setEmployeeId((data?.employee_id as string | null) ?? null);
-    })();
-    return () => {
-      live = false;
-    };
-  }, []);
 
   const mine = useMyFeedback(start, end, refresh);
   const forms = useMyCustomerForms(employeeId ?? null, start, end, refresh);

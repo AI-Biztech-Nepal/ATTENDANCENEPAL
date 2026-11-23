@@ -1,6 +1,8 @@
 'use client';
 
+import { createContext, useContext } from 'react';
 import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
+import type { Explained } from '@/lib/kpiExplain';
 import { compare, compareServices, lowerFirst, type Change } from '@/lib/compareKpi';
 import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
 import { numberText } from '@/lib/ownKpi';
@@ -24,11 +26,44 @@ const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
  * is only out of reach. The note above the cards (LoadProblems) says why. */
 const UNREAD = { title: 'Could not be read', text: 'The note above says why.' };
 
-function Card({ eyebrow, name, className = '', footer, children }: {
+/**
+ * How the cards speak. On an admin's page for one person (the default) they talk ABOUT someone and tell the admin what to do ("Import
+ * your booking file", "Type in a form"). On the employee's own page (`mine`) they talk TO the person, say who fills things in, offer
+ * no way to change anything, link to the Feedback page, and can carry a plain-words "How is this worked out?" for each KPI.
+ */
+export type CardMode = {
+  mine: boolean;
+  /** A short explanation per KPI, shown under the card as "How is this worked out?". */
+  explain: Partial<Record<Explained, string>> | null;
+  /** Where "See your forms" and "See what colleagues said" go (the employee's Feedback page). */
+  feedbackHref: string | null;
+};
+const CardModeContext = createContext<CardMode>({ mine: false, explain: null, feedbackHref: null });
+export const CardModeProvider = CardModeContext.Provider;
+const useCardMode = () => useContext(CardModeContext);
+
+/** A small outlined link under a card, with an arrow ("See your forms") or a plus ("Type in a form"). */
+function CardLink({ href, children, plus = false }: { href: string; children: React.ReactNode; plus?: boolean }) {
+  return (
+    <Link
+      href={href}
+      className="mt-3 inline-flex min-h-[40px] items-center gap-1.5 self-start rounded-lg border border-teal-700 bg-white px-3.5 text-[12.5px] font-extrabold text-teal-700 hover:bg-teal-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+    >
+      <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d={plus ? 'M12 5v14M5 12h14' : 'M5 12h14M13 6l6 6-6 6'} />
+      </svg>
+      {children}
+    </Link>
+  );
+}
+
+function Card({ eyebrow, name, className = '', footer, explain, children }: {
   eyebrow: string;
   name: string;
   className?: string;
   footer?: React.ReactNode;
+  /** Plain words on how the number is worked out (the employee's own page). */
+  explain?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -36,6 +71,12 @@ function Card({ eyebrow, name, className = '', footer, children }: {
       <div className="text-[11.5px] font-extrabold uppercase tracking-wider text-slate-600">{eyebrow}</div>
       <h2 className="m-0 mb-3 mt-0.5 text-[15px] font-extrabold text-ink">{name}</h2>
       <div className="flex-1">{children}</div>
+      {explain && (
+        <details className="mt-3 text-xs text-slate-600">
+          <summary className="min-h-[28px] cursor-pointer select-none py-1 font-bold text-slate-700 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">How is this worked out?</summary>
+          <p className="m-0 mt-1 leading-relaxed">{explain}</p>
+        </details>
+      )}
       {footer && <div className="mt-auto pt-3 text-xs text-slate-600">{footer}</div>}
     </section>
   );
@@ -104,15 +145,17 @@ export function OwnKpiCard({ eyebrow, name, data, monthName, previousName, notSt
   monthName: string;
   previousName: string;
   notStarted: boolean;
-  /** Where "Type in the numbers" goes: the Your own KPIs section, on this KPI. */
-  typeInHref: string;
+  /** Where "Type in the numbers" goes: the Your own KPIs section, on this KPI. Not for the employee's own page. */
+  typeInHref?: string;
   className?: string;
 }) {
+  const mode = useCardMode();
   let body: React.ReactNode;
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (data.current == null) body = <Message title={`Nothing typed in for ${monthName}`} text="Type in this person's number for the month." />;
+  else if (data.current == null)
+    body = mode.mine ? <Message title={`Nothing typed in for you in ${monthName}`} text="Your admin types this number in each month." /> : <Message title={`Nothing typed in for ${monthName}`} text="Type in this person's number for the month." />;
   else {
     body = (
       <div className="flex items-baseline gap-3">
@@ -126,18 +169,12 @@ export function OwnKpiCard({ eyebrow, name, data, monthName, previousName, notSt
       <Compare change={compare(data.current, data.previous, { name: previousName, unit: 'number' })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.own}>
       {body}
-      {!notStarted && (
-        <Link
-          href={typeInHref}
-          className="mt-3 inline-flex min-h-[40px] items-center gap-1.5 self-start rounded-lg border border-teal-700 bg-white px-3.5 text-[12.5px] font-extrabold text-teal-700 hover:bg-teal-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-        >
-          <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
+      {!notStarted && typeInHref && !mode.mine && (
+        <CardLink href={typeInHref} plus>
           Type in the numbers
-        </Link>
+        </CardLink>
       )}
     </Card>
   );
@@ -157,6 +194,7 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
   notStarted: boolean;
   className?: string;
 }) {
+  const mode = useCardMode();
   let body: React.ReactNode;
   if (loading || !current) body = <Message title="Loading…" />;
   else if (!current.tracked) body = <Message title="Not tracked" text="This person is excused from attendance." />;
@@ -212,7 +250,7 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
     }
   }
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.attendance}>
       {body}
     </Card>
   );
@@ -233,13 +271,19 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
   notStarted: boolean;
   className?: string;
 }) {
+  const mode = useCardMode();
   const total = data.dates.length;
   const partial = bars.some(b => b.partial);
   let body: React.ReactNode;
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (!data.monthHasData) body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
+  else if (!data.monthHasData)
+    body = mode.mine ? (
+      <Message title={`No services for you in ${monthName}`} text="Services come from the booking file your company imports." />
+    ) : (
+      <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />
+    );
   else {
     body = (
       <>
@@ -267,7 +311,7 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
       </div>
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.services}>
       {body}
     </Card>
   );
@@ -286,6 +330,7 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
   notStarted: boolean;
   className?: string;
 }) {
+  const mode = useCardMode();
   const { words } = useKpiSettings();
   const cur = data.current;
   let body: React.ReactNode;
@@ -319,7 +364,7 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
       <Compare change={compare(currentPct, previousPct, { name: previousName, unit: 'points', shown: `${previousPct}%` })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.rebooking}>
       {body}
     </Card>
   );
@@ -342,6 +387,7 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
   notStarted: boolean;
   className?: string;
 }) {
+  const mode = useCardMode();
   const { words } = useKpiSettings();
   const cur = utilisation(data.time, presentDays, hoursPerDay);
   const prev = utilisation(data.previousTime, previousPresentDays, hoursPerDay);
@@ -349,8 +395,18 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading || attendanceLoading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (data.timeReason === 'none') body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
-  else if (data.timeReason === 'notime') body = <Message title="No time in the file" text='Choose a "Time with the customer" column when you import, so the hours can be worked out.' />;
+  else if (data.timeReason === 'none')
+    body = mode.mine ? (
+      <Message title={`No services for you in ${monthName}`} text="Services come from the booking file your company imports." />
+    ) : (
+      <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />
+    );
+  else if (data.timeReason === 'notime')
+    body = mode.mine ? (
+      <Message title="No time for your services" text="The booking file does not say how long each service took, so the hours cannot be worked out." />
+    ) : (
+      <Message title="No time in the file" text='Choose a "Time with the customer" column when you import, so the hours can be worked out.' />
+    );
   else if (!cur) body = <Message title={`No services with a time in ${monthName}`} />;
   else {
     body = (
@@ -373,7 +429,7 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
       <Compare change={compare(cur.pct, prev.pct, { name: previousName, unit: 'points', shown: `${prev.pct}%` })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.utilisation}>
       {body}
     </Card>
   );
@@ -390,17 +446,23 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
   monthName: string;
   previousName: string;
   notStarted: boolean;
-  /** Where "Type in a form" goes: this person's Customer feedback section. */
-  typeInHref: string;
+  /** Where "Type in a form" goes: this person's Customer feedback section. Not for the employee's own page. */
+  typeInHref?: string;
   className?: string;
 }) {
+  const mode = useCardMode();
   const { words } = useKpiSettings();
   const state = feedbackState(data.current, minForms);
   let body: React.ReactNode;
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (!data.monthHasForms) body = <Message title="No forms typed in for this month" text={words.t('Type in the paper forms customers filled in, in the Customer feedback section.')} />;
+  else if (!data.monthHasForms)
+    body = mode.mine ? (
+      <Message title={`No customer forms for you in ${monthName}`} text={words.t('Forms are typed in by your admin from the paper forms customers fill in.')} />
+    ) : (
+      <Message title="No forms typed in for this month" text={words.t('Type in the paper forms customers filled in, in the Customer feedback section.')} />
+    );
   else if (state.kind === 'none') body = <Message title={`No forms typed in for this employee in ${monthName}`} />;
   else if (state.kind === 'few') {
     body = <Message title="Not enough forms yet" text={`${state.count} of ${state.need} ${formWord(state.need)} typed in. The average shows once there are ${state.need}, so one or two forms do not stand for a whole month.`} />;
@@ -438,17 +500,14 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
       <Compare change={compare(state.summary.average, previous.summary.average, { name: previousName, unit: 'rating' })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.feedback}>
       {body}
-      <Link
-        href={typeInHref}
-        className="mt-3 inline-flex min-h-[40px] items-center gap-1.5 self-start rounded-lg border border-teal-700 bg-white px-3.5 text-[12.5px] font-extrabold text-teal-700 hover:bg-teal-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-      >
-        <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" aria-hidden="true">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        Type in a form
-      </Link>
+      {typeInHref && !mode.mine && (
+        <CardLink href={typeInHref} plus>
+          Type in a form
+        </CardLink>
+      )}
+      {mode.mine && mode.feedbackHref && <CardLink href={mode.feedbackHref}>See your forms</CardLink>}
     </Card>
   );
 }
@@ -466,6 +525,7 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
   notStarted: boolean;
   className?: string;
 }) {
+  const mode = useCardMode();
   const { words } = useKpiSettings();
   const state = npsState(data.nps, minForms);
   let body: React.ReactNode;
@@ -473,7 +533,12 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (!data.monthHasNps) {
-    body = (
+    body = mode.mine ? (
+      <Message
+        title={data.monthHasForms ? `No recommend numbers for you in ${monthName}` : `No customer forms for you in ${monthName}`}
+        text={words.t('Forms are typed in by your admin from the paper forms customers fill in.')}
+      />
+    ) : (
       <Message
         title={data.monthHasForms ? 'No recommend numbers typed in for this month' : 'No forms typed in for this month'}
         text={words.t('Type in the paper forms customers filled in, in the Customer feedback section.')}
@@ -523,7 +588,7 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
       <Compare change={compare(state.summary.score, previous.summary.score, { name: previousName, unit: 'points', shown: scoreText(previous.summary.score) })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.nps}>
       {body}
     </Card>
   );
@@ -547,17 +612,18 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
   notStarted: boolean;
   className?: string;
 }) {
+  const mode = useCardMode();
   const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label, relation: RELATION_OF_KPI[c.id as keyof typeof RELATION_OF_KPI] }));
-  const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once one is in. The person never sees who said what.`;
+  const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once one is in. ${mode.mine ? 'You never see' : 'The person never sees'} who said what.`;
   if (notStarted || data.loading) {
     return (
-      <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
+      <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer} explain={mode.explain?.colleagues}>
         <Message title={notStarted ? 'Nothing to show yet' : 'Loading…'} text={notStarted ? 'This month has not started.' : undefined} />
       </Card>
     );
   }
   return (
-    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
+    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer} explain={mode.explain?.colleagues}>
       <div className="flex flex-col">
         <div aria-hidden="true" className="hidden flex-wrap items-center gap-x-6 sm:flex">
           <div className="sm:w-[250px]" />
@@ -614,6 +680,7 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
           );
         })}
       </div>
+      {mode.mine && mode.feedbackHref && <CardLink href={mode.feedbackHref}>See what colleagues said, and give feedback</CardLink>}
     </Card>
   );
 }
