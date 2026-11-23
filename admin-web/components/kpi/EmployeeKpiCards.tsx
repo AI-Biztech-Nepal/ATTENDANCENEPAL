@@ -70,7 +70,8 @@ function Card({ eyebrow, name, className = '', footer, explain, children }: {
     <section aria-label={name} className={`flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
       <div className="text-[11.5px] font-extrabold uppercase tracking-wider text-slate-600">{eyebrow}</div>
       <h2 className="m-0 mb-3 mt-0.5 text-[15px] font-extrabold text-ink">{name}</h2>
-      <div className="flex-1">{children}</div>
+      {/* A column, so a message that fills the card and a link after it stack instead of the link spilling over what is below. */}
+      <div className="flex flex-1 flex-col">{children}</div>
       {explain && (
         <details className="mt-3 text-xs text-slate-600">
           <summary className="min-h-[28px] cursor-pointer select-none py-1 font-bold text-slate-700 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">How is this worked out?</summary>
@@ -127,7 +128,7 @@ function Compare({ change, label }: { change: Change; label?: string }) {
 
 function Message({ title, text }: { title: string; text?: string }) {
   return (
-    <div className="flex h-full min-h-[120px] flex-col items-center justify-center gap-1 py-4 text-center">
+    <div className="flex min-h-[120px] flex-1 flex-col items-center justify-center gap-1 py-4 text-center">
       <div className="text-sm font-bold text-slate-700">{title}</div>
       {text && <div className="text-xs text-slate-600">{text}</div>}
     </div>
