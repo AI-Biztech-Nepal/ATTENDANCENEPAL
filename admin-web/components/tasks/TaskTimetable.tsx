@@ -134,7 +134,7 @@ export default function TaskTimetable({
 
             {rows.map(({ emp, placements, visible, booked, onLeave }, rowIndex) => (
               <div key={emp.id} className={`grid min-h-[84px] grid-cols-[256px_minmax(0,1fr)] border-slate-200 ${rowIndex === 0 ? '' : 'border-t'}`}>
-                <div className="group relative flex items-center gap-3 px-5 py-3">
+                <div className="flex items-center gap-3 px-5 py-3">
                   <Avatar name={emp.name} photoUrl={emp.profile_photo_url} className="h-9 w-9 text-[13px]" />
                   <div className="min-w-0 flex-1">
                     <div className={`truncate text-sm font-bold ${onLeave ? 'text-slate-600' : 'text-ink'}`}>{emp.name}</div>
@@ -142,16 +142,6 @@ export default function TaskTimetable({
                       {emp.department ?? 'No department'} · {onLeave ? 'on leave' : `${formatDuration(booked)} of ${DAY_HOURS} h booked`}
                     </div>
                   </div>
-                  {!onLeave && (
-                    <button
-                      type="button"
-                      onClick={() => onAssign(emp.id, null)}
-                      aria-label={`Assign a task to ${emp.name}`}
-                      className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 opacity-0 hover:bg-slate-100 focus-visible:opacity-100 group-hover:opacity-100"
-                    >
-                      <PlusIcon className="h-4 w-4" />
-                    </button>
-                  )}
                 </div>
 
                 {onLeave ? (
@@ -320,14 +310,6 @@ function TimetableBlock({
         <span className="truncate">{statusText}</span>
       </span>
     </button>
-  );
-}
-
-function PlusIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" className={className} aria-hidden="true">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
   );
 }
 
