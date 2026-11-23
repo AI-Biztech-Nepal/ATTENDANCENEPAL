@@ -9,11 +9,12 @@ export type MonthRange = { start: string; end: string };
 
 /** How many services each person performed in the month `start`..`end`. `counts` is null while there is nothing to
  * count: no booking file covers the month (nobody has a service in it), so the list shows dashes, not zeros. */
-export function useServiceCounts(start: string, end: string): { loading: boolean; counts: Map<string, number> | null } {
+export function useServiceCounts(start: string, end: string, enabled = true): { loading: boolean; counts: Map<string, number> | null } {
   const key = `${start}|${end}`;
   const [done, setDone] = useState<{ key: string; counts: Map<string, number> | null } | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     // A table that is not there yet (before the import migration) gives no rows, which reads as "nothing imported".
     fetchAll<{ employee_id: string }>((a, b) =>
@@ -26,8 +27,9 @@ export function useServiceCounts(start: string, end: string): { loading: boolean
     };
     // `key` carries start and end.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, enabled]);
 
+  if (!enabled) return { loading: false, counts: null };
   return done && done.key === key ? { loading: false, counts: done.counts } : { loading: true, counts: null };
 }
 
@@ -42,11 +44,12 @@ export type PersonServices = {
 };
 
 /** One person's services for the month `cur` and the month `prev` before it. */
-export function usePersonServices(employeeId: string, cur: MonthRange, prev: MonthRange): PersonServices {
+export function usePersonServices(employeeId: string, cur: MonthRange, prev: MonthRange, enabled = true): PersonServices {
   const key = `${employeeId}|${cur.start}|${cur.end}|${prev.start}|${prev.end}`;
   const [done, setDone] = useState<{ key: string; value: Omit<PersonServices, 'loading'> } | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     const monthCount = async (r: MonthRange) => {
       const { count } = await supabase.from('service_records').select('id', { count: 'exact', head: true }).gte('performed_on', r.start).lte('performed_on', r.end);
@@ -82,7 +85,8 @@ export function usePersonServices(employeeId: string, cur: MonthRange, prev: Mon
     };
     // `key` carries every value used here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, enabled]);
 
+  if (!enabled) return { loading: false, dates: [], monthHasData: false, previousTotal: null };
   return done && done.key === key ? { loading: false, ...done.value } : { loading: true, dates: [], monthHasData: false, previousTotal: null };
 }

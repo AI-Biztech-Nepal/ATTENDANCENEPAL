@@ -4,6 +4,9 @@ import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
 import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
 import { serviceWord, type WeekBar } from '@/lib/serviceKpi';
 import type { PersonServices } from '@/lib/useServiceKpi';
+import { rebookingPct } from '@/lib/rebookingKpi';
+import type { PersonRebooking } from '@/lib/useRebookingKpi';
+import { useKpiSettings } from '@/lib/useKpiSettings';
 import { Bars, KPI_COLORS, Pie, Ring } from './KpiCharts';
 
 const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
@@ -25,10 +28,10 @@ function Card({ eyebrow, name, className = '', footer, children }: {
   );
 }
 
-function LegendRow({ color, label, value }: { color: string; label: string; value: string }) {
+function LegendRow({ color, label, value, bordered = false }: { color: string; label: string; value: string; bordered?: boolean }) {
   return (
     <div className="flex items-center gap-2 text-[13px] text-slate-700">
-      <i className="block h-3 w-3 shrink-0 rounded-[3px]" style={{ background: color }} />
+      <i className={`block h-3 w-3 shrink-0 rounded-[3px] ${bordered ? 'border border-slate-400' : ''}`} style={{ background: color }} />
       <span className="flex-1">{label}</span>
       <b className="tabular-nums text-ink">{value}</b>
     </div>
@@ -162,6 +165,53 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
   const footer = [showPrevious ? `Whole of ${previousName}: ${data.previousTotal}` : '', partial && total > 0 ? 'The pale bar is the week so far.' : ''].filter(Boolean).join('. ');
   return (
     <Card eyebrow={eyebrow} name={name} className={className} footer={footer ? `${footer}${footer.endsWith('.') ? '' : '.'}` : null}>
+      {body}
+    </Card>
+  );
+}
+
+/** Rebooking rate: a ring of the share of this person's customers who booked again, with the two numbers beside it.
+ * Under it, last month's rate. The empty states say what is missing (nothing imported, no customer codes, no customers). */
+export function RebookingCard({ eyebrow, name, data, windowDays, monthName, previousName, notStarted, className = '' }: {
+  eyebrow: string;
+  name: string;
+  data: PersonRebooking;
+  windowDays: number;
+  /** The month on screen without its year ("November", "Mangsir"). */
+  monthName: string;
+  previousName: string;
+  notStarted: boolean;
+  className?: string;
+}) {
+  const { words } = useKpiSettings();
+  const cur = data.current;
+  let body: React.ReactNode;
+  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  else if (data.loading) body = <Message title="Loading…" />;
+  else if (data.reason === 'none') body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
+  else if (data.reason === 'nocodes') body = <Message title={words.t('No customer codes in the file')} text={words.t('Choose a "Customer code" column when you import, so we can tell who came back.')} />;
+  else if (!cur) body = <Message title={words.t(`No customers served in ${monthName}`)} />;
+  else {
+    const pct = rebookingPct(cur) ?? 0;
+    body = (
+      <>
+        <div className="flex justify-center">
+          <Ring pct={pct} size={156} stroke={16} aria={`${pct} percent: ${cur.back} of ${cur.served} ${cur.served === 1 ? words.one : words.many} booked again`} big={`${pct}%`} small="booked again" />
+        </div>
+        <div className="mt-3.5 flex flex-col gap-2">
+          <LegendRow color={KPI_COLORS.accent} label="Booked again" value={String(cur.back)} />
+          <LegendRow color={KPI_COLORS.track} bordered label="Not yet" value={String(cur.served - cur.back)} />
+        </div>
+        <p className="m-0 mt-2.5 text-xs leading-normal text-slate-600">
+          {words.t(`Out of ${cur.served} ${cur.served === 1 ? 'customer' : 'customers'} served. A customer counts as booked again if they come back within ${windowDays} days of a visit. Recent visits may still come back.`)}
+        </p>
+      </>
+    );
+  }
+  const previousPct = data.previous ? rebookingPct(data.previous) : null;
+  const footer = !notStarted && !data.loading && !data.reason && previousPct != null ? `${previousName}: ${previousPct}%` : null;
+  return (
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
     </Card>
   );

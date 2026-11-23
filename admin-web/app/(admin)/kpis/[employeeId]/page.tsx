@@ -10,10 +10,11 @@ import { useEmployeeKpi } from '@/lib/useEmployeeKpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useMonthInUrl } from '@/lib/useMonthInUrl';
 import { usePersonServices } from '@/lib/useServiceKpi';
+import { usePersonRebooking } from '@/lib/useRebookingKpi';
 import { weekBars } from '@/lib/serviceKpi';
 import Avatar from '@/components/Avatar';
 import MonthStepper from '@/components/kpi/MonthStepper';
-import { AttendanceCard, ColleagueCard, PendingCard, ServicesCard } from '@/components/kpi/EmployeeKpiCards';
+import { AttendanceCard, ColleagueCard, PendingCard, RebookingCard, ServicesCard } from '@/components/kpi/EmployeeKpiCards';
 
 // One person's KPIs: the Overview section of their pages (the layout has the way back, their name and the other
 // sections). It is opened by clicking a name on the KPI list, which also passes the month it was looking at
@@ -45,7 +46,7 @@ function EmployeeKpi() {
 
   useMonthInUrl(start);
   const { loading, error, notFound, employee, current, previous: previousKpi, today } = useEmployeeKpi(employeeId, { start, end }, previous);
-  const serviceData = usePersonServices(employeeId, { start, end }, previous);
+  const serviceData = usePersonServices(employeeId, { start, end }, previous, start <= today);
   const bars = useMemo(() => weekBars(serviceData.dates, start, end, today, system), [serviceData.dates, start, end, today, system]);
   // "November" / "Mangsir": the month's name without its year.
   const monthName = label.split(' ')[0];
@@ -58,6 +59,7 @@ function EmployeeKpi() {
   const services = group('services');
   const colleagues = group('colleagues');
   const attendance = group('attendance');
+  const rebookingData = usePersonRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
 
   if (notFound || error) {
     return (
@@ -116,7 +118,17 @@ function EmployeeKpi() {
             notStarted={start > today}
           />
         )}
-        {services && on('rebooking') && <PendingCard group={services} name={kpiLabel('rebooking', settings)} ring />}
+        {services && on('rebooking') && (
+          <RebookingCard
+            eyebrow={services.title}
+            name={kpiLabel('rebooking', settings)}
+            data={rebookingData}
+            windowDays={settings.repeatDays}
+            monthName={monthName}
+            previousName={previousName}
+            notStarted={start > today}
+          />
+        )}
         {services && on('utilisation') && <PendingCard group={services} name={kpiLabel('utilisation', settings)} ring />}
         {customers && on('feedback') && <PendingCard group={customers} name={kpiLabel('feedback', settings)} />}
         {customers && on('nps') && <PendingCard group={customers} name={kpiLabel('nps', settings)} ring />}

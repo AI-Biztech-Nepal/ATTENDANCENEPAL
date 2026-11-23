@@ -4,6 +4,8 @@ import Link from 'next/link';
 import Avatar from '@/components/Avatar';
 import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
 import { serviceWord } from '@/lib/serviceKpi';
+import { rebookingPct, type Rebooking } from '@/lib/rebookingKpi';
+import type { RebookingReason } from '@/lib/useRebookingKpi';
 import type { Employee } from '@/lib/types';
 
 type Props = {
@@ -13,6 +15,9 @@ type Props = {
   attendance: Map<string, AttendanceKpi>;
   /** Services performed in the month, per person. `counts` is null when no booking file covers the month. */
   services: { loading: boolean; counts: Map<string, number> | null };
+  /** Rebooking per person: of the customers served, how many booked again within `windowDays`. */
+  rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason };
+  windowDays: number;
   loading: boolean;
   /** The month being shown has not begun, so there is nothing to count yet. */
   notStarted: boolean;
@@ -23,7 +28,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place; the
  * groups themselves are named in the "Not connected yet" card under the table). Nothing is added up or
  * compared: a dash means there is nothing to show yet. */
-export default function KpiOverviewTable({ groups, employees, attendance, services, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, rebooking, windowDays, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -88,6 +93,8 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                           <AttendanceCell key={c.id} kpi={kpi} notStarted={notStarted} />
                         ) : c.id === 'services' ? (
                           <ServicesCell key={c.id} group={g} first={i === 0} loading={services.loading} counts={services.counts} employeeId={emp.id} notStarted={notStarted} />
+                        ) : c.id === 'rebooking' ? (
+                          <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} employeeId={emp.id} notStarted={notStarted} windowDays={windowDays} />
                         ) : (
                           <EmptyCell key={c.id} group={g} first={i === 0} />
                         )
@@ -158,6 +165,33 @@ function ServicesCell({ group, first, loading, counts, employeeId, notStarted }:
   return (
     <td className={cell} title={`${n} ${serviceWord(n)}`}>
       <div className="text-sm font-extrabold tabular-nums text-ink">{n}</div>
+    </td>
+  );
+}
+
+/** Of the customers this person served in the month, the share who booked again, with the numbers under it. A dash says
+ * why there is nothing to show (not imported, no customer codes, no customers) for screen readers. */
+function RebookingCell({ group, first, loading, byEmployee, reason, employeeId, notStarted, windowDays }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; employeeId: string; notStarted: boolean; windowDays: number }) {
+  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const r = byEmployee?.get(employeeId);
+  const pct = r ? rebookingPct(r) : null;
+  if (loading || notStarted || reason || !r || pct == null) {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : reason === 'nocodes' ? 'No customer codes' : reason === 'none' ? group.emptyNote : 'No customers';
+    return (
+      <td className={cell}>
+        <div className="text-[15px] font-bold text-slate-600">
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">{why}</span>
+        </div>
+      </td>
+    );
+  }
+  return (
+    <td className={cell} title={`${r.back} of ${r.served} booked again within ${windowDays} days`}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">{pct}%</div>
+      <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
+        {r.back} of {r.served}
+      </div>
     </td>
   );
 }

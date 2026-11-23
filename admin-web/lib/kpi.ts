@@ -53,7 +53,7 @@ export const KPI_GROUPS: KpiGroup[] = [
     source: 'From the booking import',
     columns: [
       { id: 'services', label: 'Services performed', width: 100, connected: true },
-      { id: 'rebooking', label: 'Rebooking rate', width: 100, connected: false },
+      { id: 'rebooking', label: 'Rebooking rate', width: 100, connected: true },
       { id: 'utilisation', label: 'Hour utilisation per day', width: 120, connected: false },
     ],
     connected: false,
