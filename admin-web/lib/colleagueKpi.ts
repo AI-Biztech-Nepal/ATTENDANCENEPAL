@@ -1,20 +1,20 @@
 import type { KpiId } from './kpiSettings';
-import type { ReviewRelation } from './colleagueReviews';
+import type { FeedbackRelation } from './colleagueFeedback';
 
 // KPIs 7 to 10, colleague feedback: the average rating (1 to 5) a person got from their peers, from their immediate
-// manager, from the C-level executive and from training and compliance, in the month's round of colleague reviews.
+// manager, from the C-level executive and from training and compliance, in the feedback colleagues gave during the month.
 // Plain code with no network, so it can be tested on its own; useColleagueKpi.ts reads the rows.
 
-/** A review in a round, as far as the KPIs go. `rating` is empty until it is given. */
-export type ReviewRow = { subject_id: string; relation: ReviewRelation; rating: number | null };
+/** A piece of feedback, as far as the KPIs go. */
+export type FeedbackRow = { subject_id: string; relation: FeedbackRelation; rating: number | null };
 
-/** One role's part of a person's month: how many reviews were asked, how many are given, and the average of the given ones. */
-export type RoleSummary = { asked: number; given: number; average: number | null };
+/** One kind of colleague's part of a person's month: how many gave feedback, and the average of what they gave. */
+export type RoleSummary = { given: number; average: number | null };
 
-export type Roles = Record<ReviewRelation, RoleSummary>;
+export type Roles = Record<FeedbackRelation, RoleSummary>;
 
 /** The four KPIs and the kind of colleague each one asks. */
-export const RELATION_OF_KPI: Record<'peers' | 'manager' | 'clevel' | 'training', ReviewRelation> = {
+export const RELATION_OF_KPI: Record<'peers' | 'manager' | 'clevel' | 'training', FeedbackRelation> = {
   peers: 'peer',
   manager: 'manager',
   clevel: 'c_level',
@@ -24,36 +24,33 @@ export const RELATION_OF_KPI: Record<'peers' | 'manager' | 'clevel' | 'training'
 export const COLLEAGUE_KPIS = Object.keys(RELATION_OF_KPI) as (keyof typeof RELATION_OF_KPI)[];
 export const isColleagueKpi = (id: KpiId): id is keyof typeof RELATION_OF_KPI => id in RELATION_OF_KPI;
 
-/** Peers must give at least this many reviews before their average shows (fewer if fewer were asked at all). */
+/** Peers must have given at least this much feedback before their average shows, so one or two do not stand for everybody. */
 export const PEER_MIN = 3;
 
 const noRoles = (): Roles => ({
-  peer: { asked: 0, given: 0, average: null },
-  manager: { asked: 0, given: 0, average: null },
-  c_level: { asked: 0, given: 0, average: null },
-  training: { asked: 0, given: 0, average: null },
+  peer: { given: 0, average: null },
+  manager: { given: 0, average: null },
+  c_level: { given: 0, average: null },
+  training: { given: 0, average: null },
 });
 
 const validRating = (r: number | null): r is number => r != null && Number.isInteger(r) && r >= 1 && r <= 5;
 
-/** Each person's four roles from the reviews of a round. A person nobody was asked about has no entry. */
-export function summariseReviews(rows: ReviewRow[]): Map<string, Roles> {
-  const sums = new Map<string, Record<ReviewRelation, number>>();
+/** Each person's four kinds from the month's feedback. A person nobody gave feedback has no entry. */
+export function summariseFeedback(rows: FeedbackRow[]): Map<string, Roles> {
+  const sums = new Map<string, Record<FeedbackRelation, number>>();
   const out = new Map<string, Roles>();
   for (const r of rows) {
+    if (!validRating(r.rating)) continue;
     const roles = out.get(r.subject_id) ?? noRoles();
     const sum = sums.get(r.subject_id) ?? { peer: 0, manager: 0, c_level: 0, training: 0 };
-    const role = roles[r.relation];
-    role.asked += 1;
-    if (validRating(r.rating)) {
-      role.given += 1;
-      sum[r.relation] += r.rating;
-    }
+    roles[r.relation].given += 1;
+    sum[r.relation] += r.rating;
     out.set(r.subject_id, roles);
     sums.set(r.subject_id, sum);
   }
   for (const [id, roles] of out) {
-    for (const relation of Object.keys(roles) as ReviewRelation[]) {
+    for (const relation of Object.keys(roles) as FeedbackRelation[]) {
       const role = roles[relation];
       role.average = role.given > 0 ? Math.round((sums.get(id)![relation] / role.given) * 10) / 10 : null;
     }
@@ -61,18 +58,17 @@ export function summariseReviews(rows: ReviewRow[]): Map<string, Roles> {
   return out;
 }
 
-/** How many reviews a role needs before its average shows: three from peers (so one or two do not stand for everybody),
- * one from each of the others; and never more than were asked. */
-export const neededReviews = (relation: ReviewRelation, asked: number) => Math.min(relation === 'peer' ? PEER_MIN : 1, asked);
+/** How much feedback a kind needs before its average shows: three from peers, one from each of the others. */
+export const neededFeedback = (relation: FeedbackRelation) => (relation === 'peer' ? PEER_MIN : 1);
 
-/** Nobody was asked ('none'), some were but not enough have answered ('few'), or the average ('ok'). */
-export type RoleState = { kind: 'none' } | { kind: 'few'; given: number; need: number; asked: number } | { kind: 'ok'; average: number; given: number; asked: number };
+/** Nobody of that kind gave any ('none'), some did but not enough yet ('few'), or the average ('ok'). */
+export type RoleState = { kind: 'none' } | { kind: 'few'; given: number; need: number } | { kind: 'ok'; average: number; given: number };
 
-export function roleState(summary: RoleSummary | null | undefined, relation: ReviewRelation): RoleState {
-  if (!summary || summary.asked === 0) return { kind: 'none' };
-  const need = neededReviews(relation, summary.asked);
-  if (summary.given < need || summary.average == null) return { kind: 'few', given: summary.given, need, asked: summary.asked };
-  return { kind: 'ok', average: summary.average, given: summary.given, asked: summary.asked };
+export function roleState(summary: RoleSummary | null | undefined, relation: FeedbackRelation): RoleState {
+  if (!summary || summary.given === 0) return { kind: 'none' };
+  const need = neededFeedback(relation);
+  if (summary.given < need || summary.average == null) return { kind: 'few', given: summary.given, need };
+  return { kind: 'ok', average: summary.average, given: summary.given };
 }
 
 export const reviewWord = (n: number) => (n === 1 ? 'review' : 'reviews');

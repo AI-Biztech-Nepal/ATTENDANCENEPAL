@@ -12,7 +12,6 @@ import ConfigWarning from './ConfigWarning';
 import CalendarSystemSwitch from './CalendarSystemSwitch';
 import EmployeeBell from './EmployeeBell';
 import { useMyNotifications } from '@/lib/employeeNotifications';
-import { useReviewsToGive } from '@/lib/useReviewsToGive';
 import BodyFontClass from './BodyFontClass';
 
 const TABS = [
@@ -22,7 +21,7 @@ const TABS = [
   { href: '/my-tasks', label: 'My Tasks', icon: TaskTabIcon },
   { href: '/my-profile', label: 'Profile', icon: ProfileTabIcon },
 ];
-// Colleague feedback to give. It is in the menu only while this person is asked for some (or is on that page).
+// Feedback: what colleagues and customers said about this person, and giving feedback to colleagues. Everyone has it.
 const FEEDBACK_TAB = { href: '/my-feedback', label: 'Feedback', icon: FeedbackTabIcon };
 
 /**
@@ -60,7 +59,6 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
   const [isHr, setIsHr] = useState(false);
   // One fetch for both headers (phone and computer); reloaded as the person moves around the portal.
   const notifications = useMyNotifications(pathname);
-  const feedbackToGive = useReviewsToGive(pathname);
 
   useEffect(() => {
     if (!supabaseConfigured) return;
@@ -126,7 +124,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
       .join('')
       .toUpperCase() || 'E';
   const isHome = pathname === '/checkin';
-  const tabs = (feedbackToGive.items?.length ?? 0) > 0 || pathname === FEEDBACK_TAB.href ? [...TABS.slice(0, -1), FEEDBACK_TAB, TABS[TABS.length - 1]] : TABS;
+  const tabs = [...TABS.slice(0, -1), FEEDBACK_TAB, TABS[TABS.length - 1]];
   const account = { name, designation, photoUrl, initials, isHr, onSignOut: handleSignOut };
 
   return (

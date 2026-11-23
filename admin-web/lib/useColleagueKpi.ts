@@ -2,19 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { MIGRATION, fetchAllChecked, loadProblem } from './kpiLoad';
-import { summariseReviews, type ReviewRow, type Roles } from './colleagueKpi';
+import { MIGRATION, fetchAllChecked } from './kpiLoad';
+import { summariseFeedback, type FeedbackRow, type Roles } from './colleagueKpi';
+import type { FeedbackRelation } from './colleagueFeedback';
 import type { MonthRange } from './useServiceKpi';
 
-type Round = { id: string; period_start: string; period_end: string };
+const WHAT = 'the colleague feedback';
 
-const WHAT = 'the colleague reviews';
-
-/** Everyone's colleague feedback for the month `start`..`end`: the reviews of the round that covers exactly that month (the
- * round the Colleague reviews section starts for it). `bySubject` is null when the month has no round, or its round asked
- * for no reviews. A round that is still open counts what has been given so far. `error` is set when the reviews could not
- * be read (a table that is not there yet, a refused read): not the same as "no round". `enabled` holds the work back (for
- * a month that has not begun, or when all four KPIs are off). */
+/** Everyone's colleague feedback for the month `start`..`end`: the feedback colleagues gave on the days of that month, by the
+ * kind of colleague who gave it. `bySubject` is null when nobody was given any. `error` is set when the feedback could not
+ * be read (a table that is not there yet, a refused read): not the same as "no feedback". `enabled` holds the work back
+ * (for a month that has not begun, or when all four KPIs are off). */
 export function useColleagueMonth(start: string, end: string, enabled = true): { loading: boolean; bySubject: Map<string, Roles> | null; error: string } {
   const key = `${start}|${end}`;
   const [done, setDone] = useState<{ key: string; bySubject: Map<string, Roles> | null; error: string } | null>(null);
@@ -22,22 +20,14 @@ export function useColleagueMonth(start: string, end: string, enabled = true): {
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    (async () => {
-      const found = await supabase.from('review_rounds').select('id, period_start, period_end').eq('period_start', start).eq('period_end', end).limit(1);
-      if (found.error) {
-        if (live) setDone({ key, bySubject: null, error: loadProblem(WHAT, found.error, MIGRATION.reviews) });
-        return;
-      }
-      const round = ((found.data as Round[] | null) ?? [])[0];
-      const got = round
-        ? await fetchAllChecked<ReviewRow>(
-            (a, b) => supabase.from('colleague_reviews').select('subject_id, relation, rating').eq('round_id', round.id).order('id', { ascending: true }).range(a, b),
-            WHAT,
-            MIGRATION.reviews
-          )
-        : { rows: [] as ReviewRow[], error: '' };
-      if (live) setDone({ key, bySubject: got.rows.length > 0 ? summariseReviews(got.rows) : null, error: got.error });
-    })();
+    fetchAllChecked<FeedbackRow>(
+      (a, b) => supabase.from('colleague_feedback').select('subject_id, relation, rating').gte('given_on', start).lte('given_on', end).order('id', { ascending: true }).range(a, b),
+      WHAT,
+      MIGRATION.reviews
+    ).then(({ rows, error }) => {
+      if (!live) return;
+      setDone({ key, bySubject: rows.length > 0 ? summariseFeedback(rows) : null, error });
+    });
     return () => {
       live = false;
     };
@@ -51,17 +41,15 @@ export function useColleagueMonth(start: string, end: string, enabled = true): {
 
 export type PersonColleagues = {
   loading: boolean;
-  /** The month on screen has a round of reviews. */
-  roundExists: boolean;
-  /** This person's four roles in that round, or undefined when nobody was asked about them. */
+  /** This person's four kinds in the month on screen, or undefined when nobody gave them feedback. */
   current: Roles | undefined;
-  /** The same for the month before (undefined when there was no round or nobody was asked). */
+  /** The same for the month before. */
   previous: Roles | undefined;
-  /** Set when the reviews could not be read: not the same as "no round". */
+  /** Set when the feedback could not be read: not the same as "none given". */
   error: string;
 };
 
-const NONE: Omit<PersonColleagues, 'loading'> = { roundExists: false, current: undefined, previous: undefined, error: '' };
+const NONE: Omit<PersonColleagues, 'loading'> = { current: undefined, previous: undefined, error: '' };
 
 /** One person's colleague feedback for the month `cur` and the month `prev` before it. */
 export function usePersonColleagues(employeeId: string, cur: MonthRange, prev: MonthRange, enabled = true): PersonColleagues {
@@ -71,26 +59,23 @@ export function usePersonColleagues(employeeId: string, cur: MonthRange, prev: M
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    (async () => {
-      const found = await supabase.from('review_rounds').select('id, period_start, period_end').in('period_start', [cur.start, prev.start]);
-      if (found.error) {
-        if (live) setDone({ key, value: { ...NONE, error: loadProblem(WHAT, found.error, MIGRATION.reviews) } });
-        return;
-      }
-      const rounds = (found.data as Round[] | null) ?? [];
-      const curRound = rounds.find(r => r.period_start === cur.start && r.period_end === cur.end);
-      const prevRound = rounds.find(r => r.period_start === prev.start && r.period_end === prev.end);
-      const ids = [curRound?.id, prevRound?.id].filter((x): x is string => !!x);
-      const got = ids.length
-        ? await fetchAllChecked<ReviewRow & { round_id: string }>(
-            (a, b) => supabase.from('colleague_reviews').select('round_id, subject_id, relation, rating').eq('subject_id', employeeId).in('round_id', ids).order('id', { ascending: true }).range(a, b),
-            WHAT,
-            MIGRATION.reviews
-          )
-        : { rows: [] as (ReviewRow & { round_id: string })[], error: '' };
-      const rolesOf = (round: Round | undefined) => (round ? summariseReviews(got.rows.filter(r => r.round_id === round.id)).get(employeeId) : undefined);
-      if (live) setDone({ key, value: { roundExists: !!curRound, current: rolesOf(curRound), previous: rolesOf(prevRound), error: got.error } });
-    })();
+    fetchAllChecked<{ relation: FeedbackRelation; rating: number | null; given_on: string }>(
+      (a, b) =>
+        supabase
+          .from('colleague_feedback')
+          .select('relation, rating, given_on')
+          .eq('subject_id', employeeId)
+          .gte('given_on', prev.start)
+          .lte('given_on', cur.end)
+          .order('id', { ascending: true })
+          .range(a, b),
+      WHAT,
+      MIGRATION.reviews
+    ).then(({ rows, error }) => {
+      if (!live) return;
+      const rolesIn = (r: MonthRange) => summariseFeedback(rows.filter(x => x.given_on >= r.start && x.given_on <= r.end).map(x => ({ subject_id: employeeId, relation: x.relation, rating: x.rating }))).get(employeeId);
+      setDone({ key, value: { current: rolesIn(cur), previous: rolesIn(prev), error } });
+    });
     return () => {
       live = false;
     };

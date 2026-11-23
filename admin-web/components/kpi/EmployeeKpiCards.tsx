@@ -548,7 +548,7 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
   className?: string;
 }) {
   const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label, relation: RELATION_OF_KPI[c.id as keyof typeof RELATION_OF_KPI] }));
-  const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once their review is in. The person reviewed never sees who said what.`;
+  const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once one is in. The person never sees who said what.`;
   if (notStarted || data.loading) {
     return (
       <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
@@ -575,10 +575,9 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
           const last = roleState(data.previous?.[relation], relation);
           let meta: string;
           if (data.error) meta = UNREAD.title;
-          else if (!data.roundExists) meta = 'No round of reviews for this month yet';
-          else if (state.kind === 'none') meta = 'Nobody was asked this month';
-          else if (state.kind === 'few') meta = `${state.given} of ${state.need} ${reviewWord(state.need)} given. Shown once ${state.need === 1 ? 'it is' : `${state.need} are`} in.`;
-          else meta = `${state.asked > state.given ? `${state.given} of ${state.asked} reviews given` : `${state.given} ${reviewWord(state.given)}`}${last.kind === 'ok' ? ` · ${lowerFirst(compare(state.average, last.average, { name: previousName, unit: 'rating' }).text)}` : ''}`;
+          else if (state.kind === 'none') meta = 'No feedback this month';
+          else if (state.kind === 'few') meta = `${state.given} of ${state.need} ${reviewWord(state.need)}. Shown once ${state.need === 1 ? 'it is' : `${state.need} are`} in.`;
+          else meta = `${state.given} ${reviewWord(state.given)}${last.kind === 'ok' ? ` · ${lowerFirst(compare(state.average, last.average, { name: previousName, unit: 'rating' }).text)}` : ''}`;
           return (
             <div key={id} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">
               <div className="sm:w-[250px]">

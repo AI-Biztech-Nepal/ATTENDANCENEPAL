@@ -76,7 +76,7 @@ export const KPI_GROUPS: KpiGroup[] = [
   {
     id: 'colleagues',
     title: 'Colleague feedback',
-    source: 'From monthly reviews',
+    source: 'From the feedback colleagues give each other',
     columns: [
       { id: 'peers', label: 'Peers', width: 100, connected: true },
       { id: 'manager', label: 'Manager', width: 100, connected: true },
@@ -84,8 +84,8 @@ export const KPI_GROUPS: KpiGroup[] = [
       { id: 'training', label: 'Training and compliance', width: 120, connected: true },
     ],
     connected: false,
-    emptyNote: 'No reviews yet',
-    waiting: 'Peers, manager, C-level and training and compliance fill in once colleague reviews are given.',
+    emptyNote: 'No feedback yet',
+    waiting: 'Peers, manager, C-level and training and compliance fill in once colleagues give each other feedback.',
   },
 ];
 
@@ -94,7 +94,7 @@ const WAITING_TAIL: Record<KpiGroupId, string> = {
   attendance: '',
   services: 'your booking data is imported',
   customers: 'customer forms are typed in',
-  colleagues: 'colleague reviews are given',
+  colleagues: 'colleagues give each other feedback',
   own: '',
 };
 

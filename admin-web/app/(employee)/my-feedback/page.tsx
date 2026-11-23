@@ -1,77 +1,101 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import { formatAdDate } from '@/lib/calendar';
-import { weekdayName } from '@/lib/taskSchedule';
-import { useReviewsToGive } from '@/lib/useReviewsToGive';
-import { RELATION_AS, type ReviewToGive } from '@/lib/colleagueReviews';
+import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
+import { otherCalendarSpan } from '@/lib/kpi';
+import { useFeedbackGiving, useMyCustomerForms, useMyFeedback } from '@/lib/useFeedback';
 import { PageBody } from '@/components/employee/parts';
+import MonthStepper from '@/components/kpi/MonthStepper';
+import { CustomerFormsReport, FeedbackReport } from '@/components/kpi/FeedbackReport';
 import GiveFeedbackDialog from '@/components/kpi/GiveFeedbackDialog';
 
-// The colleague feedback this person is asked to give this month: peers, the manager, the C-level executive or
-// training and compliance, whichever they have been chosen as. Their name is never shown to the person they review.
+// Feedback, for the person signed in: what colleagues said about them, laid out as a report (by the kind of colleague, never by
+// name), with a "Give feedback" button that opens the feedback form so they can give feedback to anyone they work with; and the
+// customer forms typed in about them, to read only (the admin types them in and changes them).
 export default function MyFeedbackPage() {
   usePageTitle('Feedback');
   const { system } = useCalendarSystem();
-  const { items, error, reload, loading } = useReviewsToGive();
-  const [giving, setGiving] = useState<{ items: ReviewToGive[]; start: number } | null>(null);
+  const [anchor, setAnchor] = useState(() => todayAnchor());
+  const { start, end } = useMemo(() => monthDateRange(system, anchor), [system, anchor]);
+  const label = useMemo(() => buildMonth(system, anchor).label, [system, anchor]);
+  const otherSpan = useMemo(() => otherCalendarSpan(system, start, end), [system, start, end]);
 
-  const all = items ?? [];
-  const pending = useMemo(() => all.filter(i => !i.given_at), [all]);
-  const rounds = new Set(all.map(i => i.round_id)).size;
-  const roundTitle = all[0]?.round_title ?? '';
-  const due = (d: string | null) => (d ? ` · please give by ${weekdayName(d)} ${formatAdDate(d, system)}` : '');
+  // undefined = not read yet, null = this account is not linked to an employee.
+  const [employeeId, setEmployeeId] = useState<string | null | undefined>(undefined);
+  const [refresh, setRefresh] = useState(0);
+  const [formOpen, setFormOpen] = useState(false);
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) return;
+      const { data } = await supabase.from('profiles').select('employee_id').eq('id', auth.user.id).single();
+      if (live) setEmployeeId((data?.employee_id as string | null) ?? null);
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const mine = useMyFeedback(start, end, refresh);
+  const forms = useMyCustomerForms(employeeId ?? null, start, end, refresh);
+  const giving = useFeedbackGiving();
 
   return (
     <PageBody>
-      <section aria-labelledby="feedback-heading" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">
-        <h2 id="feedback-heading" className="m-0 text-[17px] font-extrabold text-ink">
-          Feedback to give
-        </h2>
-        <p className="m-0 mb-2 mt-1 text-[13px] leading-normal text-slate-600">
-          {loading
-            ? 'Loading…'
-            : all.length === 0
-              ? 'Nobody is waiting for your feedback right now.'
-              : pending.length === 0
-                ? `You have given all your feedback for ${roundTitle}. Thank you. You can still change it until the round closes.`
-                : `${pending.length} ${pending.length === 1 ? 'colleague is' : 'colleagues are'} waiting for your feedback for ${roundTitle}. Your name is not shown to them.`}
-        </p>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <MonthStepper label={label} subtitle={otherSpan} onPrevious={() => setAnchor(a => stepAnchor(system, a, -1))} onNext={() => setAnchor(a => stepAnchor(system, a, 1))} />
+        </div>
 
-        {error && (
-          <p role="alert" className="m-0 mb-2 text-sm font-semibold text-critical-text">
-            Could not load your feedback list: {error}
+        <FeedbackReport
+          title="Feedback from colleagues"
+          periodLabel={label}
+          read={mine}
+          subject={{ you: true, name: 'you' }}
+          actions={
+            <button
+              type="button"
+              onClick={() => setFormOpen(true)}
+              disabled={giving.loading || !!giving.error}
+              className="min-h-[44px] rounded-[10px] bg-teal-700 px-5 text-sm font-extrabold text-white hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50"
+            >
+              Give feedback
+            </button>
+          }
+        />
+
+        {giving.error && (
+          <p role="alert" className="m-0 text-sm font-semibold text-critical-text">
+            {giving.error}
+          </p>
+        )}
+        {note && (
+          <p role="status" className="m-0 text-sm font-semibold text-emerald-800">
+            {note}
           </p>
         )}
 
-        {all.map(it => (
-          <div key={it.review_id} className="flex flex-wrap items-center gap-x-5 gap-y-2.5 border-t border-slate-200 py-3.5">
-            <div className="min-w-[200px] flex-1">
-              <div className="text-sm font-bold text-ink">{it.subject_name}</div>
-              <div className="mt-0.5 text-[12.5px] text-slate-600">
-                {RELATION_AS[it.relation]}
-                {rounds > 1 ? ` · ${it.round_title}` : ''}
-                {it.given_at ? ' · given' : due(it.due_on)}
-              </div>
-            </div>
-            <button
-              type="button"
-              aria-label={`${it.given_at ? 'Change' : 'Give'} feedback for ${it.subject_name}`}
-              onClick={() => {
-                if (it.given_at) setGiving({ items: [it], start: 0 });
-                else setGiving({ items: pending, start: pending.findIndex(p => p.review_id === it.review_id) });
-              }}
-              className="min-h-[40px] rounded-lg border border-accent bg-white px-[18px] text-[13px] font-extrabold text-accent hover:bg-accent/10"
-            >
-              {it.given_at ? 'Change' : 'Give feedback'}
-            </button>
-          </div>
-        ))}
-      </section>
+        <CustomerFormsReport periodLabel={label} forms={forms.forms} loading={employeeId === undefined || forms.loading} error={forms.error} />
+      </div>
 
-      {giving && <GiveFeedbackDialog items={giving.items} start={giving.start} onClose={() => setGiving(null)} onChanged={reload} />}
+      {formOpen && (
+        <GiveFeedbackDialog
+          colleagues={giving.colleagues}
+          given={giving.given}
+          onClose={() => setFormOpen(false)}
+          onSent={who => {
+            setNote(`Thank you. Your feedback${who ? ` for ${who}` : ''} was sent.`);
+            giving.reload();
+            setRefresh(k => k + 1);
+          }}
+        />
+      )}
     </PageBody>
   );
 }

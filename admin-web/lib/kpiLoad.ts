@@ -47,6 +47,6 @@ export const problemsOf = (...errors: string[]) => [...new Set(errors.filter(Boo
 export const MIGRATION = {
   services: '20261122180000_service_import.sql',
   forms: '20261122140000_customer_feedback.sql',
-  reviews: '20261122160000_colleague_reviews.sql',
+  reviews: '20261123140000_colleague_feedback.sql',
   own: '20261123120000_own_kpis.sql',
 } as const;

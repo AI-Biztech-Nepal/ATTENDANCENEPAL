@@ -1,39 +1,35 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { RATING_WORDS, validateGive, COMMENT_MAX, type ReviewRelation, type ReviewToGive } from '@/lib/colleagueReviews';
+import { isMissingTable } from '@/lib/kpiLoad';
+import { COMMENT_MAX, RATING_WORDS, firstName, validateGive, type Colleague, type GivenFeedback } from '@/lib/colleagueFeedback';
 import { Question, circleClasses } from '@/components/kpi/FormParts';
 
-/** How the giver is described in the sentence above the question. */
-const GIVING_AS: Record<ReviewRelation, string> = {
-  peer: 'a peer',
-  manager: 'the manager',
-  c_level: 'a C-level executive',
-  training: 'training and compliance',
-};
-
-const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
+const FIELD = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm font-semibold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
 
 /**
- * Gives colleague feedback, one person after another, on a form built like the customer review form (numbered questions in
- * boxes, round numbers with a word under each): 1. a rating from 1 to 5, 2. an optional comment. `items` is the
- * list to walk through (the dialog keeps its own copy), `start` is where to begin. "Send" saves and moves on to the
- * next person; "Skip for now" moves on without saving. The person reviewed is never told who gave it. Used on the
- * employee portal and on the admin Colleague reviews page.
+ * The colleague feedback form, built like the customer review form: who it is for, then numbered questions in boxes (1. a rating
+ * from 1 to 5 with a word under each round number, 2. an optional comment). Anyone who works in the company can give it to anyone
+ * else, from an employee's own page or from an admin's. Sending feedback to someone who already has some from you this month
+ * replaces it, and the form says so. The person never sees who gave it.
  */
-export default function GiveFeedbackDialog({ items, start = 0, onClose, onChanged }: {
-  items: ReviewToGive[];
-  start?: number;
+export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', onClose, onSent }: {
+  /** Everyone feedback can be given to (feedback_colleagues()). */
+  colleagues: Colleague[];
+  /** What the signed-in person already gave this month (feedback_i_gave()). */
+  given: GivenFeedback[];
+  /** Who the form opens on, when it is opened from that person's page. */
+  subjectId?: string;
   onClose: () => void;
-  /** Something was saved: the list behind the dialog should be read again. */
-  onChanged: () => void;
+  /** The feedback was saved: with the name of the person it was for. */
+  onSent: (name: string) => void;
 }) {
-  const [list] = useState(items);
-  const [index, setIndex] = useState(Math.min(Math.max(start, 0), Math.max(list.length - 1, 0)));
-  const item = list[index];
-  const [rating, setRating] = useState<number | null>(item?.rating ?? null);
-  const [comment, setComment] = useState(item?.comment ?? '');
+  const start = colleagues.some(c => c.id === subjectId) ? subjectId : '';
+  const before = useMemo(() => given.find(g => g.subject_id === start), [given, start]);
+  const [who, setWho] = useState(start);
+  const [rating, setRating] = useState<number | null>(before?.rating ?? null);
+  const [comment, setComment] = useState(before?.comment ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const closeRef = useRef(onClose);
@@ -47,39 +43,33 @@ export default function GiveFeedbackDialog({ items, start = 0, onClose, onChange
     return () => window.removeEventListener('keydown', onKey);
   }, [saving]);
 
-  if (!item) return null;
-  const next = list[index + 1];
-  const isLast = !next;
+  const person = colleagues.find(c => c.id === who);
+  const earlier = given.find(g => g.subject_id === who);
+  const name = person ? firstName(person.name) : 'them';
 
-  function go(to: number) {
-    const target = list[to];
-    setIndex(to);
-    setRating(target?.rating ?? null);
-    setComment(target?.comment ?? '');
+  // Choosing someone shows what you already sent them this month, so you can change it; someone new starts empty.
+  function choose(id: string) {
+    setWho(id);
+    const prior = given.find(g => g.subject_id === id);
+    setRating(prior?.rating ?? null);
+    setComment(prior?.comment ?? '');
     setError('');
   }
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
     if (saving) return;
-    const problem = validateGive(rating, comment);
+    const problem = validateGive(who, rating, comment);
     if (problem) return setError(problem);
     setSaving(true);
     setError('');
-    const { error: rpcError } = await supabase.rpc('give_colleague_review', { p_review_id: item.review_id, p_rating: rating, p_comment: comment.trim() || null });
+    const { error: rpcError } = await supabase.rpc('give_colleague_feedback', { p_subject_id: who, p_rating: rating, p_comment: comment.trim() || null });
     setSaving(false);
-    if (rpcError) return setError(rpcError.message);
-    onChanged();
-    if (isLast) onClose();
-    else go(index + 1);
+    if (rpcError) return setError(isMissingTable(rpcError) ? 'Colleague feedback is not set up in the database yet: run the migration 20261123140000_colleague_feedback.sql.' : rpcError.message);
+    onSent(person?.name ?? '');
+    onClose();
   }
 
-  function skip() {
-    if (isLast) onClose();
-    else go(index + 1);
-  }
-
-  const name = firstName(item.subject_name);
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 sm:items-center" onClick={() => !saving && onClose()}>
       <form
@@ -91,24 +81,26 @@ export default function GiveFeedbackDialog({ items, start = 0, onClose, onChange
         aria-labelledby="give-feedback-title"
         className="my-auto w-full max-w-[560px] rounded-xl bg-white p-5 shadow-2xl sm:p-7"
       >
-        <div className="flex items-center justify-between gap-3 text-[13px] font-bold text-slate-600">
-          <span>Feedback · {item.round_title}</span>
-          <span>
-            {index + 1} of {list.length}
-          </span>
-        </div>
-        <div role="img" aria-label={`Step ${index + 1} of ${list.length}`} className="mt-2 flex gap-1">
-          {list.map((_, i) => (
-            <div key={i} className={`h-1 flex-1 rounded-full ${i <= index ? 'bg-accent' : 'bg-slate-200'}`} />
-          ))}
-        </div>
-
-        <h2 id="give-feedback-title" className="mb-1.5 mt-5 text-[22px] font-extrabold tracking-tight text-ink">
-          Feedback for {item.subject_name}
+        <h2 id="give-feedback-title" className="m-0 text-[22px] font-extrabold tracking-tight text-ink">
+          {person ? `Feedback for ${person.name}` : 'Give feedback'}
         </h2>
-        <p className="m-0 mb-4 text-[13.5px] leading-relaxed text-slate-600">
-          You are giving this as <b className="text-ink">{GIVING_AS[item.relation]}</b>. Management reads your comment. {name} never sees your name.
-        </p>
+        <p className="mb-4 mt-1.5 text-[13.5px] leading-relaxed text-slate-600">Management reads your comment. {person ? name : 'The person'} never sees your name.</p>
+
+        <div className="mb-3.5">
+          <label htmlFor="give-feedback-who" className="mb-1.5 block text-xs font-bold text-slate-700">
+            Who is it for?
+          </label>
+          <select id="give-feedback-who" value={who} onChange={e => choose(e.target.value)} className={FIELD}>
+            <option value="">Select a colleague…</option>
+            {colleagues.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.department ? ` · ${c.department}` : ''}
+              </option>
+            ))}
+          </select>
+          {earlier && <p className="m-0 mt-1.5 text-xs font-semibold text-slate-600">You already gave {name} feedback this month. Sending again replaces it.</p>}
+        </div>
 
         <Question n={1} id="give-feedback-q1" title={`Overall, how was working with ${name} this month?`} range="Rating, 1 to 5">
           <fieldset aria-labelledby="give-feedback-q1" className="m-0 border-0 p-0">
@@ -157,11 +149,11 @@ export default function GiveFeedbackDialog({ items, start = 0, onClose, onChange
         <p className="m-0 mb-4 text-center text-[12.5px] text-slate-600">Thank you for taking the time to give honest feedback.</p>
 
         <div className="flex items-center justify-between gap-2.5">
-          <button type="button" onClick={skip} disabled={saving} className="min-h-[44px] px-1 text-sm font-bold text-slate-600 hover:text-ink disabled:opacity-50">
-            {isLast ? 'Close' : 'Skip for now'}
+          <button type="button" onClick={onClose} disabled={saving} className="min-h-[44px] px-1 text-sm font-bold text-slate-600 hover:text-ink disabled:opacity-50">
+            Cancel
           </button>
           <button type="submit" disabled={saving} className="min-h-[44px] rounded-[10px] bg-accent px-6 text-sm font-extrabold text-white hover:bg-accent/90 disabled:opacity-60">
-            {saving ? 'Sending…' : isLast ? 'Send' : `Send and go to ${firstName(next.subject_name)}`}
+            {saving ? 'Sending…' : earlier ? 'Send again' : 'Send feedback'}
           </button>
         </div>
       </form>

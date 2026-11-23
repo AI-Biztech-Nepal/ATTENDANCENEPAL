@@ -7,7 +7,8 @@
 -- A customer may skip a question, so rating, recommend and comment can each be empty, but a form with none
 -- of the three is not a form. The comment is copied as written and should carry no customer name or phone
 -- number; it is read by management only, so, like the other HR-style records, only admin / HR of the same
--- company can touch these rows and there is deliberately NO policy letting an employee read them.
+-- company can touch these rows and there is deliberately NO policy letting an employee read them. (Later, 20261123140000_colleague_feedback.sql
+-- adds ONE read-only policy: an employee may read the forms about themselves. Typing in and editing stay admin / HR only.)
 --
 -- Run once, in the Supabase SQL editor, after 20261101200000_employee_performance_conduct.sql (it uses
 -- touch_record_updated() from there). Re-runnable.

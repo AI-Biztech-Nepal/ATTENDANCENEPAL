@@ -32,7 +32,7 @@ type Props = {
   /** Customer feedback and NPS per person from the forms typed in, and how many forms a month needs before they show (Settings). */
   feedback: FeedbackMonth;
   minForms: number;
-  /** Colleague feedback per person, from the month's round of reviews. `bySubject` is null when the month has no round. */
+  /** Colleague feedback per person, from the feedback colleagues gave during the month. `bySubject` is null when nobody was given any. */
   colleagues: { loading: boolean; bySubject: Map<string, Roles> | null; error: string };
   /** The numbers typed in for the KPIs the company added itself, per KPI and person. */
   own: OwnMonth;
@@ -339,7 +339,7 @@ function ColleagueCell({ group, first, loading, bySubject, unread, kpiId, employ
   const relation = RELATION_OF_KPI[kpiId];
   const state = roleState(bySubject?.get(employeeId)?.[relation], relation);
   if (loading || notStarted || unread || !bySubject || state.kind === 'none') {
-    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !bySubject ? group.emptyNote : 'Nobody asked';
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !bySubject ? group.emptyNote : 'No feedback from them';
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
@@ -362,7 +362,7 @@ function ColleagueCell({ group, first, loading, bySubject, unread, kpiId, employ
     );
   }
   return (
-    <td className={cell} title={`Average of ${state.given} ${reviewWord(state.given)} (${state.asked} asked)`}>
+    <td className={cell} title={`Average of ${state.given} ${reviewWord(state.given)}`}>
       <div className="text-sm font-extrabold tabular-nums text-ink">
         {averageText(state.average)} <span className="text-[11.5px] font-medium text-slate-600">/ 5</span>
       </div>
