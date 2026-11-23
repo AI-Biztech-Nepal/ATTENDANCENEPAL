@@ -14,7 +14,9 @@ import { useFeedbackMonth } from '@/lib/useFeedbackKpi';
 import { useColleagueMonth } from '@/lib/useColleagueKpi';
 import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { isKpiOn } from '@/lib/kpiSettings';
+import { problemsOf } from '@/lib/kpiLoad';
 import KpiOverviewTable from '@/components/kpi/KpiOverviewTable';
+import LoadProblems from '@/components/kpi/LoadProblems';
 import MonthStepper from '@/components/kpi/MonthStepper';
 
 // Every employee against every KPI for one month. Each KPI stands on its own: there is no total, no
@@ -63,7 +65,8 @@ function Kpis() {
   // A department that is not in the new month's list (or after a reload) is the same as "all".
   const activeDepartment = departments.includes(department) ? department : '';
   const shown = useMemo(() => (activeDepartment ? employees.filter(e => e.department === activeDepartment) : employees), [employees, activeDepartment]);
-  const waiting = groups.filter(g => !g.connected);
+  // A table that is missing or a refused read is said out loud, so a dash never hides a number that could not be read.
+  const problems = problemsOf(services.error, rebooking.error, feedback.error, colleagues.error);
 
   return (
     <div className="flex flex-col gap-4">
@@ -108,21 +111,9 @@ function Kpis() {
         </p>
       )}
 
-      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} minForms={settings.minResponses} colleagues={colleagues} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
+      <LoadProblems problems={problems} />
 
-      {waiting.length > 0 && (
-        <section aria-labelledby="not-connected" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">
-          <h2 id="not-connected" className="m-0 mb-1.5 text-base font-extrabold text-ink">
-            Not connected yet
-          </h2>
-          {waiting.map(g => (
-            <div key={g.id} className="border-t border-slate-200 py-3.5">
-              <div className="text-sm font-bold text-ink">{g.title}</div>
-              <div className="mt-0.5 text-[13px] text-slate-600">{g.waiting}</div>
-            </div>
-          ))}
-        </section>
-      )}
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} minForms={settings.minResponses} colleagues={colleagues} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
     </div>
   );
 }

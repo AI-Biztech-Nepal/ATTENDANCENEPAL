@@ -1,6 +1,7 @@
 'use client';
 
 import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
+import { compare, compareServices, lowerFirst, type Change } from '@/lib/compareKpi';
 import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
 import { serviceWord, type WeekBar } from '@/lib/serviceKpi';
 import type { PersonServices } from '@/lib/useServiceKpi';
@@ -17,6 +18,10 @@ import { useKpiSettings } from '@/lib/useKpiSettings';
 import { Bars, KPI_COLORS, Pie, Ring } from './KpiCharts';
 
 const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
+
+/** What a card says when its numbers could not be read, so it never claims "nothing imported" or "no forms" for data that
+ * is only out of reach. The note above the cards (LoadProblems) says why. */
+const UNREAD = { title: 'Could not be read', text: 'The note above says why.' };
 
 function Card({ eyebrow, name, className = '', footer, children }: {
   eyebrow: string;
@@ -50,6 +55,30 @@ function Stat({ big, label }: { big: string; label: string }) {
     <div>
       <div className="text-[30px] font-extrabold leading-[1.1] tabular-nums text-ink">{big}</div>
       <div className="mt-0.5 text-[12.5px] font-bold text-ink">{label}</div>
+    </div>
+  );
+}
+
+/** One line saying how a number moved since last month: a small arrow for the direction and the words that carry the same
+ * meaning. The arrow is only for the eye, and neither it nor its colour says whether the change is good: that depends on
+ * the KPI. Every card works its two numbers out from its own data (see lib/compareKpi.ts). */
+function Compare({ change, label }: { change: Change; label?: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {change.dir !== 'none' && (
+        <svg aria-hidden="true" viewBox="0 0 24 24" width={10} height={10} fill="currentColor" className="shrink-0 text-slate-500">
+          {change.dir === 'up' ? <path d="M12 5 21 19H3z" /> : change.dir === 'down' ? <path d="M12 19 3 5h18z" /> : <path d="M4 8h16v3H4zM4 14h16v3H4z" />}
+        </svg>
+      )}
+      <span>
+        {label ? (
+          <>
+            <b className="font-bold text-slate-700">{label}:</b> {lowerFirst(change.text)}
+          </>
+        ) : (
+          change.text
+        )}
+      </span>
     </div>
   );
 }
@@ -114,12 +143,21 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
     );
   }
 
-  let footer: string | null = null;
+  let footer: React.ReactNode = null;
   if (!loading && previous?.tracked) {
     if (previous.expectedDays === 0) footer = `${previousName}: no working days`;
     else {
-      const r = attendanceRates(previous);
-      footer = `${previousName}: ${r.present}% present, ${r.onTime == null ? '–' : `${r.onTime}%`} on time`;
+      const pr = attendanceRates(previous);
+      const cr = current && current.tracked && current.expectedDays > 0 ? attendanceRates(current) : null;
+      footer =
+        cr && cr.present != null && pr.present != null ? (
+          <div className="flex flex-col gap-1">
+            <Compare label="Present" change={compare(cr.present, pr.present, { name: previousName, unit: 'points', shown: `${pr.present}%` })} />
+            {cr.onTime != null && pr.onTime != null && <Compare label="On time" change={compare(cr.onTime, pr.onTime, { name: previousName, unit: 'points', shown: `${pr.onTime}%` })} />}
+          </div>
+        ) : (
+          `${previousName}: ${pr.present}% present, ${pr.onTime == null ? '–' : `${pr.onTime}%`} on time`
+        );
     }
   }
   return (
@@ -149,6 +187,7 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
   let body: React.ReactNode;
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
+  else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (!data.monthHasData) body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
   else {
     body = (
@@ -168,10 +207,16 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
       </>
     );
   }
-  const showPrevious = !notStarted && !data.loading && data.monthHasData && data.previousTotal != null;
-  const footer = [showPrevious ? `Whole of ${previousName}: ${data.previousTotal}` : '', partial && total > 0 ? 'The pale bar is the week so far.' : ''].filter(Boolean).join('. ');
+  const showPrevious = !notStarted && !data.loading && !data.error && data.monthHasData && data.previousTotal != null;
+  const footer =
+    (showPrevious && data.previousTotal != null) || (partial && total > 0) ? (
+      <div className="flex flex-col gap-1">
+        {showPrevious && data.previousTotal != null && <Compare change={compareServices(total, data.previousTotal, previousName, !thisMonthSoFar)} />}
+        {partial && total > 0 && <div>The pale bar is the week so far.</div>}
+      </div>
+    ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer ? `${footer}${footer.endsWith('.') ? '' : '.'}` : null}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
     </Card>
   );
@@ -195,6 +240,7 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
   let body: React.ReactNode;
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
+  else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (data.reason === 'none') body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
   else if (data.reason === 'nocodes') body = <Message title={words.t('No customer codes in the file')} text={words.t('Choose a "Customer code" column when you import, so we can tell who came back.')} />;
   else if (!cur) body = <Message title={words.t(`No customers served in ${monthName}`)} />;
@@ -216,7 +262,11 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
     );
   }
   const previousPct = data.previous ? rebookingPct(data.previous) : null;
-  const footer = !notStarted && !data.loading && !data.reason && previousPct != null ? `${previousName}: ${previousPct}%` : null;
+  const currentPct = cur ? rebookingPct(cur) : null;
+  const footer =
+    !notStarted && !data.loading && !data.error && !data.reason && currentPct != null && previousPct != null ? (
+      <Compare change={compare(currentPct, previousPct, { name: previousName, unit: 'points', shown: `${previousPct}%` })} />
+    ) : null;
   return (
     <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
@@ -247,6 +297,7 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
   let body: React.ReactNode;
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading || attendanceLoading) body = <Message title="Loading…" />;
+  else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (data.timeReason === 'none') body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
   else if (data.timeReason === 'notime') body = <Message title="No time in the file" text='Choose a "Time with the customer" column when you import, so the hours can be worked out.' />;
   else if (!cur) body = <Message title={`No services with a time in ${monthName}`} />;
@@ -266,7 +317,10 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
       </>
     );
   }
-  const footer = !notStarted && !data.loading && !attendanceLoading && !data.timeReason && prev ? `${previousName}: ${prev.pct}%` : null;
+  const footer =
+    !notStarted && !data.loading && !attendanceLoading && !data.error && !data.timeReason && cur && prev ? (
+      <Compare change={compare(cur.pct, prev.pct, { name: previousName, unit: 'points', shown: `${prev.pct}%` })} />
+    ) : null;
   return (
     <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
@@ -294,6 +348,7 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
   let body: React.ReactNode;
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
+  else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (!data.monthHasForms) body = <Message title="No forms typed in for this month" text={words.t('Type in the paper forms customers filled in, in the Customer feedback section.')} />;
   else if (state.kind === 'none') body = <Message title={`No forms typed in for this employee in ${monthName}`} />;
   else if (state.kind === 'few') {
@@ -327,7 +382,10 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
     );
   }
   const previous = feedbackState(data.previous, minForms);
-  const footer = !notStarted && !data.loading && state.kind === 'ok' && previous.kind === 'ok' ? `${previousName}: ${averageText(previous.summary.average)}` : null;
+  const footer =
+    !notStarted && !data.loading && state.kind === 'ok' && previous.kind === 'ok' ? (
+      <Compare change={compare(state.summary.average, previous.summary.average, { name: previousName, unit: 'rating' })} />
+    ) : null;
   return (
     <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
@@ -362,6 +420,7 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
   let body: React.ReactNode;
   if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
+  else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (!data.monthHasNps) {
     body = (
       <Message
@@ -408,7 +467,10 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
     );
   }
   const previous = npsState(data.npsPrevious, minForms);
-  const footer = !notStarted && !data.loading && state.kind === 'ok' && previous.kind === 'ok' ? `${previousName}: ${scoreText(previous.summary.score)}` : null;
+  const footer =
+    !notStarted && !data.loading && state.kind === 'ok' && previous.kind === 'ok' ? (
+      <Compare change={compare(state.summary.score, previous.summary.score, { name: previousName, unit: 'points', shown: scoreText(previous.summary.score) })} />
+    ) : null;
   return (
     <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
@@ -461,10 +523,11 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
           const state = roleState(data.current?.[relation], relation);
           const last = roleState(data.previous?.[relation], relation);
           let meta: string;
-          if (!data.roundExists) meta = 'No round of reviews for this month yet';
+          if (data.error) meta = UNREAD.title;
+          else if (!data.roundExists) meta = 'No round of reviews for this month yet';
           else if (state.kind === 'none') meta = 'Nobody was asked this month';
           else if (state.kind === 'few') meta = `${state.given} of ${state.need} ${reviewWord(state.need)} given. Shown once ${state.need === 1 ? 'it is' : `${state.need} are`} in.`;
-          else meta = `${state.asked > state.given ? `${state.given} of ${state.asked} reviews given` : `${state.given} ${reviewWord(state.given)}`}${last.kind === 'ok' ? ` · ${previousName} ${averageText(last.average)}` : ''}`;
+          else meta = `${state.asked > state.given ? `${state.given} of ${state.asked} reviews given` : `${state.given} ${reviewWord(state.given)}`}${last.kind === 'ok' ? ` · ${lowerFirst(compare(state.average, last.average, { name: previousName, unit: 'rating' }).text)}` : ''}`;
           return (
             <div key={id} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">
               <div className="sm:w-[250px]">

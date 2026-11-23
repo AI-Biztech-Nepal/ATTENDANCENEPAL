@@ -25,13 +25,13 @@ type Props = {
   /** The working day, in hours (Settings), that time with customers is measured against. */
   hoursPerDay: number;
   /** Rebooking per person: of the customers served, how many booked again within `windowDays`. */
-  rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason };
+  rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string };
   windowDays: number;
   /** Customer feedback and NPS per person from the forms typed in, and how many forms a month needs before they show (Settings). */
   feedback: FeedbackMonth;
   minForms: number;
   /** Colleague feedback per person, from the month's round of reviews. `bySubject` is null when the month has no round. */
-  colleagues: { loading: boolean; bySubject: Map<string, Roles> | null };
+  colleagues: { loading: boolean; bySubject: Map<string, Roles> | null; error: string };
   loading: boolean;
   /** The month being shown has not begun, so there is nothing to count yet. */
   notStarted: boolean;
@@ -39,9 +39,9 @@ type Props = {
   monthStart: string;
 };
 
-/** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place; the
- * groups themselves are named in the "Not connected yet" card under the table). Nothing is added up or
- * compared: a dash means there is nothing to show yet. */
+/** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place). Nothing is
+ * added up, ranked or compared: a dash means there is nothing to show yet, or its numbers could not be read (the note
+ * above the table says so in that case). */
 export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, minForms, colleagues, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
@@ -106,17 +106,17 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                         c.id === 'attendance' ? (
                           <AttendanceCell key={c.id} kpi={kpi} notStarted={notStarted} />
                         ) : c.id === 'services' ? (
-                          <ServicesCell key={c.id} group={g} first={i === 0} loading={services.loading} counts={services.counts} employeeId={emp.id} notStarted={notStarted} />
+                          <ServicesCell key={c.id} group={g} first={i === 0} loading={services.loading} counts={services.counts} unread={!!services.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'utilisation' ? (
                           <UtilisationCell key={c.id} group={g} first={i === 0} services={services} kpi={kpi} hoursPerDay={hoursPerDay} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'feedback' ? (
-                          <FeedbackCell key={c.id} group={g} first={i === 0} loading={feedback.loading} byEmployee={feedback.byEmployee} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
+                          <FeedbackCell key={c.id} group={g} first={i === 0} loading={feedback.loading} byEmployee={feedback.byEmployee} unread={!!feedback.error} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'peers' || c.id === 'manager' || c.id === 'clevel' || c.id === 'training' ? (
-                          <ColleagueCell key={c.id} group={g} first={i === 0} loading={colleagues.loading} bySubject={colleagues.bySubject} kpiId={c.id} employeeId={emp.id} notStarted={notStarted} />
+                          <ColleagueCell key={c.id} group={g} first={i === 0} loading={colleagues.loading} bySubject={colleagues.bySubject} unread={!!colleagues.error} kpiId={c.id} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'nps' ? (
-                          <NpsCell key={c.id} group={g} first={i === 0} loading={feedback.loading} nps={feedback.nps} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
+                          <NpsCell key={c.id} group={g} first={i === 0} loading={feedback.loading} nps={feedback.nps} unread={!!feedback.error} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'rebooking' ? (
-                          <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} employeeId={emp.id} notStarted={notStarted} windowDays={windowDays} />
+                          <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} unread={!!rebooking.error} employeeId={emp.id} notStarted={notStarted} windowDays={windowDays} />
                         ) : (
                           <EmptyCell key={c.id} group={g} first={i === 0} />
                         )
@@ -135,6 +135,10 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
     </section>
   );
 }
+
+/** What a dash says to a screen reader when its numbers could not be read (the note above the table says why), so it never
+ * claims "nothing imported" for data that is only out of reach. */
+const UNREAD = 'Could not be read';
 
 function subtitle(emp: Employee, kpi: AttendanceKpi | undefined) {
   const parts: string[] = [];
@@ -171,14 +175,14 @@ function AttendanceCell({ kpi, notStarted }: { kpi: AttendanceKpi | undefined; n
 
 /** How many services this person performed in the month. A dash when no booking file covers the month (that is not
  * the same as 0: someone with nothing in a month the others have services in did perform none). */
-function ServicesCell({ group, first, loading, counts, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; counts: Map<string, number> | null; employeeId: string; notStarted: boolean }) {
+function ServicesCell({ group, first, loading, counts, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; counts: Map<string, number> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
-  if (loading || !counts) {
+  if (loading || unread || !counts) {
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
           <span aria-hidden="true">–</span>
-          <span className="sr-only">{loading ? 'Loading' : notStarted ? 'Month has not started' : group.emptyNote}</span>
+          <span className="sr-only">{loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : group.emptyNote}</span>
         </div>
       </td>
     );
@@ -193,12 +197,12 @@ function ServicesCell({ group, first, loading, counts, employeeId, notStarted }:
 
 /** Of the customers this person served in the month, the share who booked again, with the numbers under it. A dash says
  * why there is nothing to show (not imported, no customer codes, no customers) for screen readers. */
-function RebookingCell({ group, first, loading, byEmployee, reason, employeeId, notStarted, windowDays }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; employeeId: string; notStarted: boolean; windowDays: number }) {
+function RebookingCell({ group, first, loading, byEmployee, reason, unread, employeeId, notStarted, windowDays }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; unread: boolean; employeeId: string; notStarted: boolean; windowDays: number }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
   const r = byEmployee?.get(employeeId);
   const pct = r ? rebookingPct(r) : null;
-  if (loading || notStarted || reason || !r || pct == null) {
-    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : reason === 'nocodes' ? 'No customer codes' : reason === 'none' ? group.emptyNote : 'No customers';
+  if (loading || notStarted || unread || reason || !r || pct == null) {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : reason === 'nocodes' ? 'No customer codes' : reason === 'none' ? group.emptyNote : 'No customers';
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
@@ -223,8 +227,8 @@ function RebookingCell({ group, first, loading, byEmployee, reason, employeeId, 
 function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId, notStarted }: { group: KpiGroup; first: boolean; services: ServiceMonth; kpi: AttendanceKpi | undefined; hoursPerDay: number; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
   const u = services.time ? utilisation(services.time.get(employeeId), kpi?.tracked ? kpi.presentDays : null, hoursPerDay) : null;
-  if (services.loading || notStarted || services.reason || !u) {
-    const why = services.loading ? 'Loading' : notStarted ? 'Month has not started' : services.reason === 'notime' ? 'No time in the file' : services.reason === 'none' ? group.emptyNote : 'No services with a time';
+  if (services.loading || notStarted || services.error || services.reason || !u) {
+    const why = services.loading ? 'Loading' : notStarted ? 'Month has not started' : services.error ? UNREAD : services.reason === 'notime' ? 'No time in the file' : services.reason === 'none' ? group.emptyNote : 'No services with a time';
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
@@ -244,11 +248,11 @@ function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId,
 
 /** The average service rating out of 5 from the customer forms, with how many forms under it. Held back (a dash and "3 of 5
  * forms") until the month has as many forms as Settings asks for, so one or two forms never stand for a whole month. */
-function FeedbackCell({ group, first, loading, byEmployee, minForms, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, FeedbackSummary> | null; minForms: number; employeeId: string; notStarted: boolean }) {
+function FeedbackCell({ group, first, loading, byEmployee, unread, minForms, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, FeedbackSummary> | null; unread: boolean; minForms: number; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
   const state = feedbackState(byEmployee?.get(employeeId), minForms);
-  if (loading || notStarted || !byEmployee || state.kind === 'none') {
-    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : !byEmployee ? group.emptyNote : 'No forms';
+  if (loading || notStarted || unread || !byEmployee || state.kind === 'none') {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !byEmployee ? group.emptyNote : 'No forms';
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
@@ -285,11 +289,11 @@ function FeedbackCell({ group, first, loading, byEmployee, minForms, employeeId,
 
 /** The NPS: the share who would recommend minus the share who are not likely to, from -100 to +100, with how many forms
  * under it. Held back like customer feedback until the month has the forms Settings asks for. */
-function NpsCell({ group, first, loading, nps, minForms, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; nps: Map<string, NpsSummary> | null; minForms: number; employeeId: string; notStarted: boolean }) {
+function NpsCell({ group, first, loading, nps, unread, minForms, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; nps: Map<string, NpsSummary> | null; unread: boolean; minForms: number; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
   const state = npsState(nps?.get(employeeId), minForms);
-  if (loading || notStarted || !nps || state.kind === 'none') {
-    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : !nps ? group.emptyNote : 'No forms';
+  if (loading || notStarted || unread || !nps || state.kind === 'none') {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !nps ? group.emptyNote : 'No forms';
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
@@ -324,12 +328,12 @@ function NpsCell({ group, first, loading, nps, minForms, employeeId, notStarted 
 
 /** The average rating out of 5 a person got from one kind of colleague in the month's round, with how many reviews under it.
  * Held back (a dash and "2 of 3 reviews") until enough are in: three from peers, one from each of the others. */
-function ColleagueCell({ group, first, loading, bySubject, kpiId, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; bySubject: Map<string, Roles> | null; kpiId: keyof typeof RELATION_OF_KPI; employeeId: string; notStarted: boolean }) {
+function ColleagueCell({ group, first, loading, bySubject, unread, kpiId, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; bySubject: Map<string, Roles> | null; unread: boolean; kpiId: keyof typeof RELATION_OF_KPI; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
   const relation = RELATION_OF_KPI[kpiId];
   const state = roleState(bySubject?.get(employeeId)?.[relation], relation);
-  if (loading || notStarted || !bySubject || state.kind === 'none') {
-    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : !bySubject ? group.emptyNote : 'Nobody asked';
+  if (loading || notStarted || unread || !bySubject || state.kind === 'none') {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !bySubject ? group.emptyNote : 'Nobody asked';
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">

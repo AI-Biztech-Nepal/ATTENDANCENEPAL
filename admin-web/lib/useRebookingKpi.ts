@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { fetchAll } from './leaveBalance';
+import { MIGRATION, fetchAllChecked } from './kpiLoad';
 import { addDays } from './taskSchedule';
 import { computeRebooking, type CustomerVisit, type Rebooking } from './rebookingKpi';
 import type { MonthRange } from './useServiceKpi';
@@ -26,33 +26,38 @@ async function whyEmpty(start: string, end: string): Promise<RebookingReason> {
 
 /** The columns a visit needs, for customers who have a code. */
 const VISIT_COLUMNS = 'employee_id, customer_key, performed_on';
+const WHAT = 'the services data';
 
 /**
  * Everyone's rebooking for the month `start`..`end`: of the customers each person served, how many booked again within
  * `windowDays`. The rows run `windowDays` past the month, because a customer served on its last day can come back after
  * it. `enabled` holds the work back (until the settings that give `windowDays` are read, or when the KPI is off).
+ * `error` is set when the services could not be read, which is not the same as "no data".
  */
-export function useRebooking(start: string, end: string, windowDays: number, enabled: boolean): { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason } {
+export function useRebooking(start: string, end: string, windowDays: number, enabled: boolean): { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string } {
   const key = `${start}|${end}|${windowDays}`;
-  const [done, setDone] = useState<{ key: string; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason } | null>(null);
+  const [done, setDone] = useState<{ key: string; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string } | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
     let live = true;
     (async () => {
-      const visits = await fetchAll<CustomerVisit>((a, b) =>
-        supabase
-          .from('service_records')
-          .select(VISIT_COLUMNS)
-          .not('customer_key', 'is', null)
-          .gte('performed_on', start)
-          .lte('performed_on', addDays(end, windowDays))
-          .order('id', { ascending: true })
-          .range(a, b)
+      const { rows: visits, error } = await fetchAllChecked<CustomerVisit>(
+        (a, b) =>
+          supabase
+            .from('service_records')
+            .select(VISIT_COLUMNS)
+            .not('customer_key', 'is', null)
+            .gte('performed_on', start)
+            .lte('performed_on', addDays(end, windowDays))
+            .order('id', { ascending: true })
+            .range(a, b),
+        WHAT,
+        MIGRATION.services
       );
       const byEmployee = computeRebooking(visits, start, end, windowDays);
-      const reason = byEmployee.size > 0 ? null : await whyEmpty(start, end);
-      if (live) setDone({ key, byEmployee: byEmployee.size > 0 ? byEmployee : null, reason });
+      const reason = byEmployee.size > 0 || error ? null : await whyEmpty(start, end);
+      if (live) setDone({ key, byEmployee: byEmployee.size > 0 ? byEmployee : null, reason, error });
     })();
     return () => {
       live = false;
@@ -61,7 +66,7 @@ export function useRebooking(start: string, end: string, windowDays: number, ena
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  return enabled && done && done.key === key ? { loading: false, byEmployee: done.byEmployee, reason: done.reason } : { loading: enabled, byEmployee: null, reason: null };
+  return enabled && done && done.key === key ? { loading: false, byEmployee: done.byEmployee, reason: done.reason, error: done.error } : { loading: enabled, byEmployee: null, reason: null, error: '' };
 }
 
 export type PersonRebooking = {
@@ -72,6 +77,8 @@ export type PersonRebooking = {
   previous: Rebooking | null;
   /** Set when the month on screen has nothing to count for anyone. */
   reason: RebookingReason;
+  /** Set when the services could not be read: not the same as "no data". */
+  error: string;
 };
 
 const KEYS_PER_REQUEST = 100;
@@ -89,23 +96,27 @@ export function usePersonRebooking(employeeId: string, cur: MonthRange, prev: Mo
     if (!enabled) return;
     let live = true;
     (async () => {
-      const own = await fetchAll<{ customer_key: string }>((a, b) =>
-        supabase
-          .from('service_records')
-          .select('customer_key')
-          .eq('employee_id', employeeId)
-          .not('customer_key', 'is', null)
-          .gte('performed_on', prev.start)
-          .lte('performed_on', cur.end)
-          .order('id', { ascending: true })
-          .range(a, b)
+      const own = await fetchAllChecked<{ customer_key: string }>(
+        (a, b) =>
+          supabase
+            .from('service_records')
+            .select('customer_key')
+            .eq('employee_id', employeeId)
+            .not('customer_key', 'is', null)
+            .gte('performed_on', prev.start)
+            .lte('performed_on', cur.end)
+            .order('id', { ascending: true })
+            .range(a, b),
+        WHAT,
+        MIGRATION.services
       );
-      const codes = [...new Set(own.map(r => r.customer_key).filter(Boolean))];
+      let error = own.error;
+      const codes = [...new Set(own.rows.map(r => r.customer_key).filter(Boolean))];
       const visits: CustomerVisit[] = [];
-      for (let i = 0; i < codes.length; i += KEYS_PER_REQUEST) {
+      for (let i = 0; i < codes.length && !error; i += KEYS_PER_REQUEST) {
         const chunk = codes.slice(i, i + KEYS_PER_REQUEST);
-        visits.push(
-          ...(await fetchAll<CustomerVisit>((a, b) =>
+        const got = await fetchAllChecked<CustomerVisit>(
+          (a, b) =>
             supabase
               .from('service_records')
               .select(VISIT_COLUMNS)
@@ -113,15 +124,18 @@ export function usePersonRebooking(employeeId: string, cur: MonthRange, prev: Mo
               .gte('performed_on', prev.start)
               .lte('performed_on', addDays(cur.end, windowDays))
               .order('id', { ascending: true })
-              .range(a, b)
-          ))
+              .range(a, b),
+          WHAT,
+          MIGRATION.services
         );
+        visits.push(...got.rows);
+        error = got.error;
       }
       const current = computeRebooking(visits, cur.start, cur.end, windowDays).get(employeeId) ?? null;
       const previous = computeRebooking(visits, prev.start, prev.end, windowDays).get(employeeId) ?? null;
       // Nothing to show for this person: is it because the month has nothing for anyone?
-      const reason = current ? null : await whyEmpty(cur.start, cur.end);
-      if (live) setDone({ key, value: { current, previous, reason } });
+      const reason = current || error ? null : await whyEmpty(cur.start, cur.end);
+      if (live) setDone({ key, value: { current, previous, reason, error } });
     })();
     return () => {
       live = false;
@@ -130,5 +144,5 @@ export function usePersonRebooking(employeeId: string, cur: MonthRange, prev: Mo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  return enabled && done && done.key === key ? { loading: false, ...done.value } : { loading: enabled, current: null, previous: null, reason: null };
+  return enabled && done && done.key === key ? { loading: false, ...done.value } : { loading: enabled, current: null, previous: null, reason: null, error: '' };
 }

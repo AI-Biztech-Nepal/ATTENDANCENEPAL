@@ -15,15 +15,17 @@ import { usePersonFeedback } from '@/lib/useFeedbackKpi';
 import { usePersonColleagues } from '@/lib/useColleagueKpi';
 import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { weekBars } from '@/lib/serviceKpi';
+import { problemsOf } from '@/lib/kpiLoad';
 import Avatar from '@/components/Avatar';
+import LoadProblems from '@/components/kpi/LoadProblems';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import { AttendanceCard, ColleagueCard, FeedbackCard, NpsCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
 
 // One person's KPIs: the Overview section of their pages (the layout has the way back, their name and the other
 // sections). It is opened by clicking a name on the KPI list, which also passes the month it was looking at
 // (`?date=`). Only the
-// KPIs from the owner's sheet are here, each with the chart that suits it, and nothing is added up,
-// ranked or compared. Attendance is real; the other cards wait for their input (see KPI_GROUPS).
+// KPIs from the owner's sheet are here, each with the chart that suits it, and nothing is added up or
+// ranked. Each card compares the person with their own last month, never with another person.
 export default function EmployeeKpiPage() {
   // useSearchParams needs a Suspense boundary, like the other pages that read the address.
   return (
@@ -96,6 +98,9 @@ function EmployeeKpi() {
           onNext={() => setAnchor(a => stepAnchor(system, a, 1))}
         />
       </section>
+
+      {/* A table that is missing or a refused read is said out loud, so a dash never hides a number that could not be read. */}
+      <LoadProblems problems={problemsOf(serviceData.error, rebookingData.error, feedbackData.error, colleagueData.error)} />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {attendance && (
@@ -176,7 +181,7 @@ function EmployeeKpi() {
         )}
       </div>
 
-      <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up, ranked or compared.</p>
+      <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up or ranked, and no one is compared with anyone else, only with their own last month.</p>
     </div>
   );
 }

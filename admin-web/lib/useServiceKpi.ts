@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { fetchAll } from './leaveBalance';
+import { MIGRATION, fetchAllChecked } from './kpiLoad';
 import { countByEmployee } from './serviceKpi';
 import { monthTime, timeByEmployee, type MonthTime, type TimedService } from './utilisationKpi';
 
@@ -20,6 +20,8 @@ export type ServiceMonth = {
   /** Each person's time with customers, from the services that have a time. Null when none has. */
   time: Map<string, MonthTime> | null;
   reason: TimeReason;
+  /** Set when the services could not be read (a table that is not there yet, a refused read): not the same as "no data". */
+  error: string;
 };
 
 /** Everyone's services in the month `start`..`end`: how many each performed, and how long they spent with customers.
@@ -31,10 +33,11 @@ export function useServiceMonth(start: string, end: string, enabled = true): Ser
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    // A table that is not there yet (before the import migration) gives no rows, which reads as "nothing imported".
-    fetchAll<TimedService>((a, b) =>
-      supabase.from('service_records').select('employee_id, performed_on, minutes').gte('performed_on', start).lte('performed_on', end).order('id', { ascending: true }).range(a, b)
-    ).then(rows => {
+    fetchAllChecked<TimedService>(
+      (a, b) => supabase.from('service_records').select('employee_id, performed_on, minutes').gte('performed_on', start).lte('performed_on', end).order('id', { ascending: true }).range(a, b),
+      'the services data',
+      MIGRATION.services
+    ).then(({ rows, error }) => {
       if (!live) return;
       const time = timeByEmployee(rows);
       setDone({
@@ -42,7 +45,8 @@ export function useServiceMonth(start: string, end: string, enabled = true): Ser
         value: {
           counts: rows.length > 0 ? countByEmployee(rows) : null,
           time: time.size > 0 ? time : null,
-          reason: rows.length === 0 ? 'none' : time.size === 0 ? 'notime' : null,
+          reason: error ? null : rows.length === 0 ? 'none' : time.size === 0 ? 'notime' : null,
+          error,
         },
       });
     });
@@ -53,8 +57,8 @@ export function useServiceMonth(start: string, end: string, enabled = true): Ser
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  if (!enabled) return { loading: false, counts: null, time: null, reason: null };
-  return done && done.key === key ? { loading: false, ...done.value } : { loading: true, counts: null, time: null, reason: null };
+  if (!enabled) return { loading: false, counts: null, time: null, reason: null, error: '' };
+  return done && done.key === key ? { loading: false, ...done.value } : { loading: true, counts: null, time: null, reason: null, error: '' };
 }
 
 export type PersonServices = {
@@ -71,9 +75,11 @@ export type PersonServices = {
   /** When there is no time to show for the month on screen: nothing imported, or the file had no time column. Null when
    * the month has time for someone (so a null `time` just means this person had none). */
   timeReason: TimeReason;
+  /** Set when the services could not be read: not the same as "no data". */
+  error: string;
 };
 
-const EMPTY: Omit<PersonServices, 'loading'> = { dates: [], monthHasData: false, previousTotal: null, time: null, previousTime: null, timeReason: null };
+const EMPTY: Omit<PersonServices, 'loading'> = { dates: [], monthHasData: false, previousTotal: null, time: null, previousTime: null, timeReason: null, error: '' };
 
 /** One person's services for the month `cur` and the month `prev` before it. */
 export function usePersonServices(employeeId: string, cur: MonthRange, prev: MonthRange, enabled = true): PersonServices {
@@ -90,20 +96,23 @@ export function usePersonServices(employeeId: string, cur: MonthRange, prev: Mon
       return count ?? 0;
     };
     Promise.all([
-      fetchAll<{ performed_on: string; minutes: number | null }>((a, b) =>
-        supabase
-          .from('service_records')
-          .select('performed_on, minutes')
-          .eq('employee_id', employeeId)
-          .gte('performed_on', prev.start)
-          .lte('performed_on', cur.end)
-          .order('id', { ascending: true })
-          .range(a, b)
+      fetchAllChecked<{ performed_on: string; minutes: number | null }>(
+        (a, b) =>
+          supabase
+            .from('service_records')
+            .select('performed_on, minutes')
+            .eq('employee_id', employeeId)
+            .gte('performed_on', prev.start)
+            .lte('performed_on', cur.end)
+            .order('id', { ascending: true })
+            .range(a, b),
+        'the services data',
+        MIGRATION.services
       ),
       monthCount(cur),
       monthCount(prev),
       monthCount(cur, true),
-    ]).then(([rows, curCount, prevCount, curTimed]) => {
+    ]).then(([{ rows, error }, curCount, prevCount, curTimed]) => {
       if (!live) return;
       const dates = rows.map(r => r.performed_on);
       setDone({
@@ -114,7 +123,8 @@ export function usePersonServices(employeeId: string, cur: MonthRange, prev: Mon
           previousTotal: prevCount > 0 ? dates.filter(d => d >= prev.start && d <= prev.end).length : null,
           time: monthTime(rows, cur.start, cur.end),
           previousTime: monthTime(rows, prev.start, prev.end),
-          timeReason: curCount === 0 ? 'none' : curTimed === 0 ? 'notime' : null,
+          timeReason: error ? null : curCount === 0 ? 'none' : curTimed === 0 ? 'notime' : null,
+          error,
         },
       });
     });

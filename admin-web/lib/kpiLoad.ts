@@ -1,0 +1,49 @@
+// Reading the KPI numbers from the database, and saying so when a read fails. A table that is not there yet (a migration
+// that has not been run) or a refused read used to look exactly like "no data yet": a dash. These helpers keep the first
+// problem so the pages can say it out loud, and never confuse "nothing there" with "could not read".
+
+const PAGE = 1000;
+
+/** What a failed read looks like from Supabase. */
+type DbError = { message?: string; code?: string } | null;
+
+/**
+ * Every row of a query, a page at a time (PostgREST caps a request), and the first problem if a page could not be read.
+ * Unlike fetchAll it does not swallow the error: `rows` holds what was read before it, and `error` holds the problem.
+ */
+export async function fetchAllChecked<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: unknown; error: DbError }>,
+  what: string,
+  migration?: string
+): Promise<{ rows: T[]; error: string }> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error) return { rows, error: loadProblem(what, error, migration) };
+    if (!Array.isArray(data)) break;
+    rows.push(...(data as T[]));
+    if (data.length < PAGE) break;
+  }
+  return { rows, error: '' };
+}
+
+/** A sentence for a failed read. `what` is a short noun phrase ("the services data"); `migration` names the file that
+ * creates the table, for the common case that it has not been run. */
+export function loadProblem(what: string, e: DbError, migration?: string): string {
+  if (!e) return '';
+  const text = `${e.code ?? ''} ${e.message ?? ''}`;
+  if (/PGRST205|42P01|schema cache|does not exist|could not find the table/i.test(text)) {
+    return `${what.charAt(0).toUpperCase()}${what.slice(1)} is not set up in the database yet${migration ? ` (run ${migration})` : ''}.`;
+  }
+  return `Could not load ${what}: ${e.message || 'the database did not say why'}.`;
+}
+
+/** The distinct problems, in order, skipping empty ones. */
+export const problemsOf = (...errors: string[]) => [...new Set(errors.filter(Boolean))];
+
+/** The migration that creates each table the KPIs read, for the messages. */
+export const MIGRATION = {
+  services: '20261122180000_service_import.sql',
+  forms: '20261122140000_customer_feedback.sql',
+  reviews: '20261122160000_colleague_reviews.sql',
+} as const;
