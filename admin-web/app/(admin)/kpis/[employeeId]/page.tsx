@@ -16,10 +16,12 @@ import { usePersonColleagues } from '@/lib/useColleagueKpi';
 import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { weekBars } from '@/lib/serviceKpi';
 import { problemsOf } from '@/lib/kpiLoad';
+import { useOwnKpis } from '@/lib/useOwnKpis';
+import { usePersonOwn } from '@/lib/useOwnKpiValues';
 import Avatar from '@/components/Avatar';
 import LoadProblems from '@/components/kpi/LoadProblems';
 import MonthStepper from '@/components/kpi/MonthStepper';
-import { AttendanceCard, ColleagueCard, FeedbackCard, NpsCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
+import { AttendanceCard, ColleagueCard, FeedbackCard, NpsCard, OwnKpiCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
 
 // One person's KPIs: the Overview section of their pages (the layout has the way back, their name and the other
 // sections). It is opened by clicking a name on the KPI list, which also passes the month it was looking at
@@ -57,15 +59,20 @@ function EmployeeKpi() {
   const monthName = label.split(' ')[0];
   // Which KPIs this company uses, and what it calls them (KPIs > Settings).
   const { settings, loaded } = useKpiSettings();
-  const groups = useMemo(() => visibleGroups(settings), [settings]);
+  // The KPIs the company added itself (Settings > "Add your own KPI"): one card each, with this person's typed-in number.
+  const ownKpis = useOwnKpis();
+  const groups = useMemo(() => visibleGroups(settings, ownKpis.kpis), [settings, ownKpis.kpis]);
+  const ownIds = useMemo(() => ownKpis.inUse.map(k => k.id), [ownKpis.inUse]);
   const group = (id: KpiGroupId) => groups.find(g => g.id === id);
   const on = (id: KpiId) => isKpiOn(id, settings);
   const customers = group('customers');
   const services = group('services');
   const colleagues = group('colleagues');
+  const ownGroup = group('own');
   const attendance = group('attendance');
   const feedbackData = usePersonFeedback(employeeId, { start, end }, previous, (on('feedback') || on('nps')) && start <= today);
   const colleagueData = usePersonColleagues(employeeId, { start, end }, previous, COLLEAGUE_KPIS.some(on) && start <= today);
+  const ownData = usePersonOwn(employeeId, ownIds, { start, end }, previous, ownIds.length > 0 && start <= today);
   const rebookingData = usePersonRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
 
   if (notFound || error) {
@@ -100,7 +107,7 @@ function EmployeeKpi() {
       </section>
 
       {/* A table that is missing or a refused read is said out loud, so a dash never hides a number that could not be read. */}
-      <LoadProblems problems={problemsOf(serviceData.error, rebookingData.error, feedbackData.error, colleagueData.error)} />
+      <LoadProblems problems={problemsOf(serviceData.error, rebookingData.error, feedbackData.error, colleagueData.error, ownKpis.error, ownData.error)} />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {attendance && (
@@ -179,6 +186,19 @@ function EmployeeKpi() {
         {colleagues && (
           <ColleagueCard className="md:col-span-2 xl:col-span-4" group={colleagues} settings={settings} data={colleagueData} previousName={previousName} notStarted={start > today} />
         )}
+        {ownGroup &&
+          ownKpis.inUse.map(k => (
+            <OwnKpiCard
+              key={k.id}
+              eyebrow={ownGroup.title}
+              name={k.name}
+              data={{ loading: ownData.loading, current: ownData.byKpi.get(k.id)?.current ?? null, previous: ownData.byKpi.get(k.id)?.previous ?? null, error: ownData.error }}
+              monthName={monthName}
+              previousName={previousName}
+              notStarted={start > today}
+              typeInHref={`/kpis/${employeeId}/own?date=${start}&kpi=${k.id}`}
+            />
+          ))}
       </div>
 
       <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up or ranked, and no one is compared with anyone else, only with their own last month.</p>

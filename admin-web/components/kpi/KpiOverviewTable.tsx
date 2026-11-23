@@ -12,6 +12,8 @@ import { npsState, scoreText, type NpsSummary } from '@/lib/npsKpi';
 import type { FeedbackMonth } from '@/lib/useFeedbackKpi';
 import { RELATION_OF_KPI, reviewWord, roleState, type Roles } from '@/lib/colleagueKpi';
 import { hoursText, utilisation } from '@/lib/utilisationKpi';
+import { isOwnColumn, numberText, ownIdOf } from '@/lib/ownKpi';
+import type { OwnMonth } from '@/lib/useOwnKpiValues';
 import type { Employee } from '@/lib/types';
 
 type Props = {
@@ -32,6 +34,8 @@ type Props = {
   minForms: number;
   /** Colleague feedback per person, from the month's round of reviews. `bySubject` is null when the month has no round. */
   colleagues: { loading: boolean; bySubject: Map<string, Roles> | null; error: string };
+  /** The numbers typed in for the KPIs the company added itself, per KPI and person. */
+  own: OwnMonth;
   loading: boolean;
   /** The month being shown has not begun, so there is nothing to count yet. */
   notStarted: boolean;
@@ -42,7 +46,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place). Nothing is
  * added up, ranked or compared: a dash means there is nothing to show yet, or its numbers could not be read (the note
  * above the table says so in that case). */
-export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, minForms, colleagues, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, minForms, colleagues, own, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -115,6 +119,8 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                           <ColleagueCell key={c.id} group={g} first={i === 0} loading={colleagues.loading} bySubject={colleagues.bySubject} unread={!!colleagues.error} kpiId={c.id} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'nps' ? (
                           <NpsCell key={c.id} group={g} first={i === 0} loading={feedback.loading} nps={feedback.nps} unread={!!feedback.error} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
+                        ) : isOwnColumn(c.id) ? (
+                          <OwnCell key={c.id} group={g} first={i === 0} loading={own.loading} values={own.byKpi.get(ownIdOf(c.id))} unread={!!own.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'rebooking' ? (
                           <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} unread={!!rebooking.error} employeeId={emp.id} notStarted={notStarted} windowDays={windowDays} />
                         ) : (
@@ -363,6 +369,29 @@ function ColleagueCell({ group, first, loading, bySubject, unread, kpiId, employ
       <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
         {state.given} {reviewWord(state.given)}
       </div>
+    </td>
+  );
+}
+
+/** The number typed in for this person for a KPI of the company's own, as it was typed in. A dash when none was typed in
+ * (for anyone, or only for this person: the hidden text says which). */
+function OwnCell({ group, first, loading, values, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; values: Map<string, number> | undefined; unread: boolean; employeeId: string; notStarted: boolean }) {
+  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const n = values?.get(employeeId);
+  if (loading || notStarted || unread || n == null) {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : values && values.size > 0 ? 'Not typed in for this person' : group.emptyNote;
+    return (
+      <td className={cell}>
+        <div className="text-[15px] font-bold text-slate-600">
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">{why}</span>
+        </div>
+      </td>
+    );
+  }
+  return (
+    <td className={cell} title={numberText(n)}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">{numberText(n)}</div>
     </td>
   );
 }

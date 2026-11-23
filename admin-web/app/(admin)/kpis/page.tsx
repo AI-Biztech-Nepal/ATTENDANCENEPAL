@@ -15,6 +15,8 @@ import { useColleagueMonth } from '@/lib/useColleagueKpi';
 import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { isKpiOn } from '@/lib/kpiSettings';
 import { problemsOf } from '@/lib/kpiLoad';
+import { useOwnKpis } from '@/lib/useOwnKpis';
+import { useOwnMonth } from '@/lib/useOwnKpiValues';
 import KpiOverviewTable from '@/components/kpi/KpiOverviewTable';
 import LoadProblems from '@/components/kpi/LoadProblems';
 import MonthStepper from '@/components/kpi/MonthStepper';
@@ -52,7 +54,11 @@ function Kpis() {
   const services = useServiceMonth(start, end, start <= today);
   // Which KPIs this company uses, and what it calls them (KPIs > Settings).
   const { settings, loaded } = useKpiSettings();
-  const groups = useMemo(() => visibleGroups(settings), [settings]);
+  // The KPIs the company added itself (Settings > "Add your own KPI"), and the numbers typed in for them this month.
+  const ownKpis = useOwnKpis();
+  const groups = useMemo(() => visibleGroups(settings, ownKpis.kpis), [settings, ownKpis.kpis]);
+  const ownIds = useMemo(() => ownKpis.inUse.map(k => k.id), [ownKpis.inUse]);
+  const own = useOwnMonth(ownIds, start, end, ownIds.length > 0 && start <= today);
   const feedback = useFeedbackMonth(start, end, (isKpiOn('feedback', settings) || isKpiOn('nps', settings)) && start <= today);
   const colleagues = useColleagueMonth(start, end, COLLEAGUE_KPIS.some(id => isKpiOn(id, settings)) && start <= today);
   // Rebooking waits for the settings, because the "back within N days" setting decides who counts.
@@ -66,7 +72,7 @@ function Kpis() {
   const activeDepartment = departments.includes(department) ? department : '';
   const shown = useMemo(() => (activeDepartment ? employees.filter(e => e.department === activeDepartment) : employees), [employees, activeDepartment]);
   // A table that is missing or a refused read is said out loud, so a dash never hides a number that could not be read.
-  const problems = problemsOf(services.error, rebooking.error, feedback.error, colleagues.error);
+  const problems = problemsOf(services.error, rebooking.error, feedback.error, colleagues.error, ownKpis.error, own.error);
 
   return (
     <div className="flex flex-col gap-4">
@@ -113,7 +119,7 @@ function Kpis() {
 
       <LoadProblems problems={problems} />
 
-      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} minForms={settings.minResponses} colleagues={colleagues} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} minForms={settings.minResponses} colleagues={colleagues} own={own} loading={loading || !loaded || !ownKpis.loaded} notStarted={start > today} monthStart={start} />
     </div>
   );
 }

@@ -15,13 +15,14 @@ import {
 import { leaveDatesByEmployee, weekOffDatesByGender } from './weekOff';
 import type { CalendarAnchor, CalendarSystem } from './calendar';
 import { isKpiOn, kpiLabel, wordsFor, type KpiId, type KpiSettings } from './kpiSettings';
+import { onlyOn, ownColumnId, type OwnKpi } from './ownKpi';
 
 // ---------------------------------------------------------------------------
 // What the KPI page shows. No total, no score, no ranking: every KPI stands on
 // its own, and the weights on the owner's sheet are deliberately not here.
 // ---------------------------------------------------------------------------
 
-export type KpiGroupId = 'attendance' | 'services' | 'customers' | 'colleagues';
+export type KpiGroupId = 'attendance' | 'services' | 'customers' | 'colleagues' | 'own';
 
 export type KpiGroup = {
   id: KpiGroupId;
@@ -94,6 +95,7 @@ const WAITING_TAIL: Record<KpiGroupId, string> = {
   services: 'your booking data is imported',
   customers: 'customer forms are typed in',
   colleagues: 'colleague reviews are given',
+  own: '',
 };
 
 /** "Peers, manager, C-level and training and compliance": the first name as it is, the others in lower case
@@ -104,17 +106,22 @@ function nameList(names: string[]): string {
 }
 
 /** The groups as this company sees them (Settings): the KPIs it turned off are left out (a group with none left is
- * gone), the others carry the names it gave them, and "customer" is the word it uses for its people. */
-export function visibleGroups(settings: KpiSettings): KpiGroup[] {
+ * gone), the others carry the names it gave them, and "customer" is the word it uses for its people. The KPIs the
+ * company added itself (`own`) come last, as a group of their own with one column each, in the order they were added. */
+export function visibleGroups(settings: KpiSettings, own: OwnKpi[] = []): KpiGroup[] {
   const words = wordsFor(settings.word);
-  return KPI_GROUPS.flatMap(g => {
+  const mine = onlyOn(own);
+  const ownGroup: KpiGroup[] = mine.length
+    ? [{ id: 'own', title: 'Your own KPIs', source: 'Typed in by you, each month', columns: mine.map(k => ({ id: ownColumnId(k.id), label: k.name, width: 110, connected: true })), connected: true, emptyNote: 'Nothing typed in yet', waiting: '' }]
+    : [];
+  return [...KPI_GROUPS.flatMap(g => {
     const columns = g.columns.filter(c => isKpiOn(c.id as KpiId, settings)).map(c => ({ ...c, label: kpiLabel(c.id as KpiId, settings) }));
     if (columns.length === 0) return [];
     // Only the KPIs that are still waiting are named in the "fill in" line.
     const pending = columns.filter(c => !c.connected);
     const waiting = pending.length === 0 ? '' : `${nameList(pending.map(c => c.label))} ${pending.length === 1 ? 'fills' : 'fill'} in once ${words.t(WAITING_TAIL[g.id])}.`;
     return [{ ...g, title: words.t(g.title), source: words.t(g.source), emptyNote: words.t(g.emptyNote), columns, connected: pending.length === 0, waiting }];
-  });
+  }), ...ownGroup];
 }
 
 // ---------------------------------------------------------------------------

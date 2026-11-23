@@ -3,6 +3,7 @@
 import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
 import { compare, compareServices, lowerFirst, type Change } from '@/lib/compareKpi';
 import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
+import { numberText } from '@/lib/ownKpi';
 import { serviceWord, type WeekBar } from '@/lib/serviceKpi';
 import type { PersonServices } from '@/lib/useServiceKpi';
 import { rebookingPct } from '@/lib/rebookingKpi';
@@ -89,6 +90,56 @@ function Message({ title, text }: { title: string; text?: string }) {
       <div className="text-sm font-bold text-slate-700">{title}</div>
       {text && <div className="text-xs text-slate-600">{text}</div>}
     </div>
+  );
+}
+
+/** A KPI the company added itself: the number typed in for this person for the month, as it was typed in, with a plain
+ * comparison against last month's. There is nothing to chart: it is one number, so it is shown as one. Without a number
+ * the card says so and offers to type it in. */
+export function OwnKpiCard({ eyebrow, name, data, monthName, previousName, notStarted, typeInHref, className = '' }: {
+  eyebrow: string;
+  name: string;
+  data: { loading: boolean; current: number | null; previous: number | null; error: string };
+  /** The month on screen without its year ("November", "Mangsir"). */
+  monthName: string;
+  previousName: string;
+  notStarted: boolean;
+  /** Where "Type in the numbers" goes: the Your own KPIs section, on this KPI. */
+  typeInHref: string;
+  className?: string;
+}) {
+  let body: React.ReactNode;
+  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  else if (data.loading) body = <Message title="Loading…" />;
+  else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
+  else if (data.current == null) body = <Message title={`Nothing typed in for ${monthName}`} text="Type in this person's number for the month." />;
+  else {
+    body = (
+      <div className="flex items-baseline gap-3">
+        <div className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-ink">{numberText(data.current)}</div>
+        <div className="text-[12.5px] text-slate-600">typed in for {monthName}</div>
+      </div>
+    );
+  }
+  const footer =
+    !notStarted && !data.loading && !data.error && data.current != null && data.previous != null ? (
+      <Compare change={compare(data.current, data.previous, { name: previousName, unit: 'number' })} />
+    ) : null;
+  return (
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+      {body}
+      {!notStarted && (
+        <Link
+          href={typeInHref}
+          className="mt-3 inline-flex min-h-[40px] items-center gap-1.5 self-start rounded-lg border border-teal-700 bg-white px-3.5 text-[12.5px] font-extrabold text-teal-700 hover:bg-teal-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Type in the numbers
+        </Link>
+      )}
+    </Card>
   );
 }
 

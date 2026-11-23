@@ -27,12 +27,14 @@ export async function fetchAllChecked<T>(
   return { rows, error: '' };
 }
 
+/** True when the table is not there at all (its migration has not been run), as opposed to a table that refused the read. */
+export const isMissingTable = (e: DbError) => !!e && /PGRST205|42P01|schema cache|does not exist|could not find the table/i.test(`${e.code ?? ''} ${e.message ?? ''}`);
+
 /** A sentence for a failed read. `what` is a short noun phrase ("the services data"); `migration` names the file that
  * creates the table, for the common case that it has not been run. */
 export function loadProblem(what: string, e: DbError, migration?: string): string {
   if (!e) return '';
-  const text = `${e.code ?? ''} ${e.message ?? ''}`;
-  if (/PGRST205|42P01|schema cache|does not exist|could not find the table/i.test(text)) {
+  if (isMissingTable(e)) {
     return `${what.charAt(0).toUpperCase()}${what.slice(1)} is not set up in the database yet${migration ? ` (run ${migration})` : ''}.`;
   }
   return `Could not load ${what}: ${e.message || 'the database did not say why'}.`;
@@ -46,4 +48,5 @@ export const MIGRATION = {
   services: '20261122180000_service_import.sql',
   forms: '20261122140000_customer_feedback.sql',
   reviews: '20261122160000_colleague_reviews.sql',
+  own: '20261123120000_own_kpis.sql',
 } as const;
