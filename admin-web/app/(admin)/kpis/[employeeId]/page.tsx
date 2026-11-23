@@ -15,6 +15,7 @@ import { usePersonFeedback } from '@/lib/useFeedbackKpi';
 import { usePersonColleagues } from '@/lib/useColleagueKpi';
 import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { weekBars } from '@/lib/serviceKpi';
+import { addDays } from '@/lib/taskSchedule';
 import { problemsOf } from '@/lib/kpiLoad';
 import { useOwnKpis } from '@/lib/useOwnKpis';
 import { usePersonOwn } from '@/lib/useOwnKpiValues';
@@ -54,7 +55,8 @@ function EmployeeKpi() {
   useMonthInUrl(start);
   const { loading, error, notFound, employee, current, previous: previousKpi, today } = useEmployeeKpi(employeeId, { start, end }, previous);
   const serviceData = usePersonServices(employeeId, { start, end }, previous, start <= today);
-  const bars = useMemo(() => weekBars(serviceData.dates, start, end, today, system), [serviceData.dates, start, end, today, system]);
+  // A month that has not begun still gets its weeks on the chart, empty: pass a day after its end so none is left out.
+  const bars = useMemo(() => weekBars(serviceData.dates, start, end, start > today ? addDays(end, 1) : today, system), [serviceData.dates, start, end, today, system]);
   // "November" / "Mangsir": the month's name without its year.
   const monthName = label.split(' ')[0];
   // Which KPIs this company uses, and what it calls them (KPIs > Settings).

@@ -141,22 +141,19 @@ export function OwnKpiCard({ eyebrow, name, data, monthName, previousName, notSt
 }) {
   const mode = useCardMode();
   let body: React.ReactNode;
-  // On the employee's own page a number that is not there yet is a dash where it will be, not a sentence.
-  if (mode.mine && !data.loading && !data.error && (notStarted || data.current == null)) {
+  // Nothing typed in yet (or a month that has not begun): a dash where the number goes, not a sentence.
+  if (!data.loading && !data.error && (notStarted || data.current == null)) {
     body = (
-      <div className="flex items-baseline gap-3">
-        <div aria-label={notStarted ? 'This month has not started' : `Nothing typed in for you in ${monthName}`} className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-slate-300">
+      <div title={mode.mine || notStarted ? undefined : `Nothing typed in for ${monthName}. Type in this person's number for the month.`} className="flex items-baseline gap-3">
+        <div aria-label={notStarted ? 'This month has not started' : `Nothing typed in for ${mode.mine ? 'you in ' : ''}${monthName}`} className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-slate-300">
           –
         </div>
         <div className="text-[12.5px] text-slate-600">for {monthName}</div>
       </div>
     );
-  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
-  else if (data.loading) body = <Message title="Loading…" />;
+  } else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (data.current == null)
-    body = mode.mine ? <Message title={`Nothing typed in for you in ${monthName}`} text="Your admin types this number in each month." /> : <Message title={`Nothing typed in for ${monthName}`} text="Type in this person's number for the month." />;
-  else {
+  else if (data.current != null) {
     body = (
       <div className="flex items-baseline gap-3">
         <div className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-ink">{numberText(data.current)}</div>
@@ -180,10 +177,10 @@ export function OwnKpiCard({ eyebrow, name, data, monthName, previousName, notSt
   );
 }
 
-/** What a ring card draws when there is nothing to show yet, on the employee's own page: the ring itself, empty, with dashes for the numbers. */
-function EmptyRingBody({ aria, small, rows }: { aria: string; small?: string; rows: { color: string; label: string; bordered?: boolean }[] }) {
+/** What a ring card draws when there is nothing to show yet: the ring itself, empty, with dashes for the numbers. `hint` is what an admin can do about it, shown on hover. */
+function EmptyRingBody({ aria, small, rows, hint }: { aria: string; small?: string; rows: { color: string; label: string; bordered?: boolean }[]; hint?: string }) {
   return (
-    <>
+    <div title={hint}>
       <div className="flex justify-center">
         <Ring pct={0} size={156} stroke={16} aria={aria} big="–" small={small} />
       </div>
@@ -192,7 +189,7 @@ function EmptyRingBody({ aria, small, rows }: { aria: string; small?: string; ro
           <LegendRow key={r.label} color={r.color} bordered={r.bordered} label={r.label} value="–" />
         ))}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -234,7 +231,6 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
   let body: React.ReactNode;
   if (loading || !current) body = <Message title="Loading…" />;
   else if (!current.tracked) body = <Message title="Not tracked" text={mode.mine ? 'You are excused from attendance.' : 'This person is excused from attendance.'} />;
-  else if (current.expectedDays === 0 && !mode.mine) body = <Message title="Nothing to show yet" text={notStarted ? 'This month has not started.' : 'No working days yet this month.'} />;
   else {
     const rates = attendanceRates(current);
     const onTime = current.presentDays - current.lateDays;
@@ -312,27 +308,22 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
   const mode = useCardMode();
   const total = data.dates.length;
   const partial = bars.some(b => b.partial);
+  const hint = mode.mine || notStarted ? undefined : 'No services imported for this month. Import your booking file in the Import section to fill this in.';
   let body: React.ReactNode;
-  if (mode.mine && !data.loading && !data.error && (notStarted || !data.monthHasData)) {
-    // The employee's own page draws the chart even when there is nothing in it yet: 0 and empty weekly bars.
+  if (!data.loading && !data.error && (notStarted || !data.monthHasData)) {
+    // Nothing to show yet: the chart is drawn all the same, 0 and an empty bar for each week.
     body = (
-      <>
+      <div title={hint}>
         <div className="-mt-1 mb-1 flex items-baseline gap-3">
-          <div className={`text-[34px] font-extrabold leading-[1.1] tabular-nums ${notStarted ? 'text-slate-300' : 'text-ink'}`}>{notStarted ? '–' : 0}</div>
+          {/* A dash, not a 0: with no booking file for the month nobody can say that nothing was done. */}
+          <div className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-slate-300">–</div>
           <div className="text-[12.5px] text-slate-600">services in {monthName}</div>
         </div>
-        <Bars bars={bars} aria={notStarted ? `Services performed each week in ${monthName}: this month has not started` : `Services performed each week in ${monthName}: none. Total 0.`} />
-      </>
+        <Bars bars={bars} aria={notStarted ? `Services performed each week in ${monthName}: this month has not started` : `Services performed each week in ${monthName}: no services imported for this month`} />
+      </div>
     );
-  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
-  else if (data.loading) body = <Message title="Loading…" />;
+  } else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (!data.monthHasData)
-    body = mode.mine ? (
-      <Message title={`No services for you in ${monthName}`} text="Services come from the booking file your company imports." />
-    ) : (
-      <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />
-    );
   else {
     body = (
       <>
@@ -340,14 +331,10 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
           <div className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-ink">{total}</div>
           <div className="text-[12.5px] text-slate-600">{thisMonthSoFar ? `${serviceWord(total)} this month so far` : `${serviceWord(total)} in ${monthName}`}</div>
         </div>
-        {total > 0 || mode.mine ? (
-          <Bars
-            bars={bars}
-            aria={`Services performed each week in ${monthName}: ${bars.map(b => `${b.label} ${b.value}`).join(', ')}. Total ${total}.${partial ? ' The last bar is the week so far.' : ''}`}
-          />
-        ) : (
-          <p className="m-0 text-sm text-slate-600">No services performed in {monthName}.</p>
-        )}
+        <Bars
+          bars={bars}
+          aria={`Services performed each week in ${monthName}: ${bars.map(b => `${b.label} ${b.value}`).join(', ')}. Total ${total}.${partial ? ' The last bar is the week so far.' : ''}`}
+        />
       </>
     );
   }
@@ -382,10 +369,19 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
   const mode = useCardMode();
   const { words } = useKpiSettings();
   const cur = data.current;
+  const hint =
+    mode.mine || notStarted
+      ? undefined
+      : data.reason === 'none'
+        ? 'No services imported for this month. Import your booking file in the Import section to fill this in.'
+        : data.reason === 'nocodes'
+          ? words.t('No customer codes in the file. Choose a "Customer code" column when you import, so we can tell who came back.')
+          : words.t(`No customers served in ${monthName}`);
   let body: React.ReactNode;
-  if (mode.mine && !data.loading && !data.error && (notStarted || !cur)) {
+  if (!data.loading && !data.error && (notStarted || !cur)) {
     body = (
       <EmptyRingBody
+        hint={hint}
         aria={notStarted ? 'This month has not started: nothing to show yet' : words.t(`0 percent: no customers served in ${monthName}`)}
         small="booked again"
         rows={[
@@ -394,13 +390,9 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
         ]}
       />
     );
-  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
-  else if (data.loading) body = <Message title="Loading…" />;
+  } else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (data.reason === 'none') body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
-  else if (data.reason === 'nocodes') body = <Message title={words.t('No customer codes in the file')} text={words.t('Choose a "Customer code" column when you import, so we can tell who came back.')} />;
-  else if (!cur) body = <Message title={words.t(`No customers served in ${monthName}`)} />;
-  else {
+  else if (cur) {
     const pct = rebookingPct(cur) ?? 0;
     body = (
       <>
@@ -451,10 +443,19 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
   const { words } = useKpiSettings();
   const cur = utilisation(data.time, presentDays, hoursPerDay);
   const prev = utilisation(data.previousTime, previousPresentDays, hoursPerDay);
+  const hint =
+    mode.mine || notStarted
+      ? undefined
+      : data.timeReason === 'none'
+        ? 'No services imported for this month. Import your booking file in the Import section to fill this in.'
+        : data.timeReason === 'notime'
+          ? 'No time in the file. Choose a "Time with the customer" column when you import, so the hours can be worked out.'
+          : `No services with a time in ${monthName}`;
   let body: React.ReactNode;
-  if (mode.mine && !data.loading && !attendanceLoading && !data.error && (notStarted || !!data.timeReason || !cur)) {
+  if (!data.loading && !attendanceLoading && !data.error && (notStarted || !!data.timeReason || !cur)) {
     body = (
       <EmptyRingBody
+        hint={hint}
         aria={notStarted ? 'This month has not started: nothing to show yet' : `0 percent: no time with a ${words.one} in ${monthName}`}
         small={`of ${hoursText(hoursPerDay)} h`}
         rows={[
@@ -463,23 +464,9 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
         ]}
       />
     );
-  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
-  else if (data.loading || attendanceLoading) body = <Message title="Loading…" />;
+  } else if (data.loading || attendanceLoading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (data.timeReason === 'none')
-    body = mode.mine ? (
-      <Message title={`No services for you in ${monthName}`} text="Services come from the booking file your company imports." />
-    ) : (
-      <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />
-    );
-  else if (data.timeReason === 'notime')
-    body = mode.mine ? (
-      <Message title="No time for your services" text="The booking file does not say how long each service took, so the hours cannot be worked out." />
-    ) : (
-      <Message title="No time in the file" text='Choose a "Time with the customer" column when you import, so the hours can be worked out.' />
-    );
-  else if (!cur) body = <Message title={`No services with a time in ${monthName}`} />;
-  else {
+  else if (cur) {
     body = (
       <>
         <div className="flex justify-center">
@@ -524,32 +511,25 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
   const mode = useCardMode();
   const { words } = useKpiSettings();
   const state = feedbackState(data.current, minForms);
+  const hint = mode.mine || notStarted ? undefined : !data.monthHasForms ? words.t('No forms typed in for this month. Type in the paper forms customers filled in, in the Customer feedback section.') : `No forms typed in for this employee in ${monthName}`;
   let body: React.ReactNode;
-  if (mode.mine && !data.loading && !data.error && (notStarted || !data.monthHasForms || state.kind === 'none')) {
+  if (!data.loading && !data.error && (notStarted || !data.monthHasForms || state.kind === 'none')) {
     body = (
-      <>
+      <div title={hint}>
         <div className="flex items-baseline gap-1.5">
-          <div aria-label={notStarted ? 'This month has not started' : `No customer forms for you in ${monthName}`} className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-slate-300">
+          <div aria-label={notStarted ? 'This month has not started' : `No customer forms ${mode.mine ? 'for you ' : ''}in ${monthName}`} className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-slate-300">
             –
           </div>
           <div className="text-[15px] font-semibold text-slate-600">/ 5</div>
         </div>
         <StarRows counts={[0, 0, 0, 0, 0]} />
-      </>
+      </div>
     );
-  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
-  else if (data.loading) body = <Message title="Loading…" />;
+  } else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (!data.monthHasForms)
-    body = mode.mine ? (
-      <Message title={`No customer forms for you in ${monthName}`} text={words.t('Forms are typed in by your admin from the paper forms customers fill in.')} />
-    ) : (
-      <Message title="No forms typed in for this month" text={words.t('Type in the paper forms customers filled in, in the Customer feedback section.')} />
-    );
-  else if (state.kind === 'none') body = <Message title={`No forms typed in for this employee in ${monthName}`} />;
   else if (state.kind === 'few') {
     body = <Message title="Not enough forms yet" text={`${state.count} of ${state.need} ${formWord(state.need)} typed in. The average shows once there are ${state.need}, so one or two forms do not stand for a whole month.`} />;
-  } else {
+  } else if (state.kind === 'ok') {
     const s = state.summary;
     body = (
       <>
@@ -598,12 +578,20 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
   const mode = useCardMode();
   const { words } = useKpiSettings();
   const state = npsState(data.nps, minForms);
+  const hint =
+    mode.mine || notStarted
+      ? undefined
+      : !data.monthHasNps
+        ? data.monthHasForms
+          ? words.t('No recommend numbers typed in for this month. Type in the paper forms customers filled in, in the Customer feedback section.')
+          : words.t('No forms typed in for this month. Type in the paper forms customers filled in, in the Customer feedback section.')
+        : `No recommend numbers for this employee in ${monthName}`;
   let body: React.ReactNode;
-  if (mode.mine && !data.loading && !data.error && (notStarted || !data.monthHasNps || state.kind === 'none')) {
+  if (!data.loading && !data.error && (notStarted || !data.monthHasNps || state.kind === 'none')) {
     body = (
-      <>
+      <div title={hint}>
         <div className="flex justify-center">
-          <Pie size={156} hole={52} gap={3} aria={notStarted ? 'This month has not started: nothing to show yet' : `NPS: no recommend numbers for you in ${monthName}`} slices={[]}>
+          <Pie size={156} hole={52} gap={3} aria={notStarted ? 'This month has not started: nothing to show yet' : `NPS: no recommend numbers ${mode.mine ? 'for you ' : ''}in ${monthName}`} slices={[]}>
             <text x={78} y={80} textAnchor="middle" fontSize={28} fontWeight={800} fill="#0f172a">
               –
             </text>
@@ -617,27 +605,13 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
           <LegendRow color={KPI_COLORS.warn} label="Neutral" value="–" />
           <LegendRow color={KPI_COLORS.bad} label="Not likely" value="–" />
         </div>
-      </>
+      </div>
     );
-  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
-  else if (data.loading) body = <Message title="Loading…" />;
+  } else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (!data.monthHasNps) {
-    body = mode.mine ? (
-      <Message
-        title={data.monthHasForms ? `No recommend numbers for you in ${monthName}` : `No customer forms for you in ${monthName}`}
-        text={words.t('Forms are typed in by your admin from the paper forms customers fill in.')}
-      />
-    ) : (
-      <Message
-        title={data.monthHasForms ? 'No recommend numbers typed in for this month' : 'No forms typed in for this month'}
-        text={words.t('Type in the paper forms customers filled in, in the Customer feedback section.')}
-      />
-    );
-  } else if (state.kind === 'none') body = <Message title={`No recommend numbers for this employee in ${monthName}`} />;
   else if (state.kind === 'few') {
     body = <Message title="Not enough forms yet" text={`${state.count} of ${state.need} ${formWord(state.need)} with a recommend number. The NPS shows once there are ${state.need}, so one or two forms do not stand for a whole month.`} />;
-  } else {
+  } else if (state.kind === 'ok') {
     const s = state.summary;
     body = (
       <>
@@ -705,10 +679,10 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
   const mode = useCardMode();
   const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label, relation: RELATION_OF_KPI[c.id as keyof typeof RELATION_OF_KPI] }));
   const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once one is in. ${mode.mine ? 'You never see' : 'The person never sees'} who said what.`;
-  if (data.loading || (notStarted && !mode.mine)) {
+  if (data.loading) {
     return (
       <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
-        <Message title={notStarted ? 'Nothing to show yet' : 'Loading…'} text={notStarted ? 'This month has not started.' : undefined} />
+        <Message title="Loading…" />
       </Card>
     );
   }
@@ -731,7 +705,7 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
           const last = roleState(data.previous?.[relation], relation);
           let meta: string;
           if (data.error) meta = UNREAD.title;
-          else if (state.kind === 'none') meta = mode.mine ? '' : 'No feedback this month';
+          else if (state.kind === 'none') meta = '';
           else if (state.kind === 'few') meta = `${state.given} of ${state.need} ${reviewWord(state.need)}. Shown once ${state.need === 1 ? 'it is' : `${state.need} are`} in.`;
           else meta = `${state.given} ${reviewWord(state.given)}${last.kind === 'ok' ? ` · ${lowerFirst(compare(state.average, last.average, { name: previousName, unit: 'rating' }).text)}` : ''}`;
           return (
