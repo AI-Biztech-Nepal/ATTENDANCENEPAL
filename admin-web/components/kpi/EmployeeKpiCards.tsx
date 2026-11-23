@@ -2,7 +2,6 @@
 
 import { createContext, useContext } from 'react';
 import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
-import type { Explained } from '@/lib/kpiExplain';
 import { compare, compareServices, lowerFirst, type Change } from '@/lib/compareKpi';
 import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
 import { numberText } from '@/lib/ownKpi';
@@ -29,16 +28,14 @@ const UNREAD = { title: 'Could not be read', text: 'The note above says why.' };
 /**
  * How the cards speak. On an admin's page for one person (the default) they talk ABOUT someone and tell the admin what to do ("Import
  * your booking file", "Type in a form"). On the employee's own page (`mine`) they talk TO the person, say who fills things in, offer
- * no way to change anything, link to the Feedback page, and can carry a plain-words "How is this worked out?" for each KPI.
+ * no way to change anything and link to the Feedback page.
  */
 export type CardMode = {
   mine: boolean;
-  /** A short explanation per KPI, shown under the card as "How is this worked out?". */
-  explain: Partial<Record<Explained, string>> | null;
   /** Where "See your forms" and "See what colleagues said" go (the employee's Feedback page). */
   feedbackHref: string | null;
 };
-const CardModeContext = createContext<CardMode>({ mine: false, explain: null, feedbackHref: null });
+const CardModeContext = createContext<CardMode>({ mine: false, feedbackHref: null });
 export const CardModeProvider = CardModeContext.Provider;
 const useCardMode = () => useContext(CardModeContext);
 
@@ -57,13 +54,11 @@ function CardLink({ href, children, plus = false }: { href: string; children: Re
   );
 }
 
-function Card({ eyebrow, name, className = '', footer, explain, children }: {
+function Card({ eyebrow, name, className = '', footer, children }: {
   eyebrow: string;
   name: string;
   className?: string;
   footer?: React.ReactNode;
-  /** Plain words on how the number is worked out (the employee's own page). */
-  explain?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -72,12 +67,6 @@ function Card({ eyebrow, name, className = '', footer, explain, children }: {
       <h2 className="m-0 mb-3 mt-0.5 text-[15px] font-extrabold text-ink">{name}</h2>
       {/* A column, so a message that fills the card and a link after it stack instead of the link spilling over what is below. */}
       <div className="flex flex-1 flex-col">{children}</div>
-      {explain && (
-        <details className="mt-3 text-xs text-slate-600">
-          <summary className="min-h-[28px] cursor-pointer select-none py-1 font-bold text-slate-700 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">How is this worked out?</summary>
-          <p className="m-0 mt-1 leading-relaxed">{explain}</p>
-        </details>
-      )}
       {footer && <div className="mt-auto pt-3 text-xs text-slate-600">{footer}</div>}
     </section>
   );
@@ -170,7 +159,7 @@ export function OwnKpiCard({ eyebrow, name, data, monthName, previousName, notSt
       <Compare change={compare(data.current, data.previous, { name: previousName, unit: 'number' })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.own}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
       {!notStarted && typeInHref && !mode.mine && (
         <CardLink href={typeInHref} plus>
@@ -251,7 +240,7 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
     }
   }
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.attendance}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
     </Card>
   );
@@ -312,7 +301,7 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
       </div>
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.services}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
     </Card>
   );
@@ -365,7 +354,7 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
       <Compare change={compare(currentPct, previousPct, { name: previousName, unit: 'points', shown: `${previousPct}%` })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.rebooking}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
     </Card>
   );
@@ -430,7 +419,7 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
       <Compare change={compare(cur.pct, prev.pct, { name: previousName, unit: 'points', shown: `${prev.pct}%` })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.utilisation}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
     </Card>
   );
@@ -501,7 +490,7 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
       <Compare change={compare(state.summary.average, previous.summary.average, { name: previousName, unit: 'rating' })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.feedback}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
       {typeInHref && !mode.mine && (
         <CardLink href={typeInHref} plus>
@@ -589,7 +578,7 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
       <Compare change={compare(state.summary.score, previous.summary.score, { name: previousName, unit: 'points', shown: scoreText(previous.summary.score) })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} explain={mode.explain?.nps}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
     </Card>
   );
@@ -618,13 +607,13 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
   const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once one is in. ${mode.mine ? 'You never see' : 'The person never sees'} who said what.`;
   if (notStarted || data.loading) {
     return (
-      <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer} explain={mode.explain?.colleagues}>
+      <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
         <Message title={notStarted ? 'Nothing to show yet' : 'Loading…'} text={notStarted ? 'This month has not started.' : undefined} />
       </Card>
     );
   }
   return (
-    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer} explain={mode.explain?.colleagues}>
+    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
       <div className="flex flex-col">
         <div aria-hidden="true" className="hidden flex-wrap items-center gap-x-6 sm:flex">
           <div className="sm:w-[250px]" />

@@ -6,7 +6,6 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
 import { otherCalendarSpan, visibleGroups, type KpiGroupId } from '@/lib/kpi';
 import { isKpiOn, kpiLabel, type KpiId } from '@/lib/kpiSettings';
-import { explanations } from '@/lib/kpiExplain';
 import { problemsOf } from '@/lib/kpiLoad';
 import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { weekBars } from '@/lib/serviceKpi';
@@ -22,10 +21,10 @@ import LoadProblems from '@/components/kpi/LoadProblems';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import { AttendanceCard, CardModeProvider, ColleagueCard, FeedbackCard, NpsCard, OwnKpiCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
 
-// My KPIs: the person's own KPIs from the owner's sheet (and any the company added), each with the chart that suits it and a plain-words
-// "How is this worked out?", next to last month's. It is the same numbers, worked out the same way, as the admin's page for this
-// person, but it is read only, it talks to the person, and it only ever shows their own: nothing is added up, ranked or set against
-// a colleague. What customers and colleagues said, and giving feedback, are on the Feedback page.
+// My KPIs: the person's own KPIs from the owner's sheet (and any the company added), each with the chart that suits it, next to last
+// month's. It is the same numbers, worked out the same way, as the admin's page for this person, but it is read only, it talks to
+// the person, and it only ever shows their own: nothing is added up, ranked or set against a colleague. What customers and
+// colleagues said, and giving feedback, are on the Feedback page.
 export default function MyKpisPage() {
   usePageTitle('My KPIs');
   const employeeId = useMyEmployeeId();
@@ -86,8 +85,7 @@ function MyKpis({ employeeId }: { employeeId: string }) {
   const colleagueData = useMyColleagues({ start, end }, previous, COLLEAGUE_KPIS.some(on) && start <= today);
   const ownData = usePersonOwn(employeeId, ownIds, { start, end }, previous, ownIds.length > 0 && start <= today);
   const rebookingData = useMyRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
-  const explain = useMemo(() => explanations(settings), [settings]);
-  const mode = useMemo(() => ({ mine: true, explain, feedbackHref: '/my-feedback' }), [explain]);
+  const mode = useMemo(() => ({ mine: true, feedbackHref: '/my-feedback' }), []);
 
   if (notFound || error) {
     return (
@@ -107,7 +105,7 @@ function MyKpis({ employeeId }: { employeeId: string }) {
         </div>
 
         <p className="m-0 max-w-[760px] text-[13px] leading-relaxed text-slate-600">
-          Your KPIs for {label}, with last month next to each. Under each one, &quot;How is this worked out?&quot; says what counts. You see only your own numbers, and nothing here is added up or ranked.
+          Your KPIs for {label}, with last month next to each. You see only your own numbers, and nothing here is added up or ranked.
         </p>
 
         {/* A table that is missing or a refused read is said out loud, so a dash never hides a number that could not be read. */}
