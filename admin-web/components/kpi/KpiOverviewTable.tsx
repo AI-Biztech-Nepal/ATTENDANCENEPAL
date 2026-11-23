@@ -6,6 +6,8 @@ import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
 import { serviceWord } from '@/lib/serviceKpi';
 import { rebookingPct, type Rebooking } from '@/lib/rebookingKpi';
 import type { RebookingReason } from '@/lib/useRebookingKpi';
+import type { ServiceMonth } from '@/lib/useServiceKpi';
+import { hoursText, utilisation } from '@/lib/utilisationKpi';
 import type { Employee } from '@/lib/types';
 
 type Props = {
@@ -13,8 +15,11 @@ type Props = {
   groups: KpiGroup[];
   employees: Employee[];
   attendance: Map<string, AttendanceKpi>;
-  /** Services performed in the month, per person. `counts` is null when no booking file covers the month. */
-  services: { loading: boolean; counts: Map<string, number> | null };
+  /** Services performed in the month, per person (`counts` is null when no booking file covers the month), and the time
+   * each spent with customers. */
+  services: ServiceMonth;
+  /** The working day, in hours (Settings), that time with customers is measured against. */
+  hoursPerDay: number;
   /** Rebooking per person: of the customers served, how many booked again within `windowDays`. */
   rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason };
   windowDays: number;
@@ -28,7 +33,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place; the
  * groups themselves are named in the "Not connected yet" card under the table). Nothing is added up or
  * compared: a dash means there is nothing to show yet. */
-export default function KpiOverviewTable({ groups, employees, attendance, services, rebooking, windowDays, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -93,6 +98,8 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                           <AttendanceCell key={c.id} kpi={kpi} notStarted={notStarted} />
                         ) : c.id === 'services' ? (
                           <ServicesCell key={c.id} group={g} first={i === 0} loading={services.loading} counts={services.counts} employeeId={emp.id} notStarted={notStarted} />
+                        ) : c.id === 'utilisation' ? (
+                          <UtilisationCell key={c.id} group={g} first={i === 0} services={services} kpi={kpi} hoursPerDay={hoursPerDay} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'rebooking' ? (
                           <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} employeeId={emp.id} notStarted={notStarted} windowDays={windowDays} />
                         ) : (
@@ -192,6 +199,30 @@ function RebookingCell({ group, first, loading, byEmployee, reason, employeeId, 
       <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
         {r.back} of {r.served}
       </div>
+    </td>
+  );
+}
+
+/** The share of the working day this person spent with customers, averaged over the days they worked, with the hours a day
+ * under it. A dash says why there is nothing to show (not imported, no time in the file, no timed services). */
+function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId, notStarted }: { group: KpiGroup; first: boolean; services: ServiceMonth; kpi: AttendanceKpi | undefined; hoursPerDay: number; employeeId: string; notStarted: boolean }) {
+  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const u = services.time ? utilisation(services.time.get(employeeId), kpi?.tracked ? kpi.presentDays : null, hoursPerDay) : null;
+  if (services.loading || notStarted || services.reason || !u) {
+    const why = services.loading ? 'Loading' : notStarted ? 'Month has not started' : services.reason === 'notime' ? 'No time in the file' : services.reason === 'none' ? group.emptyNote : 'No services with a time';
+    return (
+      <td className={cell}>
+        <div className="text-[15px] font-bold text-slate-600">
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">{why}</span>
+        </div>
+      </td>
+    );
+  }
+  return (
+    <td className={cell} title={`${hoursText(u.avgHours)} hours a day with a customer, out of ${hoursText(u.hoursPerDay)}, over ${u.days} days worked`}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">{u.pct}%</div>
+      <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">{hoursText(u.avgHours)} h a day</div>
     </td>
   );
 }

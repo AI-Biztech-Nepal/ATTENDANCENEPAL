@@ -54,7 +54,7 @@ export const KPI_GROUPS: KpiGroup[] = [
     columns: [
       { id: 'services', label: 'Services performed', width: 100, connected: true },
       { id: 'rebooking', label: 'Rebooking rate', width: 100, connected: true },
-      { id: 'utilisation', label: 'Hour utilisation per day', width: 120, connected: false },
+      { id: 'utilisation', label: 'Hour utilisation per day', width: 120, connected: true },
     ],
     connected: false,
     emptyNote: 'No import yet',

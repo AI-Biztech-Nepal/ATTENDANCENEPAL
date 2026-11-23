@@ -5,6 +5,7 @@ import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
 import { serviceWord, type WeekBar } from '@/lib/serviceKpi';
 import type { PersonServices } from '@/lib/useServiceKpi';
 import { rebookingPct } from '@/lib/rebookingKpi';
+import { hoursText, restOfDay, utilisation } from '@/lib/utilisationKpi';
 import type { PersonRebooking } from '@/lib/useRebookingKpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { Bars, KPI_COLORS, Pie, Ring } from './KpiCharts';
@@ -210,6 +211,56 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
   }
   const previousPct = data.previous ? rebookingPct(data.previous) : null;
   const footer = !notStarted && !data.loading && !data.reason && previousPct != null ? `${previousName}: ${previousPct}%` : null;
+  return (
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+      {body}
+    </Card>
+  );
+}
+
+/** Hour utilisation per day: a ring of how much of the working day this person spends with customers, averaged over the
+ * days they worked, with the hours beside it. Under it, last month. The empty states say what is missing. */
+export function UtilisationCard({ eyebrow, name, data, presentDays, previousPresentDays, attendanceLoading, hoursPerDay, monthName, previousName, notStarted, className = '' }: {
+  eyebrow: string;
+  name: string;
+  data: PersonServices;
+  /** Days at work this month and last, from attendance (null for someone excused from attendance). */
+  presentDays: number | null;
+  previousPresentDays: number | null;
+  attendanceLoading: boolean;
+  /** The working day in hours (Settings). */
+  hoursPerDay: number;
+  monthName: string;
+  previousName: string;
+  notStarted: boolean;
+  className?: string;
+}) {
+  const { words } = useKpiSettings();
+  const cur = utilisation(data.time, presentDays, hoursPerDay);
+  const prev = utilisation(data.previousTime, previousPresentDays, hoursPerDay);
+  let body: React.ReactNode;
+  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  else if (data.loading || attendanceLoading) body = <Message title="Loading…" />;
+  else if (data.timeReason === 'none') body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
+  else if (data.timeReason === 'notime') body = <Message title="No time in the file" text='Choose a "Time with the customer" column when you import, so the hours can be worked out.' />;
+  else if (!cur) body = <Message title={`No services with a time in ${monthName}`} />;
+  else {
+    body = (
+      <>
+        <div className="flex justify-center">
+          <Ring pct={cur.pct} size={156} stroke={16} aria={`${cur.pct} percent: ${hoursText(cur.avgHours)} hours of a ${hoursText(cur.hoursPerDay)}-hour day with a ${words.one}`} big={`${cur.pct}%`} small={`${hoursText(cur.avgHours)} of ${hoursText(cur.hoursPerDay)} h`} />
+        </div>
+        <div className="mt-3.5 flex flex-col gap-2">
+          <LegendRow color={KPI_COLORS.accent} label={`With a ${words.one}`} value={`${hoursText(cur.avgHours)} h a day`} />
+          <LegendRow color={KPI_COLORS.track} bordered label="Rest of the day" value={`${hoursText(restOfDay(cur))} h`} />
+        </div>
+        <p className="m-0 mt-2.5 text-xs leading-normal text-slate-600">
+          {words.t(`Time with customers, out of a ${hoursText(cur.hoursPerDay)}-hour working day, averaged over ${cur.days} ${cur.days === 1 ? 'day' : 'days'} worked.`)}
+        </p>
+      </>
+    );
+  }
+  const footer = !notStarted && !data.loading && !attendanceLoading && !data.timeReason && prev ? `${previousName}: ${prev.pct}%` : null;
   return (
     <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}

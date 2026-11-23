@@ -8,7 +8,7 @@ import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calen
 import { otherCalendarSpan, parseMonthParam, visibleGroups } from '@/lib/kpi';
 import { useKpiOverview } from '@/lib/useKpiOverview';
 import { useKpiSettings } from '@/lib/useKpiSettings';
-import { useServiceCounts } from '@/lib/useServiceKpi';
+import { useServiceMonth } from '@/lib/useServiceKpi';
 import { useRebooking } from '@/lib/useRebookingKpi';
 import { isKpiOn } from '@/lib/kpiSettings';
 import KpiOverviewTable from '@/components/kpi/KpiOverviewTable';
@@ -44,7 +44,7 @@ function Kpis() {
   const isThisMonth = thisMonth.start === start;
 
   const { loading, error, employees, attendance, today } = useKpiOverview(start, end);
-  const services = useServiceCounts(start, end, start <= today);
+  const services = useServiceMonth(start, end, start <= today);
   // Which KPIs this company uses, and what it calls them (KPIs > Settings).
   const { settings, loaded } = useKpiSettings();
   const groups = useMemo(() => visibleGroups(settings), [settings]);
@@ -103,7 +103,7 @@ function Kpis() {
         </p>
       )}
 
-      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} rebooking={rebooking} windowDays={settings.repeatDays} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
 
       {waiting.length > 0 && (
         <section aria-labelledby="not-connected" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">

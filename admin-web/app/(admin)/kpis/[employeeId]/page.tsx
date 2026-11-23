@@ -14,7 +14,7 @@ import { usePersonRebooking } from '@/lib/useRebookingKpi';
 import { weekBars } from '@/lib/serviceKpi';
 import Avatar from '@/components/Avatar';
 import MonthStepper from '@/components/kpi/MonthStepper';
-import { AttendanceCard, ColleagueCard, PendingCard, RebookingCard, ServicesCard } from '@/components/kpi/EmployeeKpiCards';
+import { AttendanceCard, ColleagueCard, PendingCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
 
 // One person's KPIs: the Overview section of their pages (the layout has the way back, their name and the other
 // sections). It is opened by clicking a name on the KPI list, which also passes the month it was looking at
@@ -129,7 +129,20 @@ function EmployeeKpi() {
             notStarted={start > today}
           />
         )}
-        {services && on('utilisation') && <PendingCard group={services} name={kpiLabel('utilisation', settings)} ring />}
+        {services && on('utilisation') && (
+          <UtilisationCard
+            eyebrow={services.title}
+            name={kpiLabel('utilisation', settings)}
+            data={serviceData}
+            presentDays={current?.tracked ? current.presentDays : null}
+            previousPresentDays={previousKpi?.tracked ? previousKpi.presentDays : null}
+            attendanceLoading={loading}
+            hoursPerDay={settings.hoursPerDay}
+            monthName={monthName}
+            previousName={previousName}
+            notStarted={start > today}
+          />
+        )}
         {customers && on('feedback') && <PendingCard group={customers} name={kpiLabel('feedback', settings)} />}
         {customers && on('nps') && <PendingCard group={customers} name={kpiLabel('nps', settings)} ring />}
         {colleagues && <ColleagueCard className="md:col-span-2 xl:col-span-4" group={colleagues} settings={settings} />}
