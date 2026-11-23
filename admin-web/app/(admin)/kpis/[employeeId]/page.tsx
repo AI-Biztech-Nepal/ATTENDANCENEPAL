@@ -12,6 +12,8 @@ import { useMonthInUrl } from '@/lib/useMonthInUrl';
 import { usePersonServices } from '@/lib/useServiceKpi';
 import { usePersonRebooking } from '@/lib/useRebookingKpi';
 import { usePersonFeedback } from '@/lib/useFeedbackKpi';
+import { usePersonColleagues } from '@/lib/useColleagueKpi';
+import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { weekBars } from '@/lib/serviceKpi';
 import Avatar from '@/components/Avatar';
 import MonthStepper from '@/components/kpi/MonthStepper';
@@ -61,6 +63,7 @@ function EmployeeKpi() {
   const colleagues = group('colleagues');
   const attendance = group('attendance');
   const feedbackData = usePersonFeedback(employeeId, { start, end }, previous, (on('feedback') || on('nps')) && start <= today);
+  const colleagueData = usePersonColleagues(employeeId, { start, end }, previous, COLLEAGUE_KPIS.some(on) && start <= today);
   const rebookingData = usePersonRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
 
   if (notFound || error) {
@@ -168,7 +171,9 @@ function EmployeeKpi() {
             notStarted={start > today}
           />
         )}
-        {colleagues && <ColleagueCard className="md:col-span-2 xl:col-span-4" group={colleagues} settings={settings} />}
+        {colleagues && (
+          <ColleagueCard className="md:col-span-2 xl:col-span-4" group={colleagues} settings={settings} data={colleagueData} previousName={previousName} notStarted={start > today} />
+        )}
       </div>
 
       <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up, ranked or compared.</p>

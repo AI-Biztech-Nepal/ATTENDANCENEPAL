@@ -10,6 +10,7 @@ import type { ServiceMonth } from '@/lib/useServiceKpi';
 import { averageText, feedbackState, formWord, type FeedbackSummary } from '@/lib/feedbackKpi';
 import { npsState, scoreText, type NpsSummary } from '@/lib/npsKpi';
 import type { FeedbackMonth } from '@/lib/useFeedbackKpi';
+import { RELATION_OF_KPI, reviewWord, roleState, type Roles } from '@/lib/colleagueKpi';
 import { hoursText, utilisation } from '@/lib/utilisationKpi';
 import type { Employee } from '@/lib/types';
 
@@ -29,6 +30,8 @@ type Props = {
   /** Customer feedback and NPS per person from the forms typed in, and how many forms a month needs before they show (Settings). */
   feedback: FeedbackMonth;
   minForms: number;
+  /** Colleague feedback per person, from the month's round of reviews. `bySubject` is null when the month has no round. */
+  colleagues: { loading: boolean; bySubject: Map<string, Roles> | null };
   loading: boolean;
   /** The month being shown has not begun, so there is nothing to count yet. */
   notStarted: boolean;
@@ -39,7 +42,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place; the
  * groups themselves are named in the "Not connected yet" card under the table). Nothing is added up or
  * compared: a dash means there is nothing to show yet. */
-export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, minForms, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, minForms, colleagues, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -108,6 +111,8 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                           <UtilisationCell key={c.id} group={g} first={i === 0} services={services} kpi={kpi} hoursPerDay={hoursPerDay} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'feedback' ? (
                           <FeedbackCell key={c.id} group={g} first={i === 0} loading={feedback.loading} byEmployee={feedback.byEmployee} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
+                        ) : c.id === 'peers' || c.id === 'manager' || c.id === 'clevel' || c.id === 'training' ? (
+                          <ColleagueCell key={c.id} group={g} first={i === 0} loading={colleagues.loading} bySubject={colleagues.bySubject} kpiId={c.id} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'nps' ? (
                           <NpsCell key={c.id} group={g} first={i === 0} loading={feedback.loading} nps={feedback.nps} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'rebooking' ? (
@@ -312,6 +317,47 @@ function NpsCell({ group, first, loading, nps, minForms, employeeId, notStarted 
       <div className="text-sm font-extrabold tabular-nums text-ink">{scoreText(s.score)}</div>
       <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
         {s.count} {formWord(s.count)}
+      </div>
+    </td>
+  );
+}
+
+/** The average rating out of 5 a person got from one kind of colleague in the month's round, with how many reviews under it.
+ * Held back (a dash and "2 of 3 reviews") until enough are in: three from peers, one from each of the others. */
+function ColleagueCell({ group, first, loading, bySubject, kpiId, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; bySubject: Map<string, Roles> | null; kpiId: keyof typeof RELATION_OF_KPI; employeeId: string; notStarted: boolean }) {
+  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const relation = RELATION_OF_KPI[kpiId];
+  const state = roleState(bySubject?.get(employeeId)?.[relation], relation);
+  if (loading || notStarted || !bySubject || state.kind === 'none') {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : !bySubject ? group.emptyNote : 'Nobody asked';
+    return (
+      <td className={cell}>
+        <div className="text-[15px] font-bold text-slate-600">
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">{why}</span>
+        </div>
+      </td>
+    );
+  }
+  if (state.kind === 'few') {
+    return (
+      <td className={cell} title={`Held back until ${state.need} ${reviewWord(state.need)} ${state.need === 1 ? 'is' : 'are'} in`}>
+        <div className="text-[15px] font-bold text-slate-600" aria-hidden="true">
+          –
+        </div>
+        <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
+          {state.given} of {state.need} {reviewWord(state.need)}
+        </div>
+      </td>
+    );
+  }
+  return (
+    <td className={cell} title={`Average of ${state.given} ${reviewWord(state.given)} (${state.asked} asked)`}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">
+        {averageText(state.average)} <span className="text-[11.5px] font-medium text-slate-600">/ 5</span>
+      </div>
+      <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
+        {state.given} {reviewWord(state.given)}
       </div>
     </td>
   );

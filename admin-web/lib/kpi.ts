@@ -66,7 +66,7 @@ export const KPI_GROUPS: KpiGroup[] = [
     source: 'From customer forms typed in by staff',
     columns: [
       { id: 'feedback', label: 'Customer feedback', width: 110, connected: true },
-      { id: 'nps', label: 'NPS', width: 90, connected: true },
+      { id: 'nps', label: 'NPS', width: 110, connected: true },
     ],
     connected: false,
     emptyNote: 'No forms yet',
@@ -77,10 +77,10 @@ export const KPI_GROUPS: KpiGroup[] = [
     title: 'Colleague feedback',
     source: 'From monthly reviews',
     columns: [
-      { id: 'peers', label: 'Peers', width: 90, connected: false },
-      { id: 'manager', label: 'Manager', width: 90, connected: false },
-      { id: 'clevel', label: 'C-level', width: 90, connected: false },
-      { id: 'training', label: 'Training and compliance', width: 120, connected: false },
+      { id: 'peers', label: 'Peers', width: 100, connected: true },
+      { id: 'manager', label: 'Manager', width: 100, connected: true },
+      { id: 'clevel', label: 'C-level', width: 100, connected: true },
+      { id: 'training', label: 'Training and compliance', width: 120, connected: true },
     ],
     connected: false,
     emptyNote: 'No reviews yet',

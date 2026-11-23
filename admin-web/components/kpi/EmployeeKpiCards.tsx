@@ -8,6 +8,8 @@ import { rebookingPct } from '@/lib/rebookingKpi';
 import { hoursText, restOfDay, utilisation } from '@/lib/utilisationKpi';
 import { averageText, feedbackState, formWord } from '@/lib/feedbackKpi';
 import { npsState, scoreText, scoreWords, sharePct } from '@/lib/npsKpi';
+import { PEER_MIN, RELATION_OF_KPI, reviewWord, roleState } from '@/lib/colleagueKpi';
+import type { PersonColleagues } from '@/lib/useColleagueKpi';
 import type { PersonFeedback } from '@/lib/useFeedbackKpi';
 import Link from 'next/link';
 import type { PersonRebooking } from '@/lib/useRebookingKpi';
@@ -421,22 +423,83 @@ const COLLEAGUES: { id: KpiId; label: string }[] = [
   { id: 'training', label: 'Feedback from training and compliance' },
 ];
 
-/** The four colleague-feedback KPIs on one scale of 0 to 5. Empty until reviews exist. */
-export function ColleagueCard({ group, settings, className = '' }: { group: KpiGroup; settings: KpiSettings; className?: string }) {
-  const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label }));
+/** The four colleague-feedback KPIs on one scale of 0 to 5: the average rating from peers, from the manager, from the C-level
+ * executive and from training and compliance, in the month's round of reviews. A role shows once enough reviews are in
+ * (three from peers, one from each of the others). Under each, how many reviews it is and last month's average. */
+export function ColleagueCard({ group, settings, data, previousName, notStarted, className = '' }: {
+  group: KpiGroup;
+  settings: KpiSettings;
+  data: PersonColleagues;
+  previousName: string;
+  notStarted: boolean;
+  className?: string;
+}) {
+  const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label, relation: RELATION_OF_KPI[c.id as keyof typeof RELATION_OF_KPI] }));
+  const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once their review is in. The person reviewed never sees who said what.`;
+  if (notStarted || data.loading) {
+    return (
+      <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
+        <Message title={notStarted ? 'Nothing to show yet' : 'Loading…'} text={notStarted ? 'This month has not started.' : undefined} />
+      </Card>
+    );
+  }
   return (
-    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={`${group.source}. Not connected yet. Comments will be seen by management only.`}>
+    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
       <div className="flex flex-col">
-        {rows.map(({ id, label }) => (
-          <div key={id} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">
-            <div className="text-sm font-bold text-ink sm:w-[250px]">{label}</div>
-            <div aria-hidden="true" className="h-3 min-w-[120px] flex-1 rounded-full bg-slate-100" />
-            <div className="w-[74px] text-right text-2xl font-extrabold leading-none text-slate-400">
-              <span aria-hidden="true">–</span>
-              <span className="sr-only">{group.emptyNote}</span>
-            </div>
+        <div aria-hidden="true" className="hidden flex-wrap items-center gap-x-6 sm:flex">
+          <div className="sm:w-[250px]" />
+          <div className="relative h-[14px] min-w-[120px] flex-1">
+            {[0, 1, 2, 3, 4, 5].map(n => (
+              <span key={n} className="absolute -translate-x-1/2 text-[11px] text-slate-600" style={{ left: `${n * 20}%` }}>
+                {n}
+              </span>
+            ))}
           </div>
-        ))}
+          <div className="w-[74px]" />
+        </div>
+        {rows.map(({ id, label, relation }) => {
+          const state = roleState(data.current?.[relation], relation);
+          const last = roleState(data.previous?.[relation], relation);
+          let meta: string;
+          if (!data.roundExists) meta = 'No round of reviews for this month yet';
+          else if (state.kind === 'none') meta = 'Nobody was asked this month';
+          else if (state.kind === 'few') meta = `${state.given} of ${state.need} ${reviewWord(state.need)} given. Shown once ${state.need === 1 ? 'it is' : `${state.need} are`} in.`;
+          else meta = `${state.asked > state.given ? `${state.given} of ${state.asked} reviews given` : `${state.given} ${reviewWord(state.given)}`}${last.kind === 'ok' ? ` · ${previousName} ${averageText(last.average)}` : ''}`;
+          return (
+            <div key={id} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">
+              <div className="sm:w-[250px]">
+                <div className="text-sm font-bold text-ink">{label}</div>
+                <div className="mt-0.5 text-[12.5px] text-slate-600">{meta}</div>
+              </div>
+              <div className="relative h-[18px] min-w-[120px] flex-1">
+                {[0, 1, 2, 3, 4, 5].map(n => (
+                  <i key={n} aria-hidden="true" className="absolute bottom-0 top-0 w-px bg-slate-200" style={{ left: `${n * 20}%` }} />
+                ))}
+                {state.kind === 'ok' && (
+                  <div
+                    role="img"
+                    aria-label={`${label}: ${averageText(state.average)} out of 5 from ${state.given} ${reviewWord(state.given)}`}
+                    className="absolute left-0 top-[3px] h-3 rounded-r-md"
+                    style={{ width: `${(state.average / 5) * 100}%`, background: KPI_COLORS.accent }}
+                  />
+                )}
+              </div>
+              <div className="w-[74px] text-right text-2xl font-extrabold leading-none tabular-nums text-ink">
+                {state.kind === 'ok' ? (
+                  <>
+                    {averageText(state.average)}
+                    <span className="text-[13px] font-semibold text-slate-600"> / 5</span>
+                  </>
+                ) : (
+                  // The line under the name already says why there is no number, so the dash is only for the eye.
+                  <span aria-hidden="true" className="text-slate-400">
+                    –
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </Card>
   );

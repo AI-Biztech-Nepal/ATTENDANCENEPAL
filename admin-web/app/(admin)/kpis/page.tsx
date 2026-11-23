@@ -11,6 +11,8 @@ import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useServiceMonth } from '@/lib/useServiceKpi';
 import { useRebooking } from '@/lib/useRebookingKpi';
 import { useFeedbackMonth } from '@/lib/useFeedbackKpi';
+import { useColleagueMonth } from '@/lib/useColleagueKpi';
+import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { isKpiOn } from '@/lib/kpiSettings';
 import KpiOverviewTable from '@/components/kpi/KpiOverviewTable';
 import MonthStepper from '@/components/kpi/MonthStepper';
@@ -50,6 +52,7 @@ function Kpis() {
   const { settings, loaded } = useKpiSettings();
   const groups = useMemo(() => visibleGroups(settings), [settings]);
   const feedback = useFeedbackMonth(start, end, (isKpiOn('feedback', settings) || isKpiOn('nps', settings)) && start <= today);
+  const colleagues = useColleagueMonth(start, end, COLLEAGUE_KPIS.some(id => isKpiOn(id, settings)) && start <= today);
   // Rebooking waits for the settings, because the "back within N days" setting decides who counts.
   const rebooking = useRebooking(start, end, settings.repeatDays, loaded && isKpiOn('rebooking', settings) && start <= today);
 
@@ -105,7 +108,7 @@ function Kpis() {
         </p>
       )}
 
-      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} minForms={settings.minResponses} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} minForms={settings.minResponses} colleagues={colleagues} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
 
       {waiting.length > 0 && (
         <section aria-labelledby="not-connected" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">
