@@ -87,7 +87,12 @@ export function Pie({ slices, size = 168, hole = 0, gap = 0, label, aria, childr
   });
   return (
     <svg role="img" aria-label={aria} width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block shrink-0">
-      {shapes}
+      {parts.length === 0 ? (
+        // Nothing to slice yet: draw the empty pie (or the empty ring of a donut), so the chart is there to be filled.
+        hole > 0 ? <circle cx={c} cy={c} r={(ro + hole) / 2} fill="none" stroke={KPI_COLORS.track} strokeWidth={ro - hole} /> : <circle cx={c} cy={c} r={ro} fill={KPI_COLORS.track} />
+      ) : (
+        shapes
+      )}
       {children}
     </svg>
   );

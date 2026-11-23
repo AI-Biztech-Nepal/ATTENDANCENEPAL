@@ -9,6 +9,7 @@ import { isKpiOn, kpiLabel, type KpiId } from '@/lib/kpiSettings';
 import { problemsOf } from '@/lib/kpiLoad';
 import { COLLEAGUE_KPIS } from '@/lib/colleagueKpi';
 import { weekBars } from '@/lib/serviceKpi';
+import { addDays } from '@/lib/taskSchedule';
 import { useEmployeeKpi } from '@/lib/useEmployeeKpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useOwnKpis } from '@/lib/useOwnKpis';
@@ -66,7 +67,8 @@ function MyKpis({ employeeId }: { employeeId: string }) {
 
   const { loading, error, notFound, current, previous: previousKpi, today } = useEmployeeKpi(employeeId, { start, end }, previous);
   const serviceData = usePersonServices(employeeId, { start, end }, previous, start <= today);
-  const bars = useMemo(() => weekBars(serviceData.dates, start, end, today, system), [serviceData.dates, start, end, today, system]);
+  // A month that has not begun still gets its weeks on the chart, empty: pass a day after its end so none is left out.
+  const bars = useMemo(() => weekBars(serviceData.dates, start, end, start > today ? addDays(end, 1) : today, system), [serviceData.dates, start, end, today, system]);
 
   // Which KPIs this company uses, what it calls them and the rules (set by the admin in KPIs > Settings), and the KPIs it added itself.
   const { settings, loaded } = useKpiSettings();

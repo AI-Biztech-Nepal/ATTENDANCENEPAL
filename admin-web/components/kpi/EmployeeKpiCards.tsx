@@ -141,7 +141,17 @@ export function OwnKpiCard({ eyebrow, name, data, monthName, previousName, notSt
 }) {
   const mode = useCardMode();
   let body: React.ReactNode;
-  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  // On the employee's own page a number that is not there yet is a dash where it will be, not a sentence.
+  if (mode.mine && !data.loading && !data.error && (notStarted || data.current == null)) {
+    body = (
+      <div className="flex items-baseline gap-3">
+        <div aria-label={notStarted ? 'This month has not started' : `Nothing typed in for you in ${monthName}`} className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-slate-300">
+          –
+        </div>
+        <div className="text-[12.5px] text-slate-600">for {monthName}</div>
+      </div>
+    );
+  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (data.current == null)
@@ -170,6 +180,42 @@ export function OwnKpiCard({ eyebrow, name, data, monthName, previousName, notSt
   );
 }
 
+/** What a ring card draws when there is nothing to show yet, on the employee's own page: the ring itself, empty, with dashes for the numbers. */
+function EmptyRingBody({ aria, small, rows }: { aria: string; small?: string; rows: { color: string; label: string; bordered?: boolean }[] }) {
+  return (
+    <>
+      <div className="flex justify-center">
+        <Ring pct={0} size={156} stroke={16} aria={aria} big="–" small={small} />
+      </div>
+      <div className="mt-3.5 flex flex-col gap-2">
+        {rows.map(r => (
+          <LegendRow key={r.label} color={r.color} bordered={r.bordered} label={r.label} value="–" />
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** A bar for each rating from 5 stars to 1, with how many gave it. All empty when no form has a rating yet. */
+function StarRows({ counts }: { counts: number[] }) {
+  const top = Math.max(...counts, 1);
+  return (
+    <div role="img" aria-label={`Ratings: ${[5, 4, 3, 2, 1].map(n => `${n} ${n === 1 ? 'star' : 'stars'} ${counts[n - 1]}`).join(', ')}`} className="mt-3.5 flex flex-col gap-2">
+      {[5, 4, 3, 2, 1].map(n => (
+        <div key={n} className="flex items-center gap-2.5">
+          <span className="w-[52px] whitespace-nowrap text-[12.5px] text-slate-700">
+            {n} {n === 1 ? 'star' : 'stars'}
+          </span>
+          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full rounded-full" style={{ width: `${(counts[n - 1] / top) * 100}%`, background: KPI_COLORS.accent }} />
+          </div>
+          <span className="w-[22px] text-right text-[12.5px] font-extrabold tabular-nums text-ink">{counts[n - 1]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Attendance and punctuality: the month's working days as a pie of on time / late / absent, with the two
  * percentages beside it. The one KPI that is real so far; the others below wait for their input. */
 export function AttendanceCard({ eyebrow, name, current, previous, previousName, loading, notStarted, className = '' }: {
@@ -187,8 +233,8 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
   const mode = useCardMode();
   let body: React.ReactNode;
   if (loading || !current) body = <Message title="Loading…" />;
-  else if (!current.tracked) body = <Message title="Not tracked" text="This person is excused from attendance." />;
-  else if (current.expectedDays === 0) body = <Message title="Nothing to show yet" text={notStarted ? 'This month has not started.' : 'No working days yet this month.'} />;
+  else if (!current.tracked) body = <Message title="Not tracked" text={mode.mine ? 'You are excused from attendance.' : 'This person is excused from attendance.'} />;
+  else if (current.expectedDays === 0 && !mode.mine) body = <Message title="Nothing to show yet" text={notStarted ? 'This month has not started.' : 'No working days yet this month.'} />;
   else {
     const rates = attendanceRates(current);
     const onTime = current.presentDays - current.lateDays;
@@ -198,7 +244,7 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
         <Pie
           size={168}
           label
-          aria={`Of ${dayCount(current.expectedDays)} of work: ${onTime} on time, ${current.lateDays} late, ${absent} absent`}
+          aria={current.expectedDays === 0 ? 'No working days counted yet' : `Of ${dayCount(current.expectedDays)} of work: ${onTime} on time, ${current.lateDays} late, ${absent} absent`}
           slices={[
             { value: onTime, color: KPI_COLORS.good },
             { value: current.lateDays, color: KPI_COLORS.warn },
@@ -209,13 +255,15 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
           <LegendRow color={KPI_COLORS.good} label="On time" value={dayCount(onTime)} />
           <LegendRow color={KPI_COLORS.warn} label="Late" value={dayCount(current.lateDays)} />
           <LegendRow color={KPI_COLORS.bad} label="Absent" value={dayCount(absent)} />
-          <p className="m-0 mt-1 text-xs leading-normal text-slate-600">
-            Out of {dayCount(current.expectedDays)} of work. Leave, week-offs and holidays are not counted.
-            {current.leaveDays > 0 && ` On leave: ${dayCount(current.leaveDays)}.`}
-          </p>
+          {current.expectedDays > 0 && (
+            <p className="m-0 mt-1 text-xs leading-normal text-slate-600">
+              Out of {dayCount(current.expectedDays)} of work. Leave, week-offs and holidays are not counted.
+              {current.leaveDays > 0 && ` On leave: ${dayCount(current.leaveDays)}.`}
+            </p>
+          )}
         </div>
         <div className="flex flex-col gap-3.5">
-          <Stat big={`${rates.present}%`} label="present" />
+          <Stat big={rates.present == null ? '–' : `${rates.present}%`} label="present" />
           <Stat big={rates.onTime == null ? '–' : `${rates.onTime}%`} label="on time" />
         </div>
       </div>
@@ -265,7 +313,18 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
   const total = data.dates.length;
   const partial = bars.some(b => b.partial);
   let body: React.ReactNode;
-  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  if (mode.mine && !data.loading && !data.error && (notStarted || !data.monthHasData)) {
+    // The employee's own page draws the chart even when there is nothing in it yet: 0 and empty weekly bars.
+    body = (
+      <>
+        <div className="-mt-1 mb-1 flex items-baseline gap-3">
+          <div className={`text-[34px] font-extrabold leading-[1.1] tabular-nums ${notStarted ? 'text-slate-300' : 'text-ink'}`}>{notStarted ? '–' : 0}</div>
+          <div className="text-[12.5px] text-slate-600">services in {monthName}</div>
+        </div>
+        <Bars bars={bars} aria={notStarted ? `Services performed each week in ${monthName}: this month has not started` : `Services performed each week in ${monthName}: none. Total 0.`} />
+      </>
+    );
+  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (!data.monthHasData)
@@ -281,7 +340,7 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
           <div className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-ink">{total}</div>
           <div className="text-[12.5px] text-slate-600">{thisMonthSoFar ? `${serviceWord(total)} this month so far` : `${serviceWord(total)} in ${monthName}`}</div>
         </div>
-        {total > 0 ? (
+        {total > 0 || mode.mine ? (
           <Bars
             bars={bars}
             aria={`Services performed each week in ${monthName}: ${bars.map(b => `${b.label} ${b.value}`).join(', ')}. Total ${total}.${partial ? ' The last bar is the week so far.' : ''}`}
@@ -324,7 +383,18 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
   const { words } = useKpiSettings();
   const cur = data.current;
   let body: React.ReactNode;
-  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  if (mode.mine && !data.loading && !data.error && (notStarted || !cur)) {
+    body = (
+      <EmptyRingBody
+        aria={notStarted ? 'This month has not started: nothing to show yet' : words.t(`0 percent: no customers served in ${monthName}`)}
+        small="booked again"
+        rows={[
+          { color: KPI_COLORS.accent, label: 'Booked again' },
+          { color: KPI_COLORS.track, label: 'Not yet', bordered: true },
+        ]}
+      />
+    );
+  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (data.reason === 'none') body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
@@ -382,7 +452,18 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
   const cur = utilisation(data.time, presentDays, hoursPerDay);
   const prev = utilisation(data.previousTime, previousPresentDays, hoursPerDay);
   let body: React.ReactNode;
-  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  if (mode.mine && !data.loading && !attendanceLoading && !data.error && (notStarted || !!data.timeReason || !cur)) {
+    body = (
+      <EmptyRingBody
+        aria={notStarted ? 'This month has not started: nothing to show yet' : `0 percent: no time with a ${words.one} in ${monthName}`}
+        small={`of ${hoursText(hoursPerDay)} h`}
+        rows={[
+          { color: KPI_COLORS.accent, label: `With a ${words.one}` },
+          { color: KPI_COLORS.track, label: 'Rest of the day', bordered: true },
+        ]}
+      />
+    );
+  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading || attendanceLoading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (data.timeReason === 'none')
@@ -444,7 +525,19 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
   const { words } = useKpiSettings();
   const state = feedbackState(data.current, minForms);
   let body: React.ReactNode;
-  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  if (mode.mine && !data.loading && !data.error && (notStarted || !data.monthHasForms || state.kind === 'none')) {
+    body = (
+      <>
+        <div className="flex items-baseline gap-1.5">
+          <div aria-label={notStarted ? 'This month has not started' : `No customer forms for you in ${monthName}`} className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-slate-300">
+            –
+          </div>
+          <div className="text-[15px] font-semibold text-slate-600">/ 5</div>
+        </div>
+        <StarRows counts={[0, 0, 0, 0, 0]} />
+      </>
+    );
+  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (!data.monthHasForms)
@@ -458,7 +551,6 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
     body = <Message title="Not enough forms yet" text={`${state.count} of ${state.need} ${formWord(state.need)} typed in. The average shows once there are ${state.need}, so one or two forms do not stand for a whole month.`} />;
   } else {
     const s = state.summary;
-    const top = Math.max(...s.byRating, 1);
     body = (
       <>
         <div className="flex items-baseline gap-1.5">
@@ -468,19 +560,7 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
             from {s.count} {formWord(s.count)}
           </div>
         </div>
-        <div role="img" aria-label={`Ratings: ${[5, 4, 3, 2, 1].map(n => `${n} ${n === 1 ? 'star' : 'stars'} ${s.byRating[n - 1]}`).join(', ')}`} className="mt-3.5 flex flex-col gap-2">
-          {[5, 4, 3, 2, 1].map(n => (
-            <div key={n} className="flex items-center gap-2.5">
-              <span className="w-[52px] whitespace-nowrap text-[12.5px] text-slate-700">
-                {n} {n === 1 ? 'star' : 'stars'}
-              </span>
-              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-200">
-                <div className="h-full rounded-full" style={{ width: `${(s.byRating[n - 1] / top) * 100}%`, background: KPI_COLORS.accent }} />
-              </div>
-              <span className="w-[22px] text-right text-[12.5px] font-extrabold tabular-nums text-ink">{s.byRating[n - 1]}</span>
-            </div>
-          ))}
-        </div>
+        <StarRows counts={s.byRating} />
       </>
     );
   }
@@ -519,7 +599,27 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
   const { words } = useKpiSettings();
   const state = npsState(data.nps, minForms);
   let body: React.ReactNode;
-  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  if (mode.mine && !data.loading && !data.error && (notStarted || !data.monthHasNps || state.kind === 'none')) {
+    body = (
+      <>
+        <div className="flex justify-center">
+          <Pie size={156} hole={52} gap={3} aria={notStarted ? 'This month has not started: nothing to show yet' : `NPS: no recommend numbers for you in ${monthName}`} slices={[]}>
+            <text x={78} y={80} textAnchor="middle" fontSize={28} fontWeight={800} fill="#0f172a">
+              –
+            </text>
+            <text x={78} y={98} textAnchor="middle" fontSize={12} fill="#475569">
+              NPS
+            </text>
+          </Pie>
+        </div>
+        <div className="mt-3.5 flex flex-col gap-2">
+          <LegendRow color={KPI_COLORS.good} label="Would recommend" value="–" />
+          <LegendRow color={KPI_COLORS.warn} label="Neutral" value="–" />
+          <LegendRow color={KPI_COLORS.bad} label="Not likely" value="–" />
+        </div>
+      </>
+    );
+  } else if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
   else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
   else if (!data.monthHasNps) {
@@ -605,7 +705,7 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
   const mode = useCardMode();
   const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label, relation: RELATION_OF_KPI[c.id as keyof typeof RELATION_OF_KPI] }));
   const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once one is in. ${mode.mine ? 'You never see' : 'The person never sees'} who said what.`;
-  if (notStarted || data.loading) {
+  if (data.loading || (notStarted && !mode.mine)) {
     return (
       <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
         <Message title={notStarted ? 'Nothing to show yet' : 'Loading…'} text={notStarted ? 'This month has not started.' : undefined} />
@@ -631,14 +731,14 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
           const last = roleState(data.previous?.[relation], relation);
           let meta: string;
           if (data.error) meta = UNREAD.title;
-          else if (state.kind === 'none') meta = 'No feedback this month';
+          else if (state.kind === 'none') meta = mode.mine ? '' : 'No feedback this month';
           else if (state.kind === 'few') meta = `${state.given} of ${state.need} ${reviewWord(state.need)}. Shown once ${state.need === 1 ? 'it is' : `${state.need} are`} in.`;
           else meta = `${state.given} ${reviewWord(state.given)}${last.kind === 'ok' ? ` · ${lowerFirst(compare(state.average, last.average, { name: previousName, unit: 'rating' }).text)}` : ''}`;
           return (
             <div key={id} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">
               <div className="sm:w-[250px]">
                 <div className="text-sm font-bold text-ink">{label}</div>
-                <div className="mt-0.5 text-[12.5px] text-slate-600">{meta}</div>
+                {meta && <div className="mt-0.5 text-[12.5px] text-slate-600">{meta}</div>}
               </div>
               <div className="relative h-[18px] min-w-[120px] flex-1">
                 {[0, 1, 2, 3, 4, 5].map(n => (
