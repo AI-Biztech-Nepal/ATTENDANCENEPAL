@@ -7,6 +7,7 @@ import type { PersonServices } from '@/lib/useServiceKpi';
 import { rebookingPct } from '@/lib/rebookingKpi';
 import { hoursText, restOfDay, utilisation } from '@/lib/utilisationKpi';
 import { averageText, feedbackState, formWord } from '@/lib/feedbackKpi';
+import { npsState, scoreText, scoreWords, sharePct } from '@/lib/npsKpi';
 import type { PersonFeedback } from '@/lib/useFeedbackKpi';
 import Link from 'next/link';
 import type { PersonRebooking } from '@/lib/useRebookingKpi';
@@ -341,23 +342,74 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
   );
 }
 
-/** A KPI whose input does not exist yet: the card keeps its place on the page with a dash (and an empty ring
- * where the finished card has one), and says where the numbers will come from. */
-export function PendingCard({ group, name, ring = false, className = '' }: { group: KpiGroup; name: string; ring?: boolean; className?: string }) {
+/** NPS: a donut of who would recommend (9 or 10), who is neutral (7 or 8) and who is not likely (0 to 6), with the score in the
+ * middle (from -100 to +100). Held back until the month has as many forms as Settings asks for. */
+export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName, notStarted, className = '' }: {
+  eyebrow: string;
+  name: string;
+  data: PersonFeedback;
+  /** Forms a month needs before the NPS shows (Settings). */
+  minForms: number;
+  monthName: string;
+  previousName: string;
+  notStarted: boolean;
+  className?: string;
+}) {
+  const { words } = useKpiSettings();
+  const state = npsState(data.nps, minForms);
+  let body: React.ReactNode;
+  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  else if (data.loading) body = <Message title="Loading…" />;
+  else if (!data.monthHasNps) {
+    body = (
+      <Message
+        title={data.monthHasForms ? 'No recommend numbers typed in for this month' : 'No forms typed in for this month'}
+        text={words.t('Type in the paper forms customers filled in, in the Customer feedback section.')}
+      />
+    );
+  } else if (state.kind === 'none') body = <Message title={`No recommend numbers for this employee in ${monthName}`} />;
+  else if (state.kind === 'few') {
+    body = <Message title="Not enough forms yet" text={`${state.count} of ${state.need} ${formWord(state.need)} with a recommend number. The NPS shows once there are ${state.need}, so one or two forms do not stand for a whole month.`} />;
+  } else {
+    const s = state.summary;
+    body = (
+      <>
+        <div className="flex justify-center">
+          <Pie
+            size={156}
+            hole={52}
+            gap={3}
+            aria={`NPS ${scoreWords(s.score)}: ${s.promoters} would recommend, ${s.passives} neutral, ${s.detractors} not likely`}
+            slices={[
+              { value: s.promoters, color: KPI_COLORS.good },
+              { value: s.passives, color: KPI_COLORS.warn },
+              { value: s.detractors, color: KPI_COLORS.bad },
+            ]}
+          >
+            <text x={78} y={80} textAnchor="middle" fontSize={28} fontWeight={800} fill="#0f172a">
+              {scoreText(s.score)}
+            </text>
+            <text x={78} y={98} textAnchor="middle" fontSize={12} fill="#475569">
+              NPS
+            </text>
+          </Pie>
+        </div>
+        <div className="mt-3.5 flex flex-col gap-2">
+          <LegendRow color={KPI_COLORS.good} label="Would recommend" value={`${s.promoters} · ${sharePct(s.promoters, s.count)}%`} />
+          <LegendRow color={KPI_COLORS.warn} label="Neutral" value={`${s.passives} · ${sharePct(s.passives, s.count)}%`} />
+          <LegendRow color={KPI_COLORS.bad} label="Not likely" value={`${s.detractors} · ${sharePct(s.detractors, s.count)}%`} />
+        </div>
+        <p className="m-0 mt-2.5 text-xs leading-normal text-slate-600">
+          Out of {s.count} {formWord(s.count)}: 9 or 10 would recommend, 7 or 8 are neutral, 0 to 6 are not likely. The NPS is the share who would recommend minus the share who are not likely.
+        </p>
+      </>
+    );
+  }
+  const previous = npsState(data.npsPrevious, minForms);
+  const footer = !notStarted && !data.loading && state.kind === 'ok' && previous.kind === 'ok' ? `${previousName}: ${scoreText(previous.summary.score)}` : null;
   return (
-    <Card eyebrow={group.title} name={name} className={className}>
-      <div className="flex h-full min-h-[150px] flex-col items-center justify-center gap-2 py-2 text-center">
-        {ring ? (
-          <Ring pct={0} size={120} stroke={14} aria={`${name}: not connected yet`} big="–" />
-        ) : (
-          <div aria-hidden="true" className="text-[34px] font-extrabold leading-none text-slate-400">
-            –
-          </div>
-        )}
-        <div className="text-sm font-bold text-slate-700">Not connected yet</div>
-        <div className="text-xs text-slate-600">{group.source}</div>
-        <span className="sr-only">{group.emptyNote}</span>
-      </div>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+      {body}
     </Card>
   );
 }

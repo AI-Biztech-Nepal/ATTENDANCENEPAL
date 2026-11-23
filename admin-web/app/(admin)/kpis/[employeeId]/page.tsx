@@ -15,7 +15,7 @@ import { usePersonFeedback } from '@/lib/useFeedbackKpi';
 import { weekBars } from '@/lib/serviceKpi';
 import Avatar from '@/components/Avatar';
 import MonthStepper from '@/components/kpi/MonthStepper';
-import { AttendanceCard, ColleagueCard, FeedbackCard, PendingCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
+import { AttendanceCard, ColleagueCard, FeedbackCard, NpsCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
 
 // One person's KPIs: the Overview section of their pages (the layout has the way back, their name and the other
 // sections). It is opened by clicking a name on the KPI list, which also passes the month it was looking at
@@ -60,7 +60,7 @@ function EmployeeKpi() {
   const services = group('services');
   const colleagues = group('colleagues');
   const attendance = group('attendance');
-  const feedbackData = usePersonFeedback(employeeId, { start, end }, previous, on('feedback') && start <= today);
+  const feedbackData = usePersonFeedback(employeeId, { start, end }, previous, (on('feedback') || on('nps')) && start <= today);
   const rebookingData = usePersonRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
 
   if (notFound || error) {
@@ -157,7 +157,17 @@ function EmployeeKpi() {
             typeInHref={`/kpis/${employeeId}/feedback?date=${start}`}
           />
         )}
-        {customers && on('nps') && <PendingCard group={customers} name={kpiLabel('nps', settings)} ring />}
+        {customers && on('nps') && (
+          <NpsCard
+            eyebrow={customers.title}
+            name={kpiLabel('nps', settings)}
+            data={loaded ? feedbackData : { ...feedbackData, loading: true }}
+            minForms={settings.minResponses}
+            monthName={monthName}
+            previousName={previousName}
+            notStarted={start > today}
+          />
+        )}
         {colleagues && <ColleagueCard className="md:col-span-2 xl:col-span-4" group={colleagues} settings={settings} />}
       </div>
 

@@ -66,7 +66,7 @@ export const KPI_GROUPS: KpiGroup[] = [
     source: 'From customer forms typed in by staff',
     columns: [
       { id: 'feedback', label: 'Customer feedback', width: 110, connected: true },
-      { id: 'nps', label: 'NPS', width: 90, connected: false },
+      { id: 'nps', label: 'NPS', width: 90, connected: true },
     ],
     connected: false,
     emptyNote: 'No forms yet',

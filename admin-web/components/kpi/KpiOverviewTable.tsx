@@ -8,6 +8,8 @@ import { rebookingPct, type Rebooking } from '@/lib/rebookingKpi';
 import type { RebookingReason } from '@/lib/useRebookingKpi';
 import type { ServiceMonth } from '@/lib/useServiceKpi';
 import { averageText, feedbackState, formWord, type FeedbackSummary } from '@/lib/feedbackKpi';
+import { npsState, scoreText, type NpsSummary } from '@/lib/npsKpi';
+import type { FeedbackMonth } from '@/lib/useFeedbackKpi';
 import { hoursText, utilisation } from '@/lib/utilisationKpi';
 import type { Employee } from '@/lib/types';
 
@@ -24,8 +26,8 @@ type Props = {
   /** Rebooking per person: of the customers served, how many booked again within `windowDays`. */
   rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason };
   windowDays: number;
-  /** Customer feedback per person from the forms typed in, and how many forms a month needs before it shows (Settings). */
-  feedback: { loading: boolean; byEmployee: Map<string, FeedbackSummary> | null };
+  /** Customer feedback and NPS per person from the forms typed in, and how many forms a month needs before they show (Settings). */
+  feedback: FeedbackMonth;
   minForms: number;
   loading: boolean;
   /** The month being shown has not begun, so there is nothing to count yet. */
@@ -106,6 +108,8 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                           <UtilisationCell key={c.id} group={g} first={i === 0} services={services} kpi={kpi} hoursPerDay={hoursPerDay} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'feedback' ? (
                           <FeedbackCell key={c.id} group={g} first={i === 0} loading={feedback.loading} byEmployee={feedback.byEmployee} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
+                        ) : c.id === 'nps' ? (
+                          <NpsCell key={c.id} group={g} first={i === 0} loading={feedback.loading} nps={feedback.nps} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'rebooking' ? (
                           <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} employeeId={emp.id} notStarted={notStarted} windowDays={windowDays} />
                         ) : (
@@ -267,6 +271,45 @@ function FeedbackCell({ group, first, loading, byEmployee, minForms, employeeId,
       <div className="text-sm font-extrabold tabular-nums text-ink">
         {averageText(s.average)} <span className="text-[11.5px] font-medium text-slate-600">/ 5</span>
       </div>
+      <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
+        {s.count} {formWord(s.count)}
+      </div>
+    </td>
+  );
+}
+
+/** The NPS: the share who would recommend minus the share who are not likely to, from -100 to +100, with how many forms
+ * under it. Held back like customer feedback until the month has the forms Settings asks for. */
+function NpsCell({ group, first, loading, nps, minForms, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; nps: Map<string, NpsSummary> | null; minForms: number; employeeId: string; notStarted: boolean }) {
+  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const state = npsState(nps?.get(employeeId), minForms);
+  if (loading || notStarted || !nps || state.kind === 'none') {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : !nps ? group.emptyNote : 'No forms';
+    return (
+      <td className={cell}>
+        <div className="text-[15px] font-bold text-slate-600">
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">{why}</span>
+        </div>
+      </td>
+    );
+  }
+  if (state.kind === 'few') {
+    return (
+      <td className={cell} title={`Held back until there are ${state.need} forms for the month`}>
+        <div className="text-[15px] font-bold text-slate-600" aria-hidden="true">
+          –
+        </div>
+        <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
+          {state.count} of {state.need} forms
+        </div>
+      </td>
+    );
+  }
+  const s = state.summary;
+  return (
+    <td className={cell} title={`NPS ${scoreText(s.score)} from ${s.count} ${formWord(s.count)}: ${s.promoters} would recommend, ${s.passives} neutral, ${s.detractors} not likely`}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">{scoreText(s.score)}</div>
       <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
         {s.count} {formWord(s.count)}
       </div>

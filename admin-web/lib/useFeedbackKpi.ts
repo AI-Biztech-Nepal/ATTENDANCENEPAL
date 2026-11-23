@@ -3,26 +3,39 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { fetchAll } from './leaveBalance';
-import { summariseFeedback, summariseRatings, type FeedbackSummary, type RatedForm } from './feedbackKpi';
+import { summariseFeedback, summariseRatings, type FeedbackSummary } from './feedbackKpi';
+import { summariseNps, summariseNpsByEmployee, type NpsSummary } from './npsKpi';
 import type { MonthRange } from './useServiceKpi';
 
-/** Everyone's customer feedback for the month `start`..`end`, from the forms typed in with a rating. `byEmployee` is null
- * when no form has a rating (nothing typed in for the month, for anyone). `enabled` holds the work back (for a month
- * that has not begun, or when the KPI is off). */
-export function useFeedbackMonth(start: string, end: string, enabled = true): { loading: boolean; byEmployee: Map<string, FeedbackSummary> | null } {
+/** A typed-in form, as far as the two KPIs from it go: the service rating (customer feedback) and the would-recommend
+ * number (NPS). Either can be empty. */
+type Form = { employee_id: string; rating: number | null; recommend: number | null };
+
+export type FeedbackMonth = {
+  loading: boolean;
+  /** Customer feedback per person, from the forms with a rating. Null when no form has a rating. */
+  byEmployee: Map<string, FeedbackSummary> | null;
+  /** NPS per person, from the forms with a recommend number. Null when no form has one. */
+  nps: Map<string, NpsSummary> | null;
+};
+
+/** Everyone's customer feedback and NPS for the month `start`..`end`, read from the forms typed in, in one request.
+ * `enabled` holds the work back (for a month that has not begun, or when both KPIs are off). */
+export function useFeedbackMonth(start: string, end: string, enabled = true): FeedbackMonth {
   const key = `${start}|${end}`;
-  const [done, setDone] = useState<{ key: string; byEmployee: Map<string, FeedbackSummary> | null } | null>(null);
+  const [done, setDone] = useState<{ key: string; byEmployee: FeedbackMonth['byEmployee']; nps: FeedbackMonth['nps'] } | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
     let live = true;
     // A table that is not there yet (before the feedback migration) gives no rows, which reads as "no forms yet".
-    fetchAll<RatedForm>((a, b) =>
-      supabase.from('customer_feedback').select('employee_id, rating').not('rating', 'is', null).gte('given_on', start).lte('given_on', end).order('id', { ascending: true }).range(a, b)
+    fetchAll<Form>((a, b) =>
+      supabase.from('customer_feedback').select('employee_id, rating, recommend').gte('given_on', start).lte('given_on', end).order('id', { ascending: true }).range(a, b)
     ).then(rows => {
       if (!live) return;
-      const byEmployee = summariseFeedback(rows);
-      setDone({ key, byEmployee: byEmployee.size > 0 ? byEmployee : null });
+      const feedback = summariseFeedback(rows);
+      const nps = summariseNpsByEmployee(rows);
+      setDone({ key, byEmployee: feedback.size > 0 ? feedback : null, nps: nps.size > 0 ? nps : null });
     });
     return () => {
       live = false;
@@ -31,20 +44,27 @@ export function useFeedbackMonth(start: string, end: string, enabled = true): { 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  if (!enabled) return { loading: false, byEmployee: null };
-  return done && done.key === key ? { loading: false, byEmployee: done.byEmployee } : { loading: true, byEmployee: null };
+  if (!enabled) return { loading: false, byEmployee: null, nps: null };
+  return done && done.key === key ? { loading: false, byEmployee: done.byEmployee, nps: done.nps } : { loading: true, byEmployee: null, nps: null };
 }
 
 export type PersonFeedback = {
   loading: boolean;
-  /** This person's forms in the month on screen and in the month before: null when none of them has a rating. */
+  /** This person's customer feedback in the month on screen and in the month before: null when none of their forms has a rating. */
   current: FeedbackSummary | null;
   previous: FeedbackSummary | null;
-  /** Any rated form at all, for anyone, in the month on screen: false means nothing has been typed in for it. */
+  /** The same for NPS, from the recommend numbers. */
+  nps: NpsSummary | null;
+  npsPrevious: NpsSummary | null;
+  /** Any form with a rating (any with a recommend number), for anyone, in the month on screen: false means nothing like it
+   * has been typed in for the month. */
   monthHasForms: boolean;
+  monthHasNps: boolean;
 };
 
-/** One person's customer feedback for the month `cur` and the month `prev` before it. */
+const EMPTY: Omit<PersonFeedback, 'loading'> = { current: null, previous: null, nps: null, npsPrevious: null, monthHasForms: false, monthHasNps: false };
+
+/** One person's customer feedback and NPS for the month `cur` and the month `prev` before it. */
 export function usePersonFeedback(employeeId: string, cur: MonthRange, prev: MonthRange, enabled = true): PersonFeedback {
   const key = `${employeeId}|${cur.start}|${cur.end}|${prev.start}|${prev.end}`;
   const [done, setDone] = useState<{ key: string; value: Omit<PersonFeedback, 'loading'> } | null>(null);
@@ -52,23 +72,35 @@ export function usePersonFeedback(employeeId: string, cur: MonthRange, prev: Mon
   useEffect(() => {
     if (!enabled) return;
     let live = true;
+    const monthCount = (column: 'rating' | 'recommend') =>
+      supabase.from('customer_feedback').select('id', { count: 'exact', head: true }).not(column, 'is', null).gte('given_on', cur.start).lte('given_on', cur.end);
     Promise.all([
-      fetchAll<{ given_on: string; rating: number | null }>((a, b) =>
+      fetchAll<{ given_on: string; rating: number | null; recommend: number | null }>((a, b) =>
         supabase
           .from('customer_feedback')
-          .select('given_on, rating')
+          .select('given_on, rating, recommend')
           .eq('employee_id', employeeId)
-          .not('rating', 'is', null)
           .gte('given_on', prev.start)
           .lte('given_on', cur.end)
           .order('id', { ascending: true })
           .range(a, b)
       ),
-      supabase.from('customer_feedback').select('id', { count: 'exact', head: true }).not('rating', 'is', null).gte('given_on', cur.start).lte('given_on', cur.end),
-    ]).then(([rows, all]) => {
+      monthCount('rating'),
+      monthCount('recommend'),
+    ]).then(([rows, rated, recommended]) => {
       if (!live) return;
-      const inMonth = (r: MonthRange) => rows.filter(x => x.given_on >= r.start && x.given_on <= r.end).map(x => x.rating);
-      setDone({ key, value: { current: summariseRatings(inMonth(cur)), previous: summariseRatings(inMonth(prev)), monthHasForms: (all.count ?? 0) > 0 } });
+      const inMonth = (r: MonthRange) => rows.filter(x => x.given_on >= r.start && x.given_on <= r.end);
+      setDone({
+        key,
+        value: {
+          current: summariseRatings(inMonth(cur).map(x => x.rating)),
+          previous: summariseRatings(inMonth(prev).map(x => x.rating)),
+          nps: summariseNps(inMonth(cur).map(x => x.recommend)),
+          npsPrevious: summariseNps(inMonth(prev).map(x => x.recommend)),
+          monthHasForms: (rated.count ?? 0) > 0,
+          monthHasNps: (recommended.count ?? 0) > 0,
+        },
+      });
     });
     return () => {
       live = false;
@@ -77,6 +109,6 @@ export function usePersonFeedback(employeeId: string, cur: MonthRange, prev: Mon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
-  if (!enabled) return { loading: false, current: null, previous: null, monthHasForms: false };
-  return done && done.key === key ? { loading: false, ...done.value } : { loading: true, current: null, previous: null, monthHasForms: false };
+  if (!enabled) return { loading: false, ...EMPTY };
+  return done && done.key === key ? { loading: false, ...done.value } : { loading: true, ...EMPTY };
 }

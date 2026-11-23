@@ -49,7 +49,7 @@ function Kpis() {
   // Which KPIs this company uses, and what it calls them (KPIs > Settings).
   const { settings, loaded } = useKpiSettings();
   const groups = useMemo(() => visibleGroups(settings), [settings]);
-  const feedback = useFeedbackMonth(start, end, isKpiOn('feedback', settings) && start <= today);
+  const feedback = useFeedbackMonth(start, end, (isKpiOn('feedback', settings) || isKpiOn('nps', settings)) && start <= today);
   // Rebooking waits for the settings, because the "back within N days" setting decides who counts.
   const rebooking = useRebooking(start, end, settings.repeatDays, loaded && isKpiOn('rebooking', settings) && start <= today);
 
