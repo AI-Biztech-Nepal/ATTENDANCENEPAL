@@ -17,8 +17,9 @@ type Props = {
   monthStart: string;
 };
 
-/** One row per person, the KPIs across, grouped by where their numbers come from. Nothing is added up
- * or compared: a dash means there is nothing to show yet. */
+/** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place; the
+ * groups themselves are named in the "Not connected yet" card under the table). Nothing is added up or
+ * compared: a dash means there is nothing to show yet. */
 export default function KpiOverviewTable({ groups, employees, attendance, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
@@ -28,30 +29,20 @@ export default function KpiOverviewTable({ groups, employees, attendance, loadin
       <div className="overflow-x-auto">
         <table style={{ minWidth }} className="w-full border-collapse text-left">
           <thead>
-            <tr className="bg-slate-50">
+            <tr className="border-b border-slate-200 bg-slate-50">
               <th
-                rowSpan={2}
                 scope="col"
-                className="w-[210px] border-b border-slate-200 bg-slate-50 px-5 py-3.5 align-bottom md:sticky md:left-0 md:z-10 text-xs font-extrabold uppercase tracking-wider text-slate-600"
+                className="w-[210px] bg-slate-50 px-5 py-3.5 align-bottom md:sticky md:left-0 md:z-10 text-xs font-extrabold uppercase tracking-wider text-slate-600"
               >
                 Employee
               </th>
-              {groups.map(g => (
-                <th key={g.id} colSpan={g.columns.length} scope="colgroup" className="border-l border-slate-200 px-3 pb-1.5 pt-3 align-top text-xs font-extrabold text-ink">
-                  {g.title}
-                  <div className="mt-0.5 text-[11px] font-semibold text-slate-600">{g.source}</div>
-                  {!g.connected && <div className="mt-1 text-[11px] font-bold text-slate-600">Not connected yet</div>}
-                </th>
-              ))}
-            </tr>
-            <tr className="border-b border-slate-200 bg-slate-50">
               {groups.flatMap(g =>
                 g.columns.map((c, i) => (
                   <th
                     key={c.id}
                     scope="col"
                     style={{ width: c.width }}
-                    className={`px-3 pb-3 pt-1.5 text-xs font-bold text-slate-700 ${i === 0 ? 'border-l border-slate-200' : ''}`}
+                    className={`px-3 py-3.5 align-bottom text-xs font-bold text-slate-700 ${i === 0 ? 'border-l border-slate-200' : ''}`}
                   >
                     {c.label}
                   </th>
