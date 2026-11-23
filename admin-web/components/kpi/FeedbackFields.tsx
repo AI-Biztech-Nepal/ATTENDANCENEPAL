@@ -10,11 +10,57 @@ export type StaffOption = Pick<Employee, 'id' | 'name' | 'department'>;
 const LABEL = 'mb-1.5 block text-xs font-bold text-slate-700';
 const FIELD =
   'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm font-semibold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
-const NUMBER = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3 text-base font-extrabold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
+const NUMBER = 'h-11 w-[84px] rounded-[10px] border border-slate-300 bg-white px-3 text-base font-extrabold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
+const RATING_WORDS = ['Poor', 'Fair', 'Good', 'Very good', 'Excellent'];
 
-/** The boxes of one customer form: who served them, the date on the paper, what it was for, the two numbers
- * the customer circled, and the comment. Shared by the typing card and the edit dialog; `idPrefix` keeps the
- * ids of the two apart. A customer may skip a question, so the numbers and the comment can be left empty. */
+/** The numbers the customer could circle, as buttons to click. They are a second way in: the box beside them takes the same
+ * number typed, and the buttons are left out of the Tab order so typing one form after another stays as fast as before. */
+function Circles({ from, to, value, onPick, name, words }: { from: number; to: number; value: string; onPick: (v: string) => void; name: string; words?: string[] }) {
+  return (
+    <div role="group" aria-label={name} className="flex flex-wrap gap-1.5">
+      {Array.from({ length: to - from + 1 }, (_, i) => from + i).map((n, i) => {
+        const on = value.trim() === String(n);
+        return (
+          <button
+            key={n}
+            type="button"
+            tabIndex={-1}
+            aria-pressed={on}
+            aria-label={words ? `${n}, ${words[i]}` : String(n)}
+            onClick={() => onPick(on ? '' : String(n))}
+            className={`flex h-10 w-10 items-center justify-center rounded-full border text-sm font-extrabold tabular-nums transition-colors ${
+              on ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-teal-700 hover:text-teal-700'
+            }`}
+          >
+            {n}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** One numbered question of the form, in a box like the paper's. */
+function Question({ n, htmlFor, title, range, children }: { n: number; htmlFor: string; title: string; range?: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-3.5 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+      <label htmlFor={htmlFor} className="mb-2.5 flex items-start gap-2.5 text-[13px] font-extrabold leading-snug text-ink">
+        <span aria-hidden="true" className="mt-px flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-ink text-[11px] text-white">
+          {n}
+        </span>
+        <span>
+          {title} {range && <span className="font-medium text-slate-600">{range}</span>}
+        </span>
+      </label>
+      {children}
+    </div>
+  );
+}
+
+/** The boxes of one customer form, in the order of the paper form: who served them, the date on the paper, what it was for,
+ * 1. the service rating the customer circled, 2. how likely they are to recommend, 3. the comment. Shared by the typing
+ * card and the edit dialog; `idPrefix` keeps the ids of the two apart. A customer may skip a question, so the numbers and
+ * the comment can be left empty. */
 export default function FeedbackFields({ draft, onChange, staff, idPrefix, employeeRef, ratingRef, employeeLocked = false }: {
   /** The employee is fixed (the form is typed in on that person's own page). */
   employeeLocked?: boolean;
@@ -66,11 +112,8 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
         </div>
       </div>
 
-      <div className="mb-3.5 grid grid-cols-2 gap-3.5">
-        <div>
-          <label htmlFor={`${idPrefix}-rating`} className={LABEL}>
-            Service rating, 1 to 5
-          </label>
+      <Question n={1} htmlFor={`${idPrefix}-rating`} title="How was the service you received?" range="Rating, 1 to 5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
           <input
             id={`${idPrefix}-rating`}
             ref={ratingRef}
@@ -83,11 +126,16 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
             onChange={e => set({ rating: e.target.value })}
             className={NUMBER}
           />
+          <Circles from={1} to={5} value={draft.rating} onPick={v => set({ rating: v })} name="Rating" words={RATING_WORDS} />
         </div>
-        <div>
-          <label htmlFor={`${idPrefix}-recommend`} className={LABEL}>
-            Would recommend, 0 to 10
-          </label>
+        <div className="mt-1.5 flex justify-between text-[11.5px] text-slate-600">
+          <span>1 = Poor</span>
+          <span>5 = Excellent</span>
+        </div>
+      </Question>
+
+      <Question n={2} htmlFor={`${idPrefix}-recommend`} title="How likely are you to recommend us to a friend or family member?" range="Would recommend, 0 to 10">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
           <input
             id={`${idPrefix}-recommend`}
             type="number"
@@ -99,13 +147,15 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
             onChange={e => set({ recommend: e.target.value })}
             className={NUMBER}
           />
+          <Circles from={0} to={10} value={draft.recommend} onPick={v => set({ recommend: v })} name="Would recommend" />
         </div>
-      </div>
+        <div className="mt-1.5 flex justify-between text-[11.5px] text-slate-600">
+          <span>0 = Not at all likely</span>
+          <span>10 = Extremely likely</span>
+        </div>
+      </Question>
 
-      <div className="mb-3.5">
-        <label htmlFor={`${idPrefix}-comment`} className={LABEL}>
-          Comment {optional}
-        </label>
+      <Question n={3} htmlFor={`${idPrefix}-comment`} title="Anything else you would like to tell us?" range="Comment (optional)">
         <textarea
           id={`${idPrefix}-comment`}
           rows={3}
@@ -115,7 +165,7 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
           className="w-full resize-y rounded-[10px] border border-slate-300 bg-white px-3 py-2.5 text-sm leading-normal text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         />
         <p className="m-0 mt-1.5 text-xs text-slate-600">{words.t("Copy the comment as written. Do not add a customer's name or phone number.")}</p>
-      </div>
+      </Question>
     </>
   );
 }

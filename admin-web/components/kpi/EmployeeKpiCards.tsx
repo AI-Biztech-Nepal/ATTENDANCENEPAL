@@ -6,6 +6,9 @@ import { serviceWord, type WeekBar } from '@/lib/serviceKpi';
 import type { PersonServices } from '@/lib/useServiceKpi';
 import { rebookingPct } from '@/lib/rebookingKpi';
 import { hoursText, restOfDay, utilisation } from '@/lib/utilisationKpi';
+import { averageText, feedbackState, formWord } from '@/lib/feedbackKpi';
+import type { PersonFeedback } from '@/lib/useFeedbackKpi';
+import Link from 'next/link';
 import type { PersonRebooking } from '@/lib/useRebookingKpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { Bars, KPI_COLORS, Pie, Ring } from './KpiCharts';
@@ -264,6 +267,76 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
   return (
     <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
       {body}
+    </Card>
+  );
+}
+
+/** Customer feedback: the average rating out of 5 with how many forms it comes from, and a bar for each rating. Held back
+ * until the month has as many forms as Settings asks for. Always offers to type in a form. */
+export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previousName, notStarted, typeInHref, className = '' }: {
+  eyebrow: string;
+  name: string;
+  data: PersonFeedback;
+  /** Forms a month needs before the average shows (Settings). */
+  minForms: number;
+  monthName: string;
+  previousName: string;
+  notStarted: boolean;
+  /** Where "Type in a form" goes: this person's Customer feedback section. */
+  typeInHref: string;
+  className?: string;
+}) {
+  const { words } = useKpiSettings();
+  const state = feedbackState(data.current, minForms);
+  let body: React.ReactNode;
+  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  else if (data.loading) body = <Message title="Loading…" />;
+  else if (!data.monthHasForms) body = <Message title="No forms typed in for this month" text={words.t('Type in the paper forms customers filled in, in the Customer feedback section.')} />;
+  else if (state.kind === 'none') body = <Message title={`No forms typed in for this employee in ${monthName}`} />;
+  else if (state.kind === 'few') {
+    body = <Message title="Not enough forms yet" text={`${state.count} of ${state.need} ${formWord(state.need)} typed in. The average shows once there are ${state.need}, so one or two forms do not stand for a whole month.`} />;
+  } else {
+    const s = state.summary;
+    const top = Math.max(...s.byRating, 1);
+    body = (
+      <>
+        <div className="flex items-baseline gap-1.5">
+          <div className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-ink">{averageText(s.average)}</div>
+          <div className="text-[15px] font-semibold text-slate-600">/ 5</div>
+          <div className="ml-1.5 text-[12.5px] text-slate-600">
+            from {s.count} {formWord(s.count)}
+          </div>
+        </div>
+        <div role="img" aria-label={`Ratings: ${[5, 4, 3, 2, 1].map(n => `${n} ${n === 1 ? 'star' : 'stars'} ${s.byRating[n - 1]}`).join(', ')}`} className="mt-3.5 flex flex-col gap-2">
+          {[5, 4, 3, 2, 1].map(n => (
+            <div key={n} className="flex items-center gap-2.5">
+              <span className="w-[52px] whitespace-nowrap text-[12.5px] text-slate-700">
+                {n} {n === 1 ? 'star' : 'stars'}
+              </span>
+              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full rounded-full" style={{ width: `${(s.byRating[n - 1] / top) * 100}%`, background: KPI_COLORS.accent }} />
+              </div>
+              <span className="w-[22px] text-right text-[12.5px] font-extrabold tabular-nums text-ink">{s.byRating[n - 1]}</span>
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  }
+  const previous = feedbackState(data.previous, minForms);
+  const footer = !notStarted && !data.loading && state.kind === 'ok' && previous.kind === 'ok' ? `${previousName}: ${averageText(previous.summary.average)}` : null;
+  return (
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+      {body}
+      <Link
+        href={typeInHref}
+        className="mt-3 inline-flex min-h-[40px] items-center gap-1.5 self-start rounded-lg border border-teal-700 bg-white px-3.5 text-[12.5px] font-extrabold text-teal-700 hover:bg-teal-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Type in a form
+      </Link>
     </Card>
   );
 }

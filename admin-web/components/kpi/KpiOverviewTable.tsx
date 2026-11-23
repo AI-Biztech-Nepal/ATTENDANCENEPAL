@@ -7,6 +7,7 @@ import { serviceWord } from '@/lib/serviceKpi';
 import { rebookingPct, type Rebooking } from '@/lib/rebookingKpi';
 import type { RebookingReason } from '@/lib/useRebookingKpi';
 import type { ServiceMonth } from '@/lib/useServiceKpi';
+import { averageText, feedbackState, formWord, type FeedbackSummary } from '@/lib/feedbackKpi';
 import { hoursText, utilisation } from '@/lib/utilisationKpi';
 import type { Employee } from '@/lib/types';
 
@@ -23,6 +24,9 @@ type Props = {
   /** Rebooking per person: of the customers served, how many booked again within `windowDays`. */
   rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason };
   windowDays: number;
+  /** Customer feedback per person from the forms typed in, and how many forms a month needs before it shows (Settings). */
+  feedback: { loading: boolean; byEmployee: Map<string, FeedbackSummary> | null };
+  minForms: number;
   loading: boolean;
   /** The month being shown has not begun, so there is nothing to count yet. */
   notStarted: boolean;
@@ -33,7 +37,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place; the
  * groups themselves are named in the "Not connected yet" card under the table). Nothing is added up or
  * compared: a dash means there is nothing to show yet. */
-export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, minForms, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -100,6 +104,8 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                           <ServicesCell key={c.id} group={g} first={i === 0} loading={services.loading} counts={services.counts} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'utilisation' ? (
                           <UtilisationCell key={c.id} group={g} first={i === 0} services={services} kpi={kpi} hoursPerDay={hoursPerDay} employeeId={emp.id} notStarted={notStarted} />
+                        ) : c.id === 'feedback' ? (
+                          <FeedbackCell key={c.id} group={g} first={i === 0} loading={feedback.loading} byEmployee={feedback.byEmployee} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'rebooking' ? (
                           <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} employeeId={emp.id} notStarted={notStarted} windowDays={windowDays} />
                         ) : (
@@ -223,6 +229,47 @@ function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId,
     <td className={cell} title={`${hoursText(u.avgHours)} hours a day with a customer, out of ${hoursText(u.hoursPerDay)}, over ${u.days} days worked`}>
       <div className="text-sm font-extrabold tabular-nums text-ink">{u.pct}%</div>
       <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">{hoursText(u.avgHours)} h a day</div>
+    </td>
+  );
+}
+
+/** The average service rating out of 5 from the customer forms, with how many forms under it. Held back (a dash and "3 of 5
+ * forms") until the month has as many forms as Settings asks for, so one or two forms never stand for a whole month. */
+function FeedbackCell({ group, first, loading, byEmployee, minForms, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, FeedbackSummary> | null; minForms: number; employeeId: string; notStarted: boolean }) {
+  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const state = feedbackState(byEmployee?.get(employeeId), minForms);
+  if (loading || notStarted || !byEmployee || state.kind === 'none') {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : !byEmployee ? group.emptyNote : 'No forms';
+    return (
+      <td className={cell}>
+        <div className="text-[15px] font-bold text-slate-600">
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">{why}</span>
+        </div>
+      </td>
+    );
+  }
+  if (state.kind === 'few') {
+    return (
+      <td className={cell} title={`Held back until there are ${state.need} forms for the month`}>
+        <div className="text-[15px] font-bold text-slate-600" aria-hidden="true">
+          –
+        </div>
+        <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
+          {state.count} of {state.need} forms
+        </div>
+      </td>
+    );
+  }
+  const s = state.summary;
+  return (
+    <td className={cell} title={`${averageText(s.average)} out of 5 from ${s.count} ${formWord(s.count)}`}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">
+        {averageText(s.average)} <span className="text-[11.5px] font-medium text-slate-600">/ 5</span>
+      </div>
+      <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
+        {s.count} {formWord(s.count)}
+      </div>
     </td>
   );
 }

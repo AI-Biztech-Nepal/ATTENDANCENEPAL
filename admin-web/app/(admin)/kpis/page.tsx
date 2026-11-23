@@ -10,6 +10,7 @@ import { useKpiOverview } from '@/lib/useKpiOverview';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useServiceMonth } from '@/lib/useServiceKpi';
 import { useRebooking } from '@/lib/useRebookingKpi';
+import { useFeedbackMonth } from '@/lib/useFeedbackKpi';
 import { isKpiOn } from '@/lib/kpiSettings';
 import KpiOverviewTable from '@/components/kpi/KpiOverviewTable';
 import MonthStepper from '@/components/kpi/MonthStepper';
@@ -48,6 +49,7 @@ function Kpis() {
   // Which KPIs this company uses, and what it calls them (KPIs > Settings).
   const { settings, loaded } = useKpiSettings();
   const groups = useMemo(() => visibleGroups(settings), [settings]);
+  const feedback = useFeedbackMonth(start, end, isKpiOn('feedback', settings) && start <= today);
   // Rebooking waits for the settings, because the "back within N days" setting decides who counts.
   const rebooking = useRebooking(start, end, settings.repeatDays, loaded && isKpiOn('rebooking', settings) && start <= today);
 
@@ -103,7 +105,7 @@ function Kpis() {
         </p>
       )}
 
-      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} minForms={settings.minResponses} loading={loading || !loaded} notStarted={start > today} monthStart={start} />
 
       {waiting.length > 0 && (
         <section aria-labelledby="not-connected" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">

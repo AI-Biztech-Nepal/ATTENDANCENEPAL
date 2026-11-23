@@ -11,10 +11,11 @@ import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useMonthInUrl } from '@/lib/useMonthInUrl';
 import { usePersonServices } from '@/lib/useServiceKpi';
 import { usePersonRebooking } from '@/lib/useRebookingKpi';
+import { usePersonFeedback } from '@/lib/useFeedbackKpi';
 import { weekBars } from '@/lib/serviceKpi';
 import Avatar from '@/components/Avatar';
 import MonthStepper from '@/components/kpi/MonthStepper';
-import { AttendanceCard, ColleagueCard, PendingCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
+import { AttendanceCard, ColleagueCard, FeedbackCard, PendingCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
 
 // One person's KPIs: the Overview section of their pages (the layout has the way back, their name and the other
 // sections). It is opened by clicking a name on the KPI list, which also passes the month it was looking at
@@ -59,6 +60,7 @@ function EmployeeKpi() {
   const services = group('services');
   const colleagues = group('colleagues');
   const attendance = group('attendance');
+  const feedbackData = usePersonFeedback(employeeId, { start, end }, previous, on('feedback') && start <= today);
   const rebookingData = usePersonRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
 
   if (notFound || error) {
@@ -122,7 +124,7 @@ function EmployeeKpi() {
           <RebookingCard
             eyebrow={services.title}
             name={kpiLabel('rebooking', settings)}
-            data={rebookingData}
+            data={loaded ? rebookingData : { ...rebookingData, loading: true }}
             windowDays={settings.repeatDays}
             monthName={monthName}
             previousName={previousName}
@@ -136,14 +138,25 @@ function EmployeeKpi() {
             data={serviceData}
             presentDays={current?.tracked ? current.presentDays : null}
             previousPresentDays={previousKpi?.tracked ? previousKpi.presentDays : null}
-            attendanceLoading={loading}
+            attendanceLoading={loading || !loaded}
             hoursPerDay={settings.hoursPerDay}
             monthName={monthName}
             previousName={previousName}
             notStarted={start > today}
           />
         )}
-        {customers && on('feedback') && <PendingCard group={customers} name={kpiLabel('feedback', settings)} />}
+        {customers && on('feedback') && (
+          <FeedbackCard
+            eyebrow={customers.title}
+            name={kpiLabel('feedback', settings)}
+            data={loaded ? feedbackData : { ...feedbackData, loading: true }}
+            minForms={settings.minResponses}
+            monthName={monthName}
+            previousName={previousName}
+            notStarted={start > today}
+            typeInHref={`/kpis/${employeeId}/feedback?date=${start}`}
+          />
+        )}
         {customers && on('nps') && <PendingCard group={customers} name={kpiLabel('nps', settings)} ring />}
         {colleagues && <ColleagueCard className="md:col-span-2 xl:col-span-4" group={colleagues} settings={settings} />}
       </div>
