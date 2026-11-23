@@ -230,6 +230,20 @@ export default function TasksPage() {
     return null;
   }
 
+  // Cancel a task that has not been reviewed: it is deleted. Time tracked on it refers to it, so that goes first.
+  // Resolves to an error message, or null when it worked.
+  async function cancelTask(task: Task): Promise<string | null> {
+    const logs = await supabase.from('task_time_logs').delete().eq('task_id', task.id).select('id');
+    if (logs.error) return `Could not cancel the task: ${logs.error.message}`;
+    const { data, error } = await supabase.from('tasks').delete().eq('id', task.id).select('id');
+    if (error) return `Could not cancel the task: ${error.message}`;
+    // .select() so a delete the security rules turn away is noticed instead of "cancelling" nothing.
+    if (!((data as unknown[] | null) ?? []).length) return 'Could not cancel the task: nothing was removed. It may already be gone, or you may not be allowed to remove it.';
+    reload();
+    setNotice(`Cancelled "${task.title}" for ${employeeName(task.assigned_to)}.`);
+    return null;
+  }
+
   const closeDetail = useCallback(() => setSelectedId(null), []);
   const closeAssign = useCallback(() => setAssign(null), []);
 
@@ -477,6 +491,7 @@ export default function TasksPage() {
           onClose={closeDetail}
           onReview={review}
           onPickTime={pickTime}
+          onCancel={cancelTask}
         />
       )}
 

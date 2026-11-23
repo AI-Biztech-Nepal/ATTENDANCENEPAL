@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import Avatar from '@/components/Avatar';
 import Badge from '@/components/Badge';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate, formatTime, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes } from '@/lib/shift';
@@ -20,6 +21,8 @@ type Props = {
   onReview: (task: Task, status: 'approved' | 'rejected', note: string) => Promise<string | null>;
   /** "Pick a time" for a task that has no slot yet. */
   onPickTime: (task: Task) => void;
+  /** Cancel (delete) the task. Resolves to an error message, or null when it worked. */
+  onCancel: (task: Task) => Promise<string | null>;
 };
 
 const LABEL = 'mb-1.5 block text-xs font-bold text-slate-700';
@@ -27,15 +30,22 @@ const FIELD = 'w-full rounded-[10px] border border-slate-300 bg-white px-3 text-
 
 /** Everything about one task, in a panel that slides in from the right when its block (or row) is clicked: when,
  * who, the description, the time actually tracked, the employee's note — and, for a submitted task, the
- * review. It replaces the separate Review dialog; the approve/reject rules are unchanged. */
-export default function TaskDetailPanel({ task, employee, today, onClose, onReview, onPickTime }: Props) {
+ * review. It replaces the separate Review dialog; the approve/reject rules are unchanged. A task that has not been
+ * reviewed yet can be cancelled from the bottom of the panel: it is deleted, after asking. Approved and rejected
+ * tasks are the record of work that was done, so they have no Cancel. */
+export default function TaskDetailPanel({ task, employee, today, onClose, onReview, onPickTime, onCancel }: Props) {
   const { system } = useCalendarSystem();
+  const confirm = useConfirm();
   const closeRef = useRef<HTMLButtonElement>(null);
   const [logs, setLogs] = useState<TaskTimeLog[]>([]);
   const [now, setNow] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'approved' | 'rejected' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  // True while the "are you sure" question is open, so Escape answers that and does not also close this panel.
+  const asking = useRef(false);
 
   useEffect(() => {
     setNow(Date.now());
@@ -50,7 +60,7 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
   useEffect(() => {
     closeRef.current?.focus();
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !asking.current) onClose();
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -67,6 +77,32 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
   );
   const scheduledMinutes = slot ? Math.round(slotLength(slot) * 60) : 0;
   const trackedPct = scheduledMinutes > 0 ? Math.min(100, Math.round((trackedMinutes / scheduledMinutes) * 100)) : 0;
+
+  const canCancel = task.status === 'pending' || task.status === 'in_progress' || task.status === 'submitted';
+
+  async function cancelTask() {
+    if (cancelling) return;
+    setCancelError(null);
+    const who = employee?.name ?? 'the employee';
+    const extra = [
+      trackedMinutes > 0 ? ` The ${formatHoursMinutes(trackedMinutes)} tracked on it is deleted too.` : '',
+      running ? ' Its running timer stops.' : '',
+    ].join('');
+    asking.current = true;
+    const sure = await confirm(`Cancel "${task.title}"? It is removed from ${who}'s timetable and task list for good.${extra} This cannot be undone.`, {
+      title: 'Cancel this task?',
+      confirmLabel: 'Cancel task',
+      cancelLabel: 'Keep task',
+      tone: 'danger',
+    });
+    asking.current = false;
+    if (!sure) return;
+    setCancelling(true);
+    const message = await onCancel(task);
+    setCancelling(false);
+    if (message) setCancelError(message);
+    else onClose();
+  }
 
   async function review(status: 'approved' | 'rejected') {
     setBusy(status);
@@ -241,6 +277,28 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
                 {busy === 'approved' ? 'Saving…' : 'Approve'}
               </button>
             </div>
+          </section>
+        )}
+
+        {canCancel && (
+          <section aria-labelledby="task-detail-cancel" className="mt-8 border-t border-slate-200 pt-5">
+            <h3 id="task-detail-cancel" className="mb-1 text-sm font-extrabold text-ink">Cancel this task</h3>
+            <p className="mb-3 text-[13px] leading-relaxed text-slate-600">
+              Removes it from the timetable and from {employee?.name ?? 'the employee'}&apos;s task list. Use it for a task that was assigned by mistake or is no longer needed.
+            </p>
+            {cancelError && (
+              <p role="alert" className="mb-3 text-sm font-semibold text-critical-text">
+                {cancelError}
+              </p>
+            )}
+            <button
+              type="button"
+              disabled={cancelling}
+              onClick={cancelTask}
+              className="min-h-[44px] rounded-[10px] border border-critical/40 bg-white px-5 text-sm font-extrabold text-critical-text hover:bg-critical-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-critical disabled:opacity-50"
+            >
+              {cancelling ? 'Cancelling…' : 'Cancel task'}
+            </button>
           </section>
         )}
       </aside>
