@@ -2,7 +2,9 @@
 
 import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
 import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
-import { KPI_COLORS, Pie, Ring } from './KpiCharts';
+import { serviceWord, type WeekBar } from '@/lib/serviceKpi';
+import type { PersonServices } from '@/lib/useServiceKpi';
+import { Bars, KPI_COLORS, Pie, Ring } from './KpiCharts';
 
 const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
@@ -112,6 +114,54 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
   }
   return (
     <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+      {body}
+    </Card>
+  );
+}
+
+/** Services performed: the month's total, and bars of how many in each week. The week that is still going is a pale
+ * bar. Under it, the whole of last month. Empty states say what is missing instead of showing a misleading 0. */
+export function ServicesCard({ eyebrow, name, data, bars, monthName, previousName, thisMonthSoFar, notStarted, className = '' }: {
+  eyebrow: string;
+  name: string;
+  data: PersonServices;
+  bars: WeekBar[];
+  /** The month on screen without its year ("November", "Mangsir"). */
+  monthName: string;
+  previousName: string;
+  /** The month on screen is the one going on now. */
+  thisMonthSoFar: boolean;
+  notStarted: boolean;
+  className?: string;
+}) {
+  const total = data.dates.length;
+  const partial = bars.some(b => b.partial);
+  let body: React.ReactNode;
+  if (notStarted) body = <Message title="Nothing to show yet" text="This month has not started." />;
+  else if (data.loading) body = <Message title="Loading…" />;
+  else if (!data.monthHasData) body = <Message title="No services imported for this month" text="Import your booking file in the Import section to fill this in." />;
+  else {
+    body = (
+      <>
+        <div className="-mt-1 mb-1 flex items-baseline gap-3">
+          <div className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-ink">{total}</div>
+          <div className="text-[12.5px] text-slate-600">{thisMonthSoFar ? `${serviceWord(total)} this month so far` : `${serviceWord(total)} in ${monthName}`}</div>
+        </div>
+        {total > 0 ? (
+          <Bars
+            bars={bars}
+            aria={`Services performed each week in ${monthName}: ${bars.map(b => `${b.label} ${b.value}`).join(', ')}. Total ${total}.${partial ? ' The last bar is the week so far.' : ''}`}
+          />
+        ) : (
+          <p className="m-0 text-sm text-slate-600">No services performed in {monthName}.</p>
+        )}
+      </>
+    );
+  }
+  const showPrevious = !notStarted && !data.loading && data.monthHasData && data.previousTotal != null;
+  const footer = [showPrevious ? `Whole of ${previousName}: ${data.previousTotal}` : '', partial && total > 0 ? 'The pale bar is the week so far.' : ''].filter(Boolean).join('. ');
+  return (
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer ? `${footer}${footer.endsWith('.') ? '' : '.'}` : null}>
       {body}
     </Card>
   );

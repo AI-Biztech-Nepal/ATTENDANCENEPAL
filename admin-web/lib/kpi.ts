@@ -28,8 +28,8 @@ export type KpiGroup = {
   title: string;
   /** Where the numbers in this group come from, shown under the group name. */
   source: string;
-  columns: { id: string; label: string; width: number }[];
-  /** True once something feeds the group. Until then its columns show a dash. */
+  columns: { id: string; label: string; width: number; /** True once numbers are worked out for this KPI. Until then it shows a dash. */ connected: boolean }[];
+  /** True once every KPI in the group has its numbers. */
   connected: boolean;
   /** What a dash in this group means, read out to screen readers (the header says "Not connected yet"). */
   emptyNote: string;
@@ -42,7 +42,7 @@ export const KPI_GROUPS: KpiGroup[] = [
     id: 'attendance',
     title: 'Attendance',
     source: 'From the attendance records',
-    columns: [{ id: 'attendance', label: 'Attendance and punctuality', width: 150 }],
+    columns: [{ id: 'attendance', label: 'Attendance and punctuality', width: 150, connected: true }],
     connected: true,
     emptyNote: '',
     waiting: '',
@@ -52,9 +52,9 @@ export const KPI_GROUPS: KpiGroup[] = [
     title: 'Services',
     source: 'From the booking import',
     columns: [
-      { id: 'services', label: 'Services performed', width: 100 },
-      { id: 'rebooking', label: 'Rebooking rate', width: 100 },
-      { id: 'utilisation', label: 'Hour utilisation per day', width: 120 },
+      { id: 'services', label: 'Services performed', width: 100, connected: true },
+      { id: 'rebooking', label: 'Rebooking rate', width: 100, connected: false },
+      { id: 'utilisation', label: 'Hour utilisation per day', width: 120, connected: false },
     ],
     connected: false,
     emptyNote: 'No import yet',
@@ -65,8 +65,8 @@ export const KPI_GROUPS: KpiGroup[] = [
     title: 'Customers',
     source: 'From customer forms typed in by staff',
     columns: [
-      { id: 'feedback', label: 'Customer feedback', width: 110 },
-      { id: 'nps', label: 'NPS', width: 90 },
+      { id: 'feedback', label: 'Customer feedback', width: 110, connected: false },
+      { id: 'nps', label: 'NPS', width: 90, connected: false },
     ],
     connected: false,
     emptyNote: 'No forms yet',
@@ -77,10 +77,10 @@ export const KPI_GROUPS: KpiGroup[] = [
     title: 'Colleague feedback',
     source: 'From monthly reviews',
     columns: [
-      { id: 'peers', label: 'Peers', width: 90 },
-      { id: 'manager', label: 'Manager', width: 90 },
-      { id: 'clevel', label: 'C-level', width: 90 },
-      { id: 'training', label: 'Training and compliance', width: 120 },
+      { id: 'peers', label: 'Peers', width: 90, connected: false },
+      { id: 'manager', label: 'Manager', width: 90, connected: false },
+      { id: 'clevel', label: 'C-level', width: 90, connected: false },
+      { id: 'training', label: 'Training and compliance', width: 120, connected: false },
     ],
     connected: false,
     emptyNote: 'No reviews yet',
@@ -110,8 +110,10 @@ export function visibleGroups(settings: KpiSettings): KpiGroup[] {
   return KPI_GROUPS.flatMap(g => {
     const columns = g.columns.filter(c => isKpiOn(c.id as KpiId, settings)).map(c => ({ ...c, label: kpiLabel(c.id as KpiId, settings) }));
     if (columns.length === 0) return [];
-    const waiting = g.connected ? '' : `${nameList(columns.map(c => c.label))} ${columns.length === 1 ? 'fills' : 'fill'} in once ${words.t(WAITING_TAIL[g.id])}.`;
-    return [{ ...g, title: words.t(g.title), source: words.t(g.source), emptyNote: words.t(g.emptyNote), columns, waiting }];
+    // Only the KPIs that are still waiting are named in the "fill in" line.
+    const pending = columns.filter(c => !c.connected);
+    const waiting = pending.length === 0 ? '' : `${nameList(pending.map(c => c.label))} ${pending.length === 1 ? 'fills' : 'fill'} in once ${words.t(WAITING_TAIL[g.id])}.`;
+    return [{ ...g, title: words.t(g.title), source: words.t(g.source), emptyNote: words.t(g.emptyNote), columns, connected: pending.length === 0, waiting }];
   });
 }
 

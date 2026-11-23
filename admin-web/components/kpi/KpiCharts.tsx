@@ -3,6 +3,8 @@
 // likely) are three hues that stay apart, and every chart is read out through its aria-label and has its
 // numbers written beside it, so nothing depends on colour alone.
 
+import { niceScale } from '@/lib/serviceKpi';
+
 export const KPI_COLORS = {
   good: '#0d9488',
   warn: '#d97706',
@@ -129,6 +131,63 @@ export function Ring({ pct, size = 156, stroke = 16, aria, big, small }: {
           {small}
         </text>
       )}
+    </svg>
+  );
+}
+
+export type Bar = { label: string; value: number; /** Still going, so it will grow: drawn pale with a dashed edge. */ partial?: boolean };
+
+/** Bars of one series, one per label, with the number above each bar and a light grid behind. The axis tops out at a
+ * tidy number that holds the tallest bar. Written out in full through its aria-label. */
+export function Bars({ bars, aria }: { bars: Bar[]; aria: string }) {
+  const W = 520;
+  const H = 176;
+  const L = 34;
+  const R = 8;
+  const T = 18;
+  const B = 30;
+  const pw = W - L - R;
+  const ph = H - T - B;
+  const { max, ticks } = niceScale(Math.max(0, ...bars.map(b => b.value)));
+  const y = (v: number) => T + ph - (v / max) * ph;
+  const slot = pw / Math.max(bars.length, 1);
+  const barW = Math.min(68, slot * 0.62);
+  return (
+    <svg role="img" aria-label={aria} width="100%" viewBox={`0 0 ${W} ${H}`} className="block">
+      {ticks.map(t => (
+        <g key={t}>
+          <line x1={L} x2={L + pw} y1={y(t)} y2={y(t)} stroke={KPI_COLORS.track} />
+          <text x={L - 8} y={y(t) + 4} textAnchor="end" fontSize={11} fill="#475569">
+            {t}
+          </text>
+        </g>
+      ))}
+      {bars.map((b, i) => {
+        const cx = L + slot * (i + 0.5);
+        return (
+          <g key={i}>
+            {b.value > 0 && (
+              <rect
+                x={cx - barW / 2}
+                y={y(b.value)}
+                width={barW}
+                height={y(0) - y(b.value)}
+                rx={5}
+                fill={b.partial ? '#99d6cf' : KPI_COLORS.accent}
+                stroke={b.partial ? KPI_COLORS.accent : undefined}
+                strokeWidth={b.partial ? 1.5 : undefined}
+                strokeDasharray={b.partial ? '4 3' : undefined}
+              />
+            )}
+            <text x={cx} y={y(b.value) - 6} textAnchor="middle" fontSize={13} fontWeight={800} fill="#0f172a">
+              {b.value}
+            </text>
+            <text x={cx} y={H - 8} textAnchor="middle" fontSize={12} fill="#475569">
+              {b.label}
+            </text>
+          </g>
+        );
+      })}
     </svg>
   );
 }

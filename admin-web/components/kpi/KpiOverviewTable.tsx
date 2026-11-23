@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import Avatar from '@/components/Avatar';
 import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
+import { serviceWord } from '@/lib/serviceKpi';
 import type { Employee } from '@/lib/types';
 
 type Props = {
@@ -10,6 +11,8 @@ type Props = {
   groups: KpiGroup[];
   employees: Employee[];
   attendance: Map<string, AttendanceKpi>;
+  /** Services performed in the month, per person. `counts` is null when no booking file covers the month. */
+  services: { loading: boolean; counts: Map<string, number> | null };
   loading: boolean;
   /** The month being shown has not begun, so there is nothing to count yet. */
   notStarted: boolean;
@@ -20,7 +23,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place; the
  * groups themselves are named in the "Not connected yet" card under the table). Nothing is added up or
  * compared: a dash means there is nothing to show yet. */
-export default function KpiOverviewTable({ groups, employees, attendance, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -80,10 +83,14 @@ export default function KpiOverviewTable({ groups, employees, attendance, loadin
                       </div>
                     </th>
                     {groups.map(g =>
-                      g.id === 'attendance' ? (
-                        <AttendanceCell key={g.id} kpi={kpi} notStarted={notStarted} />
-                      ) : (
-                        g.columns.map((c, i) => <EmptyCell key={c.id} group={g} first={i === 0} />)
+                      g.columns.map((c, i) =>
+                        c.id === 'attendance' ? (
+                          <AttendanceCell key={c.id} kpi={kpi} notStarted={notStarted} />
+                        ) : c.id === 'services' ? (
+                          <ServicesCell key={c.id} group={g} first={i === 0} loading={services.loading} counts={services.counts} employeeId={emp.id} notStarted={notStarted} />
+                        ) : (
+                          <EmptyCell key={c.id} group={g} first={i === 0} />
+                        )
                       )
                     )}
                   </tr>
@@ -129,6 +136,28 @@ function AttendanceCell({ kpi, notStarted }: { kpi: AttendanceKpi | undefined; n
       <div className="mt-0.5 text-[13px] font-bold tabular-nums text-ink">
         {onTime == null ? '–' : `${onTime}%`} <span className="text-[11.5px] font-medium text-slate-600">on time</span>
       </div>
+    </td>
+  );
+}
+
+/** How many services this person performed in the month. A dash when no booking file covers the month (that is not
+ * the same as 0: someone with nothing in a month the others have services in did perform none). */
+function ServicesCell({ group, first, loading, counts, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; counts: Map<string, number> | null; employeeId: string; notStarted: boolean }) {
+  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  if (loading || !counts) {
+    return (
+      <td className={cell}>
+        <div className="text-[15px] font-bold text-slate-600">
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">{loading ? 'Loading' : notStarted ? 'Month has not started' : group.emptyNote}</span>
+        </div>
+      </td>
+    );
+  }
+  const n = counts.get(employeeId) ?? 0;
+  return (
+    <td className={cell} title={`${n} ${serviceWord(n)}`}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">{n}</div>
     </td>
   );
 }

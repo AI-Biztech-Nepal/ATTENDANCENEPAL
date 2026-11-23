@@ -9,9 +9,11 @@ import { isKpiOn, kpiLabel, type KpiId } from '@/lib/kpiSettings';
 import { useEmployeeKpi } from '@/lib/useEmployeeKpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useMonthInUrl } from '@/lib/useMonthInUrl';
+import { usePersonServices } from '@/lib/useServiceKpi';
+import { weekBars } from '@/lib/serviceKpi';
 import Avatar from '@/components/Avatar';
 import MonthStepper from '@/components/kpi/MonthStepper';
-import { AttendanceCard, ColleagueCard, PendingCard } from '@/components/kpi/EmployeeKpiCards';
+import { AttendanceCard, ColleagueCard, PendingCard, ServicesCard } from '@/components/kpi/EmployeeKpiCards';
 
 // One person's KPIs: the Overview section of their pages (the layout has the way back, their name and the other
 // sections). It is opened by clicking a name on the KPI list, which also passes the month it was looking at
@@ -43,6 +45,10 @@ function EmployeeKpi() {
 
   useMonthInUrl(start);
   const { loading, error, notFound, employee, current, previous: previousKpi, today } = useEmployeeKpi(employeeId, { start, end }, previous);
+  const serviceData = usePersonServices(employeeId, { start, end }, previous);
+  const bars = useMemo(() => weekBars(serviceData.dates, start, end, today, system), [serviceData.dates, start, end, today, system]);
+  // "November" / "Mangsir": the month's name without its year.
+  const monthName = label.split(' ')[0];
   // Which KPIs this company uses, and what it calls them (KPIs > Settings).
   const { settings, loaded } = useKpiSettings();
   const groups = useMemo(() => visibleGroups(settings), [settings]);
@@ -97,7 +103,19 @@ function EmployeeKpi() {
             notStarted={start > today}
           />
         )}
-        {services && on('services') && <PendingCard className="md:col-span-2" group={services} name={kpiLabel('services', settings, 'Number of services performed')} />}
+        {services && on('services') && (
+          <ServicesCard
+            className="md:col-span-2"
+            eyebrow={services.title}
+            name={kpiLabel('services', settings, 'Number of services performed')}
+            data={serviceData}
+            bars={bars}
+            monthName={monthName}
+            previousName={previousName}
+            thisMonthSoFar={start <= today && today <= end}
+            notStarted={start > today}
+          />
+        )}
         {services && on('rebooking') && <PendingCard group={services} name={kpiLabel('rebooking', settings)} ring />}
         {services && on('utilisation') && <PendingCard group={services} name={kpiLabel('utilisation', settings)} ring />}
         {customers && on('feedback') && <PendingCard group={customers} name={kpiLabel('feedback', settings)} />}
