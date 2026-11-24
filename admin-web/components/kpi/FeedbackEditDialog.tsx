@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useConfirm } from '@/components/ConfirmDialog';
 import FeedbackFields, { type StaffOption } from '@/components/kpi/FeedbackFields';
-import { draftFromRow, feedbackRow, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
+import { draftFromRow, feedbackRow, needsGuestMigration, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
+import { MIGRATION } from '@/lib/kpiLoad';
+import { saveGuest } from '@/lib/guestDetails';
 import type { CustomerFeedback } from '@/lib/types';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 
@@ -40,10 +42,19 @@ export default function FeedbackEditDialog({ row, staff, today, onClose, onChang
     setBusy('save');
     setError('');
     // .select() so a row the security rules hide (or one already deleted) is noticed instead of "saving" nothing.
-    const { data, error: updateError } = await supabase.from('customer_feedback').update(feedbackRow(draft)).eq('id', row.id).select('id');
+    const { data, error: updateError } = await supabase.from('customer_feedback').update(feedbackRow(draft, !!row.visit_date)).eq('id', row.id).select('id');
+    if (updateError) {
+      setBusy(null);
+      return setError(needsGuestMigration(updateError.message) ? `Guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `Could not save: ${updateError.message}`);
+    }
+    if (!data || data.length === 0) {
+      setBusy(null);
+      return setError('That form could not be changed. It may already have been deleted.');
+    }
+    // The guest's name, phone and email are kept in their own table: saved, or removed when all three boxes were emptied.
+    const guestError = await saveGuest(draft, row.id, !row.guest);
     setBusy(null);
-    if (updateError) return setError(`Could not save: ${updateError.message}`);
-    if (!data || data.length === 0) return setError('That form could not be changed. It may already have been deleted.');
+    if (guestError) return setError(needsGuestMigration(guestError) ? `The form was changed, but guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `The form was changed, but the guest's details were not: ${guestError}`);
     onChanged();
   }
 

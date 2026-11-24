@@ -50,4 +50,5 @@ export const MIGRATION = {
   reviews: '20261123140000_colleague_feedback.sql',
   own: '20261123120000_own_kpis.sql',
   mine: '20261123160000_employee_kpi_read.sql',
+  guests: '20261124120000_customer_feedback_guest_details.sql',
 } as const;

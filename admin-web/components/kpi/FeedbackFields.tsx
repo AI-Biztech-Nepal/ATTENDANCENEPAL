@@ -2,7 +2,7 @@
 
 import DatePicker from '@/components/DatePicker';
 import { Question, circleClasses } from '@/components/kpi/FormParts';
-import { COMMENT_MAX, REFERENCE_MAX, type FeedbackDraft } from '@/lib/customerFeedback';
+import { COMMENT_MAX, GUEST_EMAIL_MAX, GUEST_NAME_MAX, GUEST_PHONE_MAX, REFERENCE_MAX, type FeedbackDraft } from '@/lib/customerFeedback';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import type { Employee } from '@/lib/types';
 
@@ -39,8 +39,9 @@ function Circles({ from, to, value, onPick, name, words }: { from: number; to: n
   );
 }
 
-/** The boxes of one customer form, in the order of the paper form: who served them, the date on the paper, what it was for,
- * 1. the service rating the customer circled, 2. how likely they are to recommend, 3. the comment. Shared by the typing
+/** The boxes of one customer form, in the order of the paper form: who served them, the date on the paper and the day of the visit,
+ * what it was for, who the guest is (name, phone, email: all optional), 1. the service rating the customer circled, 2. how likely
+ * they are to recommend, 3. the comment. Shared by the typing
  * card and the edit dialog; `idPrefix` keeps the ids of the two apart. A customer may skip a question, so the numbers and
  * the comment can be left empty. */
 export default function FeedbackFields({ draft, onChange, staff, idPrefix, employeeRef, ratingRef, employeeLocked = false }: {
@@ -79,18 +80,44 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
           <DatePicker value={draft.date} onChange={v => set({ date: v })} ariaLabel="Date on the form" className="h-11 rounded-[10px] border-slate-300 font-semibold" />
         </div>
         <div>
-          <label htmlFor={`${idPrefix}-reference`} className={LABEL}>
-            What it was for {optional}
+          <span className={LABEL}>Date of visit {optional}</span>
+          <DatePicker value={draft.visitDate} onChange={v => set({ visitDate: v })} ariaLabel="Date of visit" className="h-11 rounded-[10px] border-slate-300 font-semibold" />
+        </div>
+      </div>
+
+      <div className="mb-3.5">
+        <label htmlFor={`${idPrefix}-reference`} className={LABEL}>
+          What it was for {optional}
+        </label>
+        <input
+          id={`${idPrefix}-reference`}
+          type="text"
+          maxLength={REFERENCE_MAX}
+          value={draft.reference}
+          onChange={e => set({ reference: e.target.value })}
+          placeholder="e.g. Consultation"
+          className={FIELD}
+        />
+      </div>
+
+      <div className="mb-3.5">
+        <label htmlFor={`${idPrefix}-guest-name`} className={LABEL}>
+          {words.One} name {optional}
+        </label>
+        <input id={`${idPrefix}-guest-name`} type="text" maxLength={GUEST_NAME_MAX} autoComplete="off" value={draft.guestName} onChange={e => set({ guestName: e.target.value })} className={FIELD} />
+      </div>
+      <div className="mb-3.5 grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+        <div>
+          <label htmlFor={`${idPrefix}-guest-phone`} className={LABEL}>
+            Phone {optional}
           </label>
-          <input
-            id={`${idPrefix}-reference`}
-            type="text"
-            maxLength={REFERENCE_MAX}
-            value={draft.reference}
-            onChange={e => set({ reference: e.target.value })}
-            placeholder="e.g. Consultation"
-            className={FIELD}
-          />
+          <input id={`${idPrefix}-guest-phone`} type="tel" inputMode="tel" maxLength={GUEST_PHONE_MAX} autoComplete="off" value={draft.guestPhone} onChange={e => set({ guestPhone: e.target.value })} className={FIELD} />
+        </div>
+        <div>
+          <label htmlFor={`${idPrefix}-guest-email`} className={LABEL}>
+            Email {optional}
+          </label>
+          <input id={`${idPrefix}-guest-email`} type="email" inputMode="email" maxLength={GUEST_EMAIL_MAX} autoComplete="off" value={draft.guestEmail} onChange={e => set({ guestEmail: e.target.value })} className={FIELD} />
         </div>
       </div>
 
@@ -146,7 +173,6 @@ export default function FeedbackFields({ draft, onChange, staff, idPrefix, emplo
           onChange={e => set({ comment: e.target.value })}
           className="w-full resize-y rounded-[10px] border border-slate-300 bg-white px-3 py-2.5 text-sm leading-normal text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         />
-        <p className="m-0 mt-1.5 text-xs text-slate-600">{words.t("Copy the comment as written. Do not add a customer's name or phone number.")}</p>
       </Question>
     </>
   );

@@ -246,6 +246,10 @@ export type CustomerFeedback = {
   /** Would recommend, 0 to 10. */
   recommend: number | null;
   comment: string | null;
+  /** The day the guest visited, when the form says (never after `given_on`). */
+  visit_date?: string | null;
+  /** Who the guest is, kept apart from the form where only admin and HR can read it. Added to the row after it is read. */
+  guest?: { guest_name: string | null; guest_phone: string | null; guest_email: string | null } | null;
   created_at: string;
 };
 

@@ -2,8 +2,8 @@
 // hidden on screen; when the page is printed the rest of the page is hidden instead (print:hidden on the
 // page's other content, and the sidebar and top bar already hide themselves), so only this prints, on one A4 page.
 // Black and white with plain lines, so it prints the same on any printer. It asks exactly what the page types in
-// (who served, the date, what it was for, a 1-5 rating, a 0-10 would-recommend number and a comment), in the
-// same order. Written for any company: "customer", no names or phone numbers asked for.
+// (who served, the date, the day of the visit, what it was for, the guest's name, phone and email, a 1-5 rating, a 0-10
+// would-recommend number and a comment), in the same order. Written for any company: "customer". The guest's details are optional.
 
 const circle = 'flex shrink-0 items-center justify-center rounded-full border-[1.8px] border-black font-bold';
 const label = 'text-[12px] font-bold';
@@ -49,9 +49,35 @@ export default function BlankFeedbackForm({ companyName }: { companyName: string
             <div className={fieldLine} />
           </div>
         </div>
+        <div className="mt-3 grid grid-cols-[1.3fr_1fr] gap-x-7">
+          <div>
+            <div className={label}>
+              What was it for? <span className="font-medium">(optional)</span>
+            </div>
+            <div className={fieldLine} />
+          </div>
+          <div>
+            <div className={label}>Date of visit</div>
+            <div className={fieldLine} />
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-[1.3fr_1fr] gap-x-7">
+          <div>
+            <div className={label}>
+              Your name <span className="font-medium">(optional)</span>
+            </div>
+            <div className={fieldLine} />
+          </div>
+          <div>
+            <div className={label}>
+              Phone <span className="font-medium">(optional)</span>
+            </div>
+            <div className={fieldLine} />
+          </div>
+        </div>
         <div className="mt-3">
           <div className={label}>
-            What was it for? <span className="font-medium">(optional)</span>
+            Email <span className="font-medium">(optional)</span>
           </div>
           <div className={fieldLine} />
         </div>
@@ -92,8 +118,6 @@ export default function BlankFeedbackForm({ companyName }: { companyName: string
 
       <div className="mt-5 border-t-[1.5px] border-black pt-3 text-[13px] leading-relaxed">
         Thank you. Please hand this form to our team or put it in the box.
-        <br />
-        You do not need to write your name or phone number.
       </div>
     </div>
   );

@@ -11,7 +11,9 @@ import { weekdayName } from '@/lib/taskSchedule';
 import { otherCalendarSpan, parseMonthParam } from '@/lib/kpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useMonthInUrl } from '@/lib/useMonthInUrl';
-import { FEEDBACK_COLUMNS, FEEDBACK_PAGE_SIZE, emptyDraft, feedbackRow, rangeText, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
+import { FEEDBACK_COLUMNS, FEEDBACK_COLUMNS_WITHOUT_VISIT, FEEDBACK_PAGE_SIZE, emptyDraft, feedbackRow, needsGuestMigration, rangeText, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
+import { MIGRATION } from '@/lib/kpiLoad';
+import { loadGuests, saveGuest } from '@/lib/guestDetails';
 import type { CustomerFeedback, Employee } from '@/lib/types';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import FeedbackFields, { type StaffOption } from '@/components/kpi/FeedbackFields';
@@ -78,28 +80,38 @@ function FeedbackSection() {
 
   useEffect(() => {
     let live = true;
-    supabase
-      .from('customer_feedback')
-      .select(FEEDBACK_COLUMNS, { count: 'exact' })
-      .eq('employee_id', employeeId)
-      .gte('given_on', start)
-      .lte('given_on', end)
-      .order('given_on', { ascending: false })
-      .order('created_at', { ascending: false })
-      .range(page * FEEDBACK_PAGE_SIZE, page * FEEDBACK_PAGE_SIZE + FEEDBACK_PAGE_SIZE - 1)
-      .then(({ data, count, error }: { data: unknown; count: number | null; error: { message: string } | null }) => {
-        if (!live) return;
-        if (error) {
-          setListError(`Could not load the forms: ${error.message}`);
-          setList({ rows: [], total: 0, page });
-          return;
-        }
-        setListError('');
-        const rows = (data as CustomerFeedback[] | null) ?? [];
-        // The last form on the last page was deleted: go back a page instead of showing an empty one.
-        if (rows.length === 0 && page > 0) setPage(page - 1);
-        else setList({ rows, total: count ?? rows.length, page });
-      });
+    const read = (columns: string) =>
+      supabase
+        .from('customer_feedback')
+        .select(columns, { count: 'exact' })
+        .eq('employee_id', employeeId)
+        .gte('given_on', start)
+        .lte('given_on', end)
+        .order('given_on', { ascending: false })
+        .order('created_at', { ascending: false })
+        .range(page * FEEDBACK_PAGE_SIZE, page * FEEDBACK_PAGE_SIZE + FEEDBACK_PAGE_SIZE - 1);
+    (async () => {
+      let res = (await read(FEEDBACK_COLUMNS)) as { data: unknown; count: number | null; error: { message: string } | null };
+      // Before the guest-details migration is run there is no visit_date column: read the forms without it, so the page keeps working.
+      if (res.error && needsGuestMigration(res.error.message)) res = (await read(FEEDBACK_COLUMNS_WITHOUT_VISIT)) as typeof res;
+      const { data, count, error } = res;
+      if (!live) return;
+      if (error) {
+        setListError(`Could not load the forms: ${error.message}`);
+        setList({ rows: [], total: 0, page });
+        return;
+      }
+      setListError('');
+      const rows = (data as CustomerFeedback[] | null) ?? [];
+      // The last form on the last page was deleted: go back a page instead of showing an empty one.
+      if (rows.length === 0 && page > 0) {
+        setPage(page - 1);
+        return;
+      }
+      // Who each guest is lives in a table only admin and HR can read: read it for these forms and put it on their rows.
+      const guests = await loadGuests(rows.map(r => r.id));
+      if (live) setList({ rows: rows.map(r => ({ ...r, guest: guests.get(r.id) ?? null })), total: count ?? rows.length, page });
+    })();
     return () => {
       live = false;
     };
@@ -125,10 +137,20 @@ function FeedbackSection() {
     }
     setSaving(true);
     setFormError('');
-    const { error } = await supabase.from('customer_feedback').insert(feedbackRow(draft));
-    setSaving(false);
+    const { data: made, error } = await supabase.from('customer_feedback').insert(feedbackRow(draft)).select('id');
     if (error) {
-      setFormError(`Could not save: ${error.message}`);
+      setSaving(false);
+      setFormError(needsGuestMigration(error.message) ? `Guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `Could not save: ${error.message}`);
+      return;
+    }
+    // The guest's name, phone and email go to their own table, with the id of the form just made.
+    const formId = (made as { id: string }[] | null)?.[0]?.id;
+    const guestError = formId ? await saveGuest(draft, formId, true) : '';
+    setSaving(false);
+    if (guestError) {
+      setFormError(needsGuestMigration(guestError) ? `The form was saved, but guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `The form was saved, but the guest's details were not: ${guestError}. Open the form from the list and add them again.`);
+      setDraft(keep ? { ...blank(), date: draft.date } : blank());
+      setReloadKey(k => k + 1);
       return;
     }
     setNotice(`Saved for ${personName(draft.employeeId)} · ${dayText(draft.date)}.`);
@@ -250,10 +272,10 @@ function FeedbackSection() {
             )}
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] border-collapse text-left">
+              <table className="w-full min-w-[660px] border-collapse text-left">
                 <thead>
                   <tr className="border-y border-slate-200 bg-slate-50">
-                    {['Date', 'Rating', 'Recommend', 'Comment'].map((h, i) => (
+                    {['Date', words.One, 'Rating', 'Recommend', 'Comment'].map((h, i) => (
                       <th key={h} scope="col" className={`py-[11px] text-xs font-extrabold uppercase tracking-wider text-slate-600 ${i === 0 ? 'px-6' : 'px-3'}`}>
                         {h}
                       </th>
@@ -264,20 +286,34 @@ function FeedbackSection() {
                 <tbody>
                   {!list ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-600">
+                      <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-600">
                         Loading…
                       </td>
                     </tr>
                   ) : rows.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-10 text-center text-sm text-slate-600">
+                      <td colSpan={6} className="px-6 py-10 text-center text-sm text-slate-600">
                         No forms typed in for this employee in {label}.
                       </td>
                     </tr>
                   ) : (
                     rows.map(r => (
                       <tr key={r.id} className="border-b border-slate-100 last:border-0">
-                        <td className="whitespace-nowrap px-6 py-[13px] text-[13px] text-slate-700">{dayText(r.given_on)}</td>
+                        <td className="whitespace-nowrap px-6 py-[13px] text-[13px] text-slate-700">
+                          {dayText(r.given_on)}
+                          {r.visit_date && <span className="mt-0.5 block text-xs text-slate-600">Visited {dayText(r.visit_date)}</span>}
+                        </td>
+                        <td className="max-w-[170px] px-3 py-[13px] text-[13px] text-slate-700">
+                          {r.guest ? (
+                            <>
+                              {r.guest.guest_name && <span className="block font-bold text-ink">{r.guest.guest_name}</span>}
+                              {r.guest.guest_phone && <span className="block text-xs text-slate-600">{r.guest.guest_phone}</span>}
+                              {r.guest.guest_email && <span className="block break-all text-xs text-slate-600">{r.guest.guest_email}</span>}
+                            </>
+                          ) : (
+                            <Dash />
+                          )}
+                        </td>
                         <td className="px-3 py-[13px] text-sm font-extrabold tabular-nums text-ink">{r.rating ?? <Dash />}</td>
                         <td className="px-3 py-[13px] text-sm font-extrabold tabular-nums text-ink">{r.recommend ?? <Dash />}</td>
                         <td className="px-3 py-[13px] text-[13px] text-slate-700">
