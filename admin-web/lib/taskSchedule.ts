@@ -32,14 +32,23 @@ export function taskSlot(task: Pick<Task, 'start_time' | 'end_time'>): Slot | nu
   return { start, end };
 }
 
+/** A day and a clock time ("09:30:00") on that day, read as Nepal time (UTC+5:45), as milliseconds. Null when either is missing or garbled. */
+function nepalMs(day: string | null, time: string | null | undefined): number | null {
+  const m = /^(\d{1,2}):(\d{2})/.exec(time ?? '');
+  if (!day || !m) return null;
+  const ms = Date.parse(`${day}T${m[1].padStart(2, '0')}:${m[2]}:00+05:45`);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** The moment a task's time begins: its day and its start time, read as Nepal time, as milliseconds. Null when it has no slot or no day. */
+export function slotStartMs(task: Pick<Task, 'due_date' | 'start_time' | 'end_time'>): number | null {
+  return taskSlot(task) ? nepalMs(task.due_date, task.start_time) : null;
+}
+
 /** The moment a task's time is over: its day and its end time, read as Nepal time (UTC+5:45), as milliseconds. Null when it has
  * no slot or no day. */
 export function slotEndMs(task: Pick<Task, 'due_date' | 'start_time' | 'end_time'>): number | null {
-  if (!task.due_date || !taskSlot(task)) return null;
-  const m = /^(\d{1,2}):(\d{2})/.exec(task.end_time ?? '');
-  if (!m) return null;
-  const ms = Date.parse(`${task.due_date}T${m[1].padStart(2, '0')}:${m[2]}:00+05:45`);
-  return Number.isNaN(ms) ? null : ms;
+  return taskSlot(task) ? nepalMs(task.due_date, task.end_time) : null;
 }
 
 /** A task that is still to be done (pending or in progress) and has a time slot is completed once the slot's end has passed: this is

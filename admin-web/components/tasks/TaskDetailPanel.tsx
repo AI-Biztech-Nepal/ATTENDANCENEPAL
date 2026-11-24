@@ -8,6 +8,7 @@ import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate, formatTime, localDateKey } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes } from '@/lib/shift';
+import { scheduledLog } from '@/lib/taskHours';
 import { formatDuration, formatSlot, slotLength, taskSlot, weekdayName } from '@/lib/taskSchedule';
 import type { Employee, Task, TaskTimeLog } from '@/lib/types';
 import { STATUS_LABEL, STATUS_TONE, isOverdue } from './taskStyles';
@@ -57,6 +58,12 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
       .then(({ data }) => setLogs((data as TaskTimeLog[] | null) ?? []));
   }, [task.id]);
 
+  // The time shown keeps moving while the panel is open (a task that is running now).
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     closeRef.current?.focus();
     function onKey(e: KeyboardEvent) {
@@ -69,8 +76,12 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
   const slot = taskSlot(task);
   const overdue = isOverdue(task, today);
   const running = logs.some(l => !l.ended_at);
+  // Time counts by the schedule: tasks run on the clock (they complete when their time is over), so nobody has to start a timer for the
+  // time to count. A timer that was used is the truth for its task, so the scheduled time is only used when there are no sessions.
+  const planned = logs.length === 0 ? scheduledLog(task, now ?? Date.now()) : null;
+  const shownLogs = planned ? [planned] : logs;
   const trackedMinutes = Math.round(
-    logs.reduce((sum, l) => {
+    shownLogs.reduce((sum, l) => {
       const end = l.ended_at ? new Date(l.ended_at).getTime() : (now ?? new Date(l.started_at).getTime());
       return sum + Math.max(0, end - new Date(l.started_at).getTime());
     }, 0) / 60000
@@ -207,11 +218,11 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
               <div className="h-full rounded-full bg-teal-700" style={{ width: `${trackedPct}%` }} />
             </div>
           )}
-          {logs.length === 0 ? (
+          {shownLogs.length === 0 ? (
             <p className="mt-2 text-[13px] text-slate-600">No time logged yet.</p>
           ) : (
             <ul className="mt-3">
-              {logs.map(l => {
+              {shownLogs.map(l => {
                 const end = l.ended_at ? new Date(l.ended_at).getTime() : (now ?? new Date(l.started_at).getTime());
                 const minutes = Math.max(0, Math.round((end - new Date(l.started_at).getTime()) / 60000));
                 return (
@@ -226,7 +237,6 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
               })}
             </ul>
           )}
-          {running && logs.length > 0 && <p className="mt-1 text-xs text-slate-600">Time updates when the page is reopened.</p>}
         </section>
 
         {task.work_notes && (

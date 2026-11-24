@@ -11,7 +11,7 @@ import { PageBody } from '@/components/employee/parts';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso } from '@/lib/shift';
-import { totalsByTask } from '@/lib/taskHours';
+import { logsWithSchedule, totalsByTask } from '@/lib/taskHours';
 import { withTimeStatus } from '@/lib/taskSchedule';
 import { STATUS_LABEL, STATUS_TONE } from '@/components/tasks/taskStyles';
 import type { Task, TaskTimeLog } from '@/lib/types';
@@ -164,7 +164,10 @@ export default function MyTasksPage() {
   }
 
   const filtered = useMemo(() => (filter === 'All' ? tasks : tasks.filter(t => t.status === filter)), [tasks, filter]);
-  const taskTotals = useMemo(() => totalsByTask(logs), [logs]);
+  // The hours per task and the chart count the schedule too: a task's time counts as it passes, with no timer needed (a timer that was
+  // used is the truth for its task). `logs` itself stays the real timer sessions, for the running timer.
+  const timeLogs = useMemo(() => logsWithSchedule(tasks, logs, clock), [tasks, logs, clock]);
+  const taskTotals = useMemo(() => totalsByTask(timeLogs), [timeLogs]);
   const todayIso = useMemo(nepalTodayIso, []);
   const isOverdue = (t: Task) => (t.status === 'pending' || t.status === 'in_progress') && !!t.due_date && t.due_date < todayIso;
   const hoursOf = (taskId: string) => taskTotals.find(r => r.task_id === taskId)?.hours ?? 0;
@@ -364,13 +367,13 @@ export default function MyTasksPage() {
         </div>
 
         <div className="min-w-0">
-          <TaskHoursChart logs={logs} tasks={tasks} />
+          <TaskHoursChart logs={timeLogs} tasks={tasks} />
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <h2 className="mb-3 text-sm font-semibold text-ink">Hours by Task</h2>
           {taskTotals.length === 0 ? (
-            <p className="text-sm text-slate-400">No time logged yet. Accept a task to start the timer.</p>
+            <p className="text-sm text-slate-400">No time yet.</p>
           ) : (
             <div className="divide-y divide-slate-100">
               {taskTotals.map(row => {
