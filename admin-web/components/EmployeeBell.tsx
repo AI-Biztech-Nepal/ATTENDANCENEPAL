@@ -5,11 +5,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { timeAgo } from '@/lib/pendingApprovals';
-import { notificationLines, notificationTitle, type EmployeeNotification } from '@/lib/employeeNotifications';
+import { notificationHref, notificationLines, notificationTitle, type EmployeeNotification } from '@/lib/employeeNotifications';
 
 type Notifications = { items: EmployeeNotification[]; unread: number; markAllRead: () => Promise<void> };
 
-/** The employee portal's bell: what HR has done about them — today, changes to their exit. The badge counts what
+/** The employee portal's bell: what HR or the manager has done about them: a new or moved task, a change to their exit. The badge counts what
  * they have not read and the panel lists only those; "Mark all as read" clears both. `notes` comes from the
  * shell so the phone and computer headers share one fetch. */
 export default function EmployeeBell({ notes, variant }: { notes: Notifications; variant: 'onDark' | 'portal' }) {
@@ -87,7 +87,7 @@ export default function EmployeeBell({ notes, variant }: { notes: Notifications;
           {shown.length === 0 ? (
             <div className="px-4 py-10 text-center">
               <p className="text-sm font-semibold text-ink">Nothing new</p>
-              <p className="mt-1 text-xs text-slate-500">When HR updates something about you, it shows up here.</p>
+              <p className="mt-1 text-xs text-slate-500">When you are given a task, or HR updates something about you, it shows up here.</p>
             </div>
           ) : (
             <ul>
@@ -95,7 +95,7 @@ export default function EmployeeBell({ notes, variant }: { notes: Notifications;
                 const lines = notificationLines(n, system);
                 return (
                   <li key={n.id} className="border-b border-slate-100 last:border-b-0">
-                    <Link href="/my-profile?tab=exit" onClick={() => setOpen(false)} className="block bg-accent/5 px-4 py-3 hover:bg-accent/10">
+                    <Link href={notificationHref(n)} onClick={() => setOpen(false)} className="block bg-accent/5 px-4 py-3 hover:bg-accent/10">
                       <span className="flex items-start gap-2">
                         <span aria-hidden="true" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
                         <span className="min-w-0 flex-1">

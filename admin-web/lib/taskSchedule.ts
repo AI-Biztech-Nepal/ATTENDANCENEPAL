@@ -51,12 +51,17 @@ export function slotEndMs(task: Pick<Task, 'due_date' | 'start_time' | 'end_time
   return taskSlot(task) ? nepalMs(task.due_date, task.end_time) : null;
 }
 
-/** A task that is still to be done (pending or in progress) and has a time slot is completed once the slot's end has passed: this is
- * the task as it is to be shown at `nowMs`. Anything else (no slot, already sent in, completed, rejected) comes back as it is. */
+/** Tasks run on the clock: nobody accepts or starts one. A task that is still to be done (pending or in progress) and has a time slot is
+ * pending until its slot begins, in progress while the slot is running and completed once the slot's end has passed. This is the task as it
+ * is to be shown at `nowMs`. Anything else (no slot, sent in, completed, rejected) comes back as it is. */
 export function withTimeStatus<T extends Task>(task: T, nowMs: number): T {
   if (task.status !== 'pending' && task.status !== 'in_progress') return task;
   const end = slotEndMs(task);
-  return end !== null && nowMs >= end ? { ...task, status: 'approved' } : task;
+  if (end === null) return task;
+  if (nowMs >= end) return { ...task, status: 'approved' };
+  const start = slotStartMs(task);
+  if (task.status === 'pending' && start !== null && nowMs >= start) return { ...task, status: 'in_progress' };
+  return task;
 }
 
 export function slotsOverlap(a: Slot, b: Slot): boolean {

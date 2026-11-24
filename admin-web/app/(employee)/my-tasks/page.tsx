@@ -3,280 +3,160 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { usePageTitle } from '@/lib/pageTitle';
-import Badge from '@/components/Badge';
-import DatePicker from '@/components/DatePicker';
-import TaskHoursChart from '@/components/TaskHoursChart';
-import FormDialog from '@/components/employee/FormDialog';
 import { PageBody } from '@/components/employee/parts';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import { nepalTodayIso } from '@/lib/shift';
-import { logsWithSchedule, totalsByTask } from '@/lib/taskHours';
-import { withTimeStatus } from '@/lib/taskSchedule';
-import { STATUS_LABEL, STATUS_TONE } from '@/components/tasks/taskStyles';
-import type { Task, TaskTimeLog } from '@/lib/types';
+import { nepalDateKey } from '@/lib/shift';
+import { formatDuration, formatSlot, relativeDayLabel, slotEndMs, slotLength, slotStartMs, taskSlot, weekdayName, withTimeStatus } from '@/lib/taskSchedule';
+import type { Task } from '@/lib/types';
 
-const FILTERS = ['All', 'pending', 'in_progress', 'submitted', 'approved', 'rejected'] as const;
-type Filter = (typeof FILTERS)[number];
+/** How many finished tasks are listed before "Show all". */
+const DONE_SHOWN = 8;
 
-const EMPTY_TASK_FORM = { title: '', description: '', due_date: '' };
-const LABEL = 'mb-1 block text-xs font-medium text-slate-600';
-const INPUT = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
-const PRIMARY_SM = 'rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90 disabled:opacity-50';
-const OUTLINE_SM = 'rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50';
+/** Oldest first by day and start time; a task with no day goes last, and one with a day but no time goes after that day's timed tasks. */
+const when = (t: Task) => `${t.due_date ?? '9999-12-31'}T${t.start_time ?? '99:99'}`;
 
-
-function formatElapsed(startedAt: string, now: number) {
-  const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+/** "25 min left", "1 h 5 min left". */
+function timeLeft(minutes: number): string {
+  if (minutes < 60) return `${minutes} min left`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h} h left` : `${h} h ${m} min left`;
 }
 
-/** The employee's own tasks, laid out like the owner console's Tasks page: filter pills, the task
- * table, then the hours. Instead of Review, each task carries what the employee does with it —
- * accept it, hold or resume the timer, complete it. */
+/** The employee's own tasks, to look at. The manager enters the work and the clock does the rest (a task starts when its time begins and is
+ * done when its time ends), so there is nothing to accept, start or finish here: what they are working on now, what is coming up, and what
+ * is done. A new task is announced in the bell. */
 export default function MyTasksPage() {
   usePageTitle('My Tasks');
   const { system } = useCalendarSystem();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  // The tasks as stored. `tasks` (below) is what is shown: a task whose time is over counts as completed.
+  // The tasks as stored. `tasks` (below) is what is shown by the clock.
   const [rawTasks, setRawTasks] = useState<Task[]>([]);
   const [clock, setClock] = useState(() => Date.now());
-  const [logs, setLogs] = useState<TaskTimeLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<Filter>('All');
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-
-  const [showTaskForm, setShowTaskForm] = useState(false);
-  const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
-  const [creatingTask, setCreatingTask] = useState(false);
-  const [taskFormError, setTaskFormError] = useState<string | null>(null);
-
-  function reload(empId: string) {
-    supabase
-      .from('tasks')
-      .select('*')
-      .eq('assigned_to', empId)
-      .order('created_at', { ascending: false })
-      .then(({ data }) => setRawTasks(data ?? []));
-    supabase
-      .from('task_time_logs')
-      .select('*')
-      .eq('employee_id', empId)
-      .then(({ data }) => setLogs(data ?? []));
-  }
+  const [loadError, setLoadError] = useState('');
+  const [showAllDone, setShowAllDone] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data }) => {
+    let active = true;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
       if (!data.user) return;
-      setUserId(data.user.id);
       const { data: profile } = await supabase.from('profiles').select('employee_id').eq('id', data.user.id).single();
+      if (!active) return;
+      setEmployeeId((profile?.employee_id as string | null) ?? null);
       setLoading(false);
-      if (profile?.employee_id) {
-        setEmployeeId(profile.employee_id);
-        reload(profile.employee_id);
-      }
-    });
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const runningLog = logs.find(l => l.ended_at === null) ?? null;
+  // The list is read again when the page comes back into view and every 5 minutes, so a task the manager has just entered shows up.
+  useEffect(() => {
+    if (!employeeId) return;
+    let active = true;
+    const load = () => {
+      Promise.resolve(supabase.from('tasks').select('*').eq('assigned_to', employeeId).order('due_date', { ascending: true })).then(({ data, error }) => {
+        if (!active) return;
+        if (error) setLoadError(`Could not load your tasks: ${error.message}`);
+        else {
+          setLoadError('');
+          setRawTasks((data as Task[] | null) ?? []);
+        }
+      });
+    };
+    load();
+    const timer = setInterval(load, 5 * 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [employeeId]);
 
-  // A task with a time slot is completed once its time is over, so the list is read again every minute.
+  // The clock moves once a minute: a task that begins moves to "working on now", one whose time ends moves to "done".
   useEffect(() => {
     const id = setInterval(() => setClock(Date.now()), 60000);
     return () => clearInterval(id);
   }, []);
+
+  const today = nepalDateKey(new Date(clock).toISOString());
   const tasks = useMemo(() => rawTasks.map(t => withTimeStatus(t, clock)), [rawTasks, clock]);
+  const working = useMemo(() => tasks.filter(t => t.status === 'in_progress').sort((a, b) => when(a).localeCompare(when(b))), [tasks]);
+  const upcoming = useMemo(() => tasks.filter(t => t.status === 'pending').sort((a, b) => when(a).localeCompare(when(b))), [tasks]);
+  const done = useMemo(() => tasks.filter(t => t.status === 'approved' || t.status === 'submitted' || t.status === 'rejected').sort((a, b) => when(b).localeCompare(when(a))), [tasks]);
+  const doneShown = showAllDone ? done : done.slice(0, DONE_SHOWN);
 
-  useEffect(() => {
-    if (!runningLog) return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [runningLog]);
-
-  async function startTimer(taskId: string) {
-    setBusyId(taskId);
-    setError(null);
-    const { error: rpcError } = await supabase.rpc('start_task_timer', { p_task_id: taskId });
-    setBusyId(null);
-    if (rpcError) {
-      setError(rpcError.message);
-      return;
+  /** "Today", "Tomorrow" or "Fri 27 Nov 2026", then "· 2:00–3:00 PM · 1 h" when it has a time. */
+  function whenText(t: Task): string {
+    let day = 'No day set yet';
+    if (t.due_date) {
+      const rel = relativeDayLabel(t.due_date, today);
+      day = rel === 'today' ? 'Today' : rel === 'tomorrow' ? 'Tomorrow' : `${weekdayName(t.due_date)} ${formatAdDate(t.due_date, system)}`;
     }
-    if (employeeId) reload(employeeId);
+    const slot = taskSlot(t);
+    return slot ? `${day} · ${formatSlot(slot)} · ${formatDuration(slotLength(slot))}` : `${day} · no time set yet`;
   }
 
-  async function stopTimer(logId: string) {
-    setBusyId(logId);
-    setError(null);
-    const { error: rpcError } = await supabase.rpc('stop_task_timer', { p_log_id: logId });
-    setBusyId(null);
-    if (rpcError) {
-      setError(rpcError.message);
-      return;
-    }
-    if (employeeId) reload(employeeId);
-  }
-
-  async function submit(id: string) {
-    setBusyId(id);
-    setError(null);
-    const { error: rpcError } = await supabase.rpc('submit_task', { p_task_id: id, p_work_notes: noteDraft[id] || null });
-    setBusyId(null);
-    if (rpcError) {
-      setError(rpcError.message);
-      return;
-    }
-    if (employeeId) reload(employeeId);
-  }
-
-  async function handleCreateTask(e: React.FormEvent) {
-    e.preventDefault();
-    if (!employeeId) return;
-    setTaskFormError(null);
-    setCreatingTask(true);
-    const { error: insertError } = await supabase.from('tasks').insert({
-      title: taskForm.title,
-      description: taskForm.description || null,
-      due_date: taskForm.due_date || null,
-      assigned_to: employeeId,
-      assigned_by: userId,
-      // Nothing shows points any more, but the database's security rule only lets an employee create a task
-      // that carries 0 of them, so the insert still says so.
-      points: 0,
-      status: 'pending',
-      source: 'self',
-    });
-    setCreatingTask(false);
-    if (insertError) {
-      setTaskFormError(insertError.message);
-      return;
-    }
-    setTaskForm(EMPTY_TASK_FORM);
-    setShowTaskForm(false);
-    reload(employeeId);
-  }
-
-  const filtered = useMemo(() => (filter === 'All' ? tasks : tasks.filter(t => t.status === filter)), [tasks, filter]);
-  // The hours per task and the chart count the schedule too: a task's time counts as it passes, with no timer needed (a timer that was
-  // used is the truth for its task). `logs` itself stays the real timer sessions, for the running timer.
-  const timeLogs = useMemo(() => logsWithSchedule(tasks, logs, clock), [tasks, logs, clock]);
-  const taskTotals = useMemo(() => totalsByTask(timeLogs), [timeLogs]);
-  const todayIso = useMemo(nepalTodayIso, []);
-  const isOverdue = (t: Task) => (t.status === 'pending' || t.status === 'in_progress') && !!t.due_date && t.due_date < todayIso;
-  const hoursOf = (taskId: string) => taskTotals.find(r => r.task_id === taskId)?.hours ?? 0;
-
-  /** Title, description, notes and — while it is in progress — the box for what you did. */
-  function taskBody(t: Task) {
-    const hours = hoursOf(t.id);
+  function card(t: Task, kind: 'working' | 'upcoming' | 'done') {
+    const start = slotStartMs(t);
+    const end = slotEndMs(t);
+    const pct = kind === 'working' && start !== null && end !== null ? Math.min(100, Math.max(0, Math.round(((clock - start) / (end - start)) * 100))) : null;
+    const left = kind === 'working' && end !== null ? Math.max(0, Math.ceil((end - clock) / 60000)) : null;
     return (
-      <>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-ink">{t.title}</span>
-          {t.source === 'self' && <Badge tone="info">Self-assigned</Badge>}
-        </div>
-        {t.description && <div className="text-xs text-slate-400">{t.description}</div>}
-        {hours > 0 && (
-          <div className="mt-0.5 text-xs text-slate-400">
-            {hours} {hours === 1 ? 'hr' : 'hrs'} logged
-          </div>
-        )}
-        {t.work_notes && (
-          <div className="mt-1 text-xs text-slate-500">
-            <span className="font-medium">Your note:</span> {t.work_notes}
-          </div>
-        )}
-        {t.review_note && (
-          <div className="mt-1 text-xs text-slate-500">
-            <span className="font-medium">Review note:</span> {t.review_note}
-          </div>
-        )}
-        {t.status === 'in_progress' && (
-          <textarea
-            aria-label={`Work notes for ${t.title}`}
-            placeholder="What did you do? (optional)"
-            value={noteDraft[t.id] ?? ''}
-            onChange={e => setNoteDraft(d => ({ ...d, [t.id]: e.target.value }))}
-            rows={2}
-            className={`${INPUT} mt-2 max-w-md resize-none text-xs`}
-          />
-        )}
-      </>
-    );
-  }
-
-  function statusCell(t: Task) {
-    const running = runningLog?.task_id === t.id;
-    return (
-      <div className="flex flex-col items-start gap-1">
-        <span className="whitespace-nowrap">
-          <Badge tone={STATUS_TONE[t.status]}>{STATUS_LABEL[t.status]}</Badge>
-        </span>
-        {running && runningLog && (
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold tabular-nums text-accent">
-            <span aria-hidden="true" className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-            {formatElapsed(runningLog.started_at, now)}
-          </span>
-        )}
-        {isOverdue(t) && <Badge tone="critical">Overdue</Badge>}
-      </div>
-    );
-  }
-
-  function actions(t: Task) {
-    const running = runningLog?.task_id === t.id;
-    // Its time is over and it counts as completed, but a timer is still running on it: that can still be stopped.
-    if (t.status === 'approved' && running && runningLog) {
-      return (
-        <button disabled={busyId === runningLog.id} onClick={() => stopTimer(runningLog.id)} className={OUTLINE_SM}>
-          Stop timer
-        </button>
-      );
-    }
-    if (t.status === 'pending') {
-      return (
-        <button disabled={busyId === t.id} onClick={() => startTimer(t.id)} className={PRIMARY_SM}>
-          Accept
-        </button>
-      );
-    }
-    if (t.status === 'in_progress') {
-      return (
-        <div className="flex flex-wrap items-center gap-2">
-          {running && runningLog ? (
-            <button disabled={busyId === runningLog.id} onClick={() => stopTimer(runningLog.id)} className={OUTLINE_SM}>
-              Hold
-            </button>
-          ) : !runningLog ? (
-            <button disabled={busyId === t.id} onClick={() => startTimer(t.id)} className={OUTLINE_SM}>
-              Resume
-            </button>
-          ) : (
-            <span className="text-xs text-slate-400">Timer running on another task</span>
+      <li key={t.id} className={`rounded-xl border bg-white p-4 shadow-sm ${kind === 'working' ? 'border-accent' : 'border-slate-200'}`}>
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+          <h3 className="min-w-0 text-[15px] font-semibold text-ink">{t.title}</h3>
+          {kind === 'done' && t.status === 'approved' && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                <path d="m5 12.5 4.5 4.5L19 7.5" />
+              </svg>
+              Done
+            </span>
           )}
-          <button disabled={busyId === t.id} onClick={() => submit(t.id)} className={PRIMARY_SM}>
-            Complete
-          </button>
+          {kind === 'done' && t.status === 'submitted' && <span className="text-xs font-bold text-amber-700">Under review</span>}
+          {kind === 'done' && t.status === 'rejected' && <span className="text-xs font-bold text-rose-700">Sent back</span>}
         </div>
-      );
-    }
-    if (t.status === 'approved') {
-      return (
-        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
-            <path d="m5 12.5 4.5 4.5L19 7.5" />
-          </svg>
-          Done
-        </span>
-      );
-    }
-    return <span className="text-xs text-slate-400">{t.status === 'submitted' ? 'Awaiting review' : 'Reviewed'}</span>;
+        <p className="mt-0.5 text-[13px] tabular-nums text-slate-600">{whenText(t)}</p>
+        {t.description && <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">{t.description}</p>}
+        {pct !== null && left !== null && (
+          <div className="mt-3">
+            <div role="progressbar" aria-label={`${t.title}: ${pct}% of its time has passed`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+            </div>
+            <p className="mt-1 text-xs font-semibold text-slate-600">{timeLeft(left)}</p>
+          </div>
+        )}
+      </li>
+    );
+  }
+
+  function section(id: string, title: string, list: Task[], kind: 'working' | 'upcoming' | 'done', empty: string, shown: Task[] = list) {
+    return (
+      <section aria-labelledby={id} className="mb-8">
+        <h2 id={id} className="mb-3 flex items-center gap-2 text-base font-extrabold text-ink">
+          {title}
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold tabular-nums text-slate-600">{list.length}</span>
+        </h2>
+        {list.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">{empty}</p>
+        ) : (
+          <ul className="m-0 grid list-none gap-3 p-0">{shown.map(t => card(t, kind))}</ul>
+        )}
+        {kind === 'done' && list.length > DONE_SHOWN && (
+          <button type="button" onClick={() => setShowAllDone(s => !s)} className="mt-3 min-h-[44px] rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50">
+            {showAllDone ? 'Show fewer' : `Show all ${list.length}`}
+          </button>
+        )}
+      </section>
+    );
   }
 
   if (loading) {
@@ -287,144 +167,18 @@ export default function MyTasksPage() {
     return <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>;
   }
 
-  const emptyText = `No ${filter !== 'All' ? STATUS_LABEL[filter].toLowerCase() + ' ' : ''}tasks${filter === 'All' ? ' yet' : ''}.`;
-  const maxHours = Math.max(0, ...taskTotals.map(r => r.hours));
-
   return (
     <PageBody>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">
-          {FILTERS.map(f => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              aria-pressed={filter === f}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize ${
-                filter === f ? 'bg-accent text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {f === 'All' ? f : STATUS_LABEL[f]}
-            </button>
-          ))}
-        </div>
-        <button onClick={() => setShowTaskForm(true)} className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90">
-          + New Task
-        </button>
+      <div className="mx-auto max-w-[860px]">
+        {loadError && (
+          <p role="alert" className="mb-4 rounded-lg bg-critical-bg px-3 py-2 text-sm text-critical-text">
+            {loadError}
+          </p>
+        )}
+        {section('tasks-now', 'Working on now', working, 'working', 'Nothing in progress right now.')}
+        {section('tasks-upcoming', 'Upcoming', upcoming, 'upcoming', 'No tasks coming up. When your manager gives you one, you will be told here.')}
+        {section('tasks-done', 'Done', done, 'done', 'No finished tasks yet.', doneShown)}
       </div>
-
-      {error && (
-        <p role="alert" className="mb-4 rounded-lg bg-critical-bg px-3 py-2 text-sm text-critical-text">
-          {error}
-        </p>
-      )}
-
-      {/* The task table across the page; the hours chart and the hours by task sit side by side under it. */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start">
-        <div className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
-          <div className="divide-y divide-slate-100 md:hidden">
-            {filtered.map(t => (
-              <div key={t.id} className={`p-4 ${runningLog?.task_id === t.id ? 'bg-accent/5' : t.status === 'approved' ? 'bg-emerald-50/60' : ''}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">{taskBody(t)}</div>
-                  <div className="shrink-0">{statusCell(t)}</div>
-                </div>
-                <div className="mt-2 text-xs text-slate-500">Due {formatAdDate(t.due_date, system)}</div>
-                <div className="mt-3">{actions(t)}</div>
-              </div>
-            ))}
-            {filtered.length === 0 && <p className="p-8 text-center text-sm text-slate-400">{emptyText}</p>}
-          </div>
-
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-5 py-3 font-medium">Task</th>
-                  <th className="w-28 px-5 py-3 font-medium">Due</th>
-                  <th className="w-36 px-5 py-3 font-medium">Status</th>
-                  <th className="w-56 px-5 py-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(t => (
-                  <tr key={t.id} className={`border-b border-slate-100 align-top last:border-0 ${runningLog?.task_id === t.id ? 'bg-accent/5' : t.status === 'approved' ? 'bg-emerald-50/60' : ''}`}>
-                    <td className="px-5 py-3 text-slate-600">{taskBody(t)}</td>
-                    <td className="px-5 py-3 text-slate-600">{formatAdDate(t.due_date, system)}</td>
-                    <td className="px-5 py-3">{statusCell(t)}</td>
-                    <td className="px-5 py-3">{actions(t)}</td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-5 py-8 text-center text-slate-400">
-                      {emptyText}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="min-w-0">
-          <TaskHoursChart logs={timeLogs} tasks={tasks} />
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <h2 className="mb-3 text-sm font-semibold text-ink">Hours by Task</h2>
-          {taskTotals.length === 0 ? (
-            <p className="text-sm text-slate-400">No time yet.</p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {taskTotals.map(row => {
-                const task = tasks.find(t => t.id === row.task_id);
-                return (
-                  <div key={row.task_id} className="py-2 text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="truncate text-ink">{task?.title ?? 'Deleted task'}</span>
-                      <span className="shrink-0 font-semibold text-ink">{row.hours} hrs</span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 rounded-full bg-slate-100">
-                      <div className="h-1.5 rounded-full bg-accent" style={{ width: `${maxHours > 0 ? (row.hours / maxHours) * 100 : 0}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {showTaskForm && (
-        <FormDialog
-          title="New Task"
-          onSubmit={handleCreateTask}
-          onClose={() => setShowTaskForm(false)}
-          saving={creatingTask}
-          savingLabel="Creating…"
-          submitLabel="Create task"
-          error={taskFormError}
-        >
-          <label htmlFor="new-task-title" className={LABEL}>
-            Title
-          </label>
-          <input id="new-task-title" required value={taskForm.title} onChange={e => setTaskForm(f => ({ ...f, title: e.target.value }))} className={`${INPUT} mb-3`} />
-
-          <label htmlFor="new-task-description" className={LABEL}>
-            Description (optional)
-          </label>
-          <textarea
-            id="new-task-description"
-            value={taskForm.description}
-            onChange={e => setTaskForm(f => ({ ...f, description: e.target.value }))}
-            rows={3}
-            className={`${INPUT} mb-3`}
-          />
-
-          <label className={LABEL}>Due date (optional)</label>
-          <DatePicker value={taskForm.due_date} onChange={v => setTaskForm(f => ({ ...f, due_date: v }))} placeholder="Select due date" ariaLabel="Due date" />
-        </FormDialog>
-      )}
     </PageBody>
   );
 }

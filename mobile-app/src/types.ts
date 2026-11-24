@@ -210,6 +210,9 @@ export type Task = {
   status: TaskStatus;
   source: TaskSource;
   due_date: string | null;
+  /** The time slot the manager gave it (Postgres `time`, "14:00:00"); null for a task with no time yet. */
+  start_time?: string | null;
+  end_time?: string | null;
   work_notes: string | null;
   review_note: string | null;
   submitted_at: string | null;

@@ -7,7 +7,7 @@ import { signOutAndUnregisterPush } from '../lib/pushNotifications';
 import CalendarSystemSwitch from '../components/CalendarSystemSwitch';
 import EmployeeNotificationsModal from '../components/EmployeeNotificationsModal';
 import { BellIcon } from '../components/icons';
-import { useMyNotifications } from '../lib/employeeNotifications';
+import { isTaskNotice, useMyNotifications, type EmployeeNotification } from '../lib/employeeNotifications';
 import HeaderBackButton from './HeaderBackButton';
 
 // The employee's own `employees.name`/`profile_photo_url` (not the login
@@ -29,9 +29,11 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
   function openBell() {
     setBellOpen(true);
   }
-  function openExit() {
+  /** A task notice opens My Tasks; an exit notice opens the Exit tab. */
+  function openNotice(n: EmployeeNotification) {
     setBellOpen(false);
-    navigation.navigate('Profile', { tab: 'exit', at: Date.now() });
+    if (isTaskNotice(n)) navigation.navigate('Tasks');
+    else navigation.navigate('Profile', { tab: 'exit', at: Date.now() });
   }
 
   useEffect(() => {
@@ -114,7 +116,7 @@ export default function EmployeeHeader({ options, navigation, route }: any) {
         </View>
       </View>
 
-      <EmployeeNotificationsModal visible={bellOpen} onClose={() => setBellOpen(false)} items={items} unread={unread} onMarkAllRead={markAllRead} onOpen={openExit} />
+      <EmployeeNotificationsModal visible={bellOpen} onClose={() => setBellOpen(false)} items={items} unread={unread} onMarkAllRead={markAllRead} onOpen={openNotice} />
 
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuOpen(false)}>

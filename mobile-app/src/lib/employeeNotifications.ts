@@ -4,15 +4,19 @@ import { AppState } from 'react-native';
 import { supabase } from './supabase';
 import { formatAdDate, type CalendarSystem } from './calendar';
 import { SEPARATION_TYPES } from './employeeSeparation';
+import { formatSlot, timeToHour, weekdayName } from './taskClock';
 
 /** One row of employee_notifications (20261104180000_employee_notifications.sql). The database stores what
  * changed, not a sentence — the words and the dates (AD or BS) are made here, for each person's own calendar. */
 export type NotificationChange = { k: string; v?: string | number | null };
 
+/** What a task notice carries: the task's title, day and time (20261124180000_task_notifications.sql). */
+export type TaskNoticePayload = { title?: string; due_date?: string | null; start_time?: string | null; end_time?: string | null };
+
 export type EmployeeNotification = {
   id: string;
-  kind: 'exit_started' | 'exit_updated';
-  payload: { changes?: NotificationChange[] } | null;
+  kind: 'exit_started' | 'exit_updated' | 'task_assigned' | 'task_changed';
+  payload: ({ changes?: NotificationChange[] } & TaskNoticePayload) | null;
   created_at: string;
   read_at: string | null;
 };
@@ -62,8 +66,22 @@ export function describeChange(c: NotificationChange, system: CalendarSystem): s
   }
 }
 
-export function notificationTitle(n: Pick<EmployeeNotification, 'kind'>): string {
+export const isTaskNotice = (n: Pick<EmployeeNotification, 'kind'>) => n.kind === 'task_assigned' || n.kind === 'task_changed';
+
+export function notificationTitle(n: Pick<EmployeeNotification, 'kind' | 'payload'>): string {
+  const task = n.payload?.title?.trim() || 'a task';
+  if (n.kind === 'task_assigned') return `New task: ${task}`;
+  if (n.kind === 'task_changed') return `Task moved: ${task}`;
   return n.kind === 'exit_started' ? 'HR started your exit process' : 'HR updated your exit';
+}
+
+/** "Tue 24 Nov 2026 · 2:00–3:00 PM", or what is missing ("No time set yet"). */
+export function taskWhen(p: TaskNoticePayload | null | undefined, system: CalendarSystem): string {
+  const day = p?.due_date ? `${weekdayName(p.due_date)} ${formatAdDate(p.due_date, system)}` : 'No day set yet';
+  const start = timeToHour(p?.start_time);
+  const end = timeToHour(p?.end_time);
+  const time = start !== null && end !== null && end > start ? formatSlot({ start, end }) : 'no time set yet';
+  return `${day} · ${time}`;
 }
 
 /** "5 min ago" / "yesterday" (same as admin-web/lib/pendingApprovals.ts). */
@@ -79,6 +97,7 @@ export function timeAgo(iso: string): string {
 
 /** The lines under a notification's title. */
 export function notificationLines(n: Pick<EmployeeNotification, 'kind' | 'payload'>, system: CalendarSystem): string[] {
+  if (isTaskNotice(n)) return [taskWhen(n.payload, system)];
   if (n.kind === 'exit_started') return ['Open your Exit tab to see the steps.'];
   return (n.payload?.changes ?? []).map(c => describeChange(c, system)).filter(Boolean);
 }

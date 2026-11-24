@@ -5,8 +5,8 @@ import { notificationLines, notificationTitle, timeAgo, type EmployeeNotificatio
 import { colors } from '../theme';
 import { Sheet } from './hr/HrKit';
 
-/** The employee's bell panel: what HR has done about them — today, changes to their exit. It lists only the unread
- * ones, so "Mark all as read" empties it. Tapping one opens their Exit tab. */
+/** The employee's bell panel: what HR or the manager has done about them: a new or moved task, a change to their exit. It lists only
+ * the unread ones, so "Mark all as read" empties it. Tapping one opens what it is about (My Tasks, or their Exit tab). */
 export default function EmployeeNotificationsModal({
   visible,
   onClose,
@@ -20,7 +20,7 @@ export default function EmployeeNotificationsModal({
   items: EmployeeNotification[];
   unread: number;
   onMarkAllRead: () => void;
-  onOpen: () => void;
+  onOpen: (n: EmployeeNotification) => void;
 }) {
   const { system } = useCalendarSystem();
   const shown = items.filter(n => !n.read_at);
@@ -34,7 +34,7 @@ export default function EmployeeNotificationsModal({
       {shown.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>Nothing new</Text>
-          <Text style={styles.emptyText}>When HR updates something about you, it shows up here.</Text>
+          <Text style={styles.emptyText}>When you are given a task, or HR updates something about you, it shows up here.</Text>
         </View>
       ) : (
         shown.map(n => {
@@ -43,7 +43,7 @@ export default function EmployeeNotificationsModal({
             <TouchableOpacity
               key={n.id}
               style={[styles.row, styles.rowFresh]}
-              onPress={onOpen}
+              onPress={() => onOpen(n)}
               accessibilityRole="button"
               accessibilityLabel={`${notificationTitle(n)}. ${lines.join('. ')}`}
             >
