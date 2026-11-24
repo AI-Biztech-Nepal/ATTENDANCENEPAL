@@ -402,7 +402,7 @@ const PHONE_MORE = ['/my-payroll', '/my-feedback', '/my-profile'];
 const SLOT = 'flex min-w-0 flex-1 flex-col items-center justify-center gap-[3px] py-1 text-[11px] leading-none';
 
 /**
- * The phone's bottom bar: Calendar and Tasks on the left, Check In in the middle as a raised round button (the page
+ * The phone's bottom bar: Calendar and Tasks on the left, Check In in the middle as a filled round button (the page
  * used most), My KPIs and More on the right. More opens a small sheet above the bar with the rest of the pages; it
  * closes when a page is chosen, when anywhere else is tapped, and on Escape. More shows as the open tab while the
  * person is on one of the pages inside it.
@@ -448,7 +448,7 @@ function PhoneTabBar({ pathname, tabs }: { pathname: string; tabs: typeof TABS }
           id="phone-more-sheet"
           role="dialog"
           aria-label="More pages"
-          className="sheet-in fixed inset-x-3 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-30 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl lg:hidden"
+          className="sheet-in fixed inset-x-3 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-30 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl lg:hidden"
         >
           {more.map(tab => {
             const active = pathname === tab.href;
@@ -472,8 +472,9 @@ function PhoneTabBar({ pathname, tabs }: { pathname: string; tabs: typeof TABS }
         {slot(pick('/my-calendar'))}
         {slot(pick('/my-tasks'))}
         <Link href={home.href} aria-current={homeActive ? 'page' : undefined} className={`${SLOT} ${homeActive ? 'font-extrabold text-brand' : 'font-semibold text-slate-600'}`}>
-          <span className="-mt-[34px] flex h-14 w-14 items-center justify-center rounded-full bg-brand text-white shadow-lg ring-4 ring-white">
-            <HomeIcon className="h-7 w-7" />
+          {/* A filled circle, not much bigger than the other icons: its extra height is taken back from the top so it stays inside the bar and the names line up. */}
+          <span className="-mt-[10px] flex h-8 w-8 items-center justify-center rounded-full bg-brand text-white">
+            <HomeIcon className="h-[18px] w-[18px]" />
           </span>
           <span className="whitespace-nowrap">{home.label}</span>
           <span className={`h-[5px] w-[5px] rounded-full ${homeActive ? 'bg-brand' : 'bg-transparent'}`} />
