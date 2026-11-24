@@ -12,15 +12,8 @@ import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso } from '@/lib/shift';
 import { totalsByTask } from '@/lib/taskHours';
-import type { Task, TaskStatus, TaskTimeLog } from '@/lib/types';
-
-const STATUS_TONE: Record<TaskStatus, 'warning' | 'info' | 'neutral' | 'good' | 'critical'> = {
-  pending: 'warning',
-  in_progress: 'info',
-  submitted: 'neutral',
-  approved: 'good',
-  rejected: 'critical',
-};
+import { STATUS_LABEL, STATUS_TONE } from '@/components/tasks/taskStyles';
+import type { Task, TaskTimeLog } from '@/lib/types';
 
 const FILTERS = ['All', 'pending', 'in_progress', 'submitted', 'approved', 'rejected'] as const;
 type Filter = (typeof FILTERS)[number];
@@ -30,6 +23,8 @@ const LABEL = 'mb-1 block text-xs font-medium text-slate-600';
 const INPUT = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
 const PRIMARY_SM = 'rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90 disabled:opacity-50';
 const OUTLINE_SM = 'rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50';
+// "Complete" is green, the colour of a finished task. (Sending it in puts it with the manager as "Submitted" until they close it.)
+const COMPLETE_SM = 'rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50';
 
 function formatElapsed(startedAt: string, now: number) {
   const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
@@ -209,7 +204,7 @@ export default function MyTasksPage() {
     return (
       <div className="flex flex-col items-start gap-1">
         <span className="whitespace-nowrap">
-          <Badge tone={STATUS_TONE[t.status]}>{t.status.replace('_', ' ')}</Badge>
+          <Badge tone={STATUS_TONE[t.status]}>{STATUS_LABEL[t.status]}</Badge>
         </span>
         {running && runningLog && (
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold tabular-nums text-accent">
@@ -245,10 +240,20 @@ export default function MyTasksPage() {
           ) : (
             <span className="text-xs text-slate-400">Timer running on another task</span>
           )}
-          <button disabled={busyId === t.id} onClick={() => submit(t.id)} className={PRIMARY_SM}>
+          <button disabled={busyId === t.id} onClick={() => submit(t.id)} className={COMPLETE_SM}>
             Complete
           </button>
         </div>
+      );
+    }
+    if (t.status === 'approved') {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+            <path d="m5 12.5 4.5 4.5L19 7.5" />
+          </svg>
+          Done
+        </span>
       );
     }
     return <span className="text-xs text-slate-400">{t.status === 'submitted' ? 'Awaiting review' : 'Reviewed'}</span>;
@@ -262,7 +267,7 @@ export default function MyTasksPage() {
     return <p className="p-4 pt-10 text-center text-sm text-warning-text">Your account isn&apos;t linked to an employee record yet.</p>;
   }
 
-  const emptyText = `No ${filter !== 'All' ? filter.replace('_', ' ') + ' ' : ''}tasks${filter === 'All' ? ' yet' : ''}.`;
+  const emptyText = `No ${filter !== 'All' ? STATUS_LABEL[filter].toLowerCase() + ' ' : ''}tasks${filter === 'All' ? ' yet' : ''}.`;
   const maxHours = Math.max(0, ...taskTotals.map(r => r.hours));
 
   return (
@@ -278,7 +283,7 @@ export default function MyTasksPage() {
                 filter === f ? 'bg-accent text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
               }`}
             >
-              {f.replace('_', ' ')}
+              {f === 'All' ? f : STATUS_LABEL[f]}
             </button>
           ))}
         </div>
@@ -298,7 +303,7 @@ export default function MyTasksPage() {
         <div className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
           <div className="divide-y divide-slate-100 md:hidden">
             {filtered.map(t => (
-              <div key={t.id} className={`p-4 ${runningLog?.task_id === t.id ? 'bg-accent/5' : ''}`}>
+              <div key={t.id} className={`p-4 ${runningLog?.task_id === t.id ? 'bg-accent/5' : t.status === 'approved' ? 'bg-emerald-50/60' : ''}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">{taskBody(t)}</div>
                   <div className="shrink-0">{statusCell(t)}</div>
@@ -322,7 +327,7 @@ export default function MyTasksPage() {
               </thead>
               <tbody>
                 {filtered.map(t => (
-                  <tr key={t.id} className={`border-b border-slate-100 align-top last:border-0 ${runningLog?.task_id === t.id ? 'bg-accent/5' : ''}`}>
+                  <tr key={t.id} className={`border-b border-slate-100 align-top last:border-0 ${runningLog?.task_id === t.id ? 'bg-accent/5' : t.status === 'approved' ? 'bg-emerald-50/60' : ''}`}>
                     <td className="px-5 py-3 text-slate-600">{taskBody(t)}</td>
                     <td className="px-5 py-3 text-slate-600">{formatAdDate(t.due_date, system)}</td>
                     <td className="px-5 py-3">{statusCell(t)}</td>

@@ -9,7 +9,8 @@ import TaskHoursChart from '@/components/TaskHoursChart';
 import AssignTaskDialog, { type AssignInitial } from '@/components/tasks/AssignTaskDialog';
 import TaskDetailPanel from '@/components/tasks/TaskDetailPanel';
 import TaskTimetable from '@/components/tasks/TaskTimetable';
-import { STATUS_LABEL, isOpen } from '@/components/tasks/taskStyles';
+import { STATUS_LABEL, completeQuestion, isOpen } from '@/components/tasks/taskStyles';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso, punchMinuteOfDay } from '@/lib/shift';
@@ -43,6 +44,7 @@ const ROUND_BTN = 'flex h-11 w-11 items-center justify-center rounded-full borde
 export default function TasksPage() {
   usePageTitle('Tasks');
   const { system } = useCalendarSystem();
+  const confirm = useConfirm();
   const todayIso = useMemo(nepalTodayIso, []);
 
   const [tab, setTab] = useState<Tab>('schedule');
@@ -52,6 +54,8 @@ export default function TasksPage() {
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   // One line saying what the last Assign / Pick a time did, shown above the timetable for a few seconds.
   const [notice, setNotice] = useState<string | null>(null);
+  // A completion from the list that the database turned away.
+  const [actionError, setActionError] = useState<string | null>(null);
   const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
 
   const [date, setDate] = useState(todayIso);
@@ -93,7 +97,7 @@ export default function TasksPage() {
       .select('*')
       .gte('holiday_date', todayIso)
       .then(({ data }) => setHolidays((data as CompanyHoliday[] | null) ?? []));
-    // Which tasks have a timer running right now, for the green dot on a block.
+    // Which tasks have a timer running right now, for the pulsing dot on a block.
     supabase
       .from('task_time_logs')
       .select('task_id')
@@ -230,6 +234,46 @@ export default function TasksPage() {
     return null;
   }
 
+  // Mark a task completed: it turns green. One the employee sent in is approved, as before. Any other (not started, or under way) is
+  // closed here by the manager: its running timer stops first, so the hours stop counting, and the change only goes through if the
+  // task is still open. Resolves to an error message, or null when it worked.
+  async function complete(task: Task, note: string): Promise<string | null> {
+    const who = employeeName(task.assigned_to);
+    if (task.status === 'submitted') {
+      const message = await review(task, 'approved', note);
+      if (!message) setNotice(`Marked "${task.title}" as completed for ${who}.`);
+      return message;
+    }
+    const stopped = await supabase.from('task_time_logs').update({ ended_at: new Date().toISOString() }).eq('task_id', task.id).is('ended_at', null);
+    if (stopped.error) return `Could not stop the timer: ${stopped.error.message}`;
+    const { data: auth } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({ status: 'approved', review_note: note || null, reviewed_by: auth.user?.id, reviewed_at: new Date().toISOString() })
+      .eq('id', task.id)
+      .in('status', ['pending', 'in_progress'])
+      .select('id');
+    if (error) return `Could not mark it completed: ${error.message}`;
+    // .select() so a task that changed meanwhile (the employee sent it in) or that the security rules hide is noticed.
+    if (!((data as unknown[] | null) ?? []).length) return 'Could not mark it completed: the task has changed since this page was loaded. Close this and look again.';
+    reload();
+    setNotice(`Marked "${task.title}" as completed for ${who}.`);
+    return null;
+  }
+
+  // The same, from a row of the "Not scheduled yet" list: asks first.
+  async function completeFromList(task: Task) {
+    setActionError(null);
+    const sure = await confirm(completeQuestion(task.title, employeeName(task.assigned_to), runningTaskIds.has(task.id)), {
+      title: 'Mark as completed?',
+      confirmLabel: 'Mark as completed',
+      cancelLabel: 'Not yet',
+    });
+    if (!sure) return;
+    const message = await complete(task, '');
+    if (message) setActionError(message);
+  }
+
   // Cancel a task that has not been reviewed: it is deleted. Time tracked on it refers to it, so that goes first.
   // Resolves to an error message, or null when it worked.
   async function cancelTask(task: Task): Promise<string | null> {
@@ -281,6 +325,11 @@ export default function TasksPage() {
           {notice && (
             <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800">
               {notice}
+            </p>
+          )}
+          {actionError && (
+            <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-critical-text">
+              {actionError}
             </p>
           )}
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -424,13 +473,23 @@ export default function TasksPage() {
                       <Avatar name={employeeName(t.assigned_to)} photoUrl={employeeById.get(t.assigned_to)?.profile_photo_url} className="h-8 w-8 text-xs" />
                       <span className="text-sm font-semibold text-ink">{employeeName(t.assigned_to)}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => pickTime(t)}
-                      className="min-h-[40px] rounded-lg border border-teal-700 px-[18px] text-[13px] font-extrabold text-teal-700 hover:bg-teal-50"
-                    >
-                      Pick a time
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => pickTime(t)}
+                        className="min-h-[40px] rounded-lg border border-teal-700 px-[18px] text-[13px] font-extrabold text-teal-700 hover:bg-teal-50"
+                      >
+                        Pick a time
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => completeFromList(t)}
+                        aria-label={`Mark ${t.title} as completed`}
+                        className="min-h-[40px] rounded-lg bg-emerald-700 px-[18px] text-[13px] font-extrabold text-white hover:bg-emerald-800"
+                      >
+                        Mark as completed
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -490,6 +549,7 @@ export default function TasksPage() {
           today={todayIso}
           onClose={closeDetail}
           onReview={review}
+          onComplete={complete}
           onPickTime={pickTime}
           onCancel={cancelTask}
         />

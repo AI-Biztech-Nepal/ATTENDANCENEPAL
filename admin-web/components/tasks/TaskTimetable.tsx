@@ -235,7 +235,7 @@ export default function TaskTimetable({
                             <span className="min-w-0 flex-1">
                               <span className="block text-sm font-bold text-ink">{p.task.title}</span>
                               <span className={`mt-0.5 inline-flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.06em] ${isOverdue(p.task, today) ? 'text-rose-700' : tone.label}`}>
-                                <i className={`h-1.5 w-1.5 rounded-full ${runningTaskIds.has(p.task.id) ? 'bg-emerald-500' : tone.dot}`} />
+                                <StatusMark status={p.task.status} running={runningTaskIds.has(p.task.id)} />
                                 {label}
                                 {runningTaskIds.has(p.task.id) ? ' · timer on' : ''}
                               </span>
@@ -306,11 +306,24 @@ function TimetableBlock({
         </>
       )}
       <span className={`flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.06em] ${overdue ? 'text-rose-700' : tone.label}`}>
-        <i className={`h-1.5 w-1.5 shrink-0 rounded-full ${running ? 'bg-emerald-500' : tone.dot}`} />
+        <StatusMark status={task.status} running={running} />
         <span className="truncate">{statusText}</span>
       </span>
     </button>
   );
+}
+
+/** The little mark before a status: a tick for a completed task (so it does not rely on green alone), otherwise a dot in the
+ * status colour that pulses while the employee's timer is running. */
+function StatusMark({ status, running }: { status: TaskStatus; running: boolean }) {
+  if (status === 'approved') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0" aria-hidden="true">
+        <path d="m5 12.5 4.5 4.5L19 7.5" />
+      </svg>
+    );
+  }
+  return <i className={`shrink-0 rounded-full ${BLOCK_TONE[status].dot} ${running ? 'h-2 w-2 motion-safe:animate-pulse' : 'h-1.5 w-1.5'}`} />;
 }
 
 function ChevronIcon({ className }: { className?: string }) {
