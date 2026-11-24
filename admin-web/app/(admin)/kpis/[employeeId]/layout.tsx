@@ -8,8 +8,8 @@ import { usePageTitle } from '@/lib/pageTitle';
 import KpiTabs from '@/components/kpi/KpiTabs';
 
 // One person's KPIs, on pages of their own (not part of the employee directory): the way back to the list, the
-// person's name in the title, and the sections: Overview, Customer feedback, Colleague reviews, Import and
-// Settings. Import and Settings are for the whole company and are the same on every person's page.
+// person's name in the title, and the sections: Overview, Customer feedback, Colleague reviews and Import.
+// Import is for the whole company and is the same on every person's page.
 export default function PersonKpiLayout({ children }: { children: React.ReactNode }) {
   // useSearchParams needs a Suspense boundary, like the other pages that read the address.
   return (

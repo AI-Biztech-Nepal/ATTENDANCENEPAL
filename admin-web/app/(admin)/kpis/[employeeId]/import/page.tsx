@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { isKpiOn, kpiLabel } from '@/lib/kpiSettings';
 import { publishKpiSettings, useKpiSettings } from '@/lib/useKpiSettings';
@@ -449,11 +448,7 @@ export default function ImportPage() {
                 <h2 id="fills-heading" className="m-0 mb-1.5 text-base font-extrabold text-ink">What this fills in</h2>
                 {fills.length === 0 && (
                   <p className="m-0 border-t border-slate-200 py-3.5 text-[13px] leading-normal text-slate-600">
-                    None of the KPIs this file fills in are turned on. You can turn them on in{' '}
-                    <Link href={`/kpis/${employeeId}/settings`} className="font-bold text-accent hover:underline">
-                      Settings
-                    </Link>
-                    .
+                    None of the KPIs this file fills in are turned on for this company.
                   </p>
                 )}
                 {isKpiOn('services', settings) && (

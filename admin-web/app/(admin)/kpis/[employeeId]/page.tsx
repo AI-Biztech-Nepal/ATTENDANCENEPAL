@@ -198,7 +198,6 @@ function EmployeeKpi() {
               monthName={monthName}
               previousName={previousName}
               notStarted={start > today}
-              typeInHref={`/kpis/${employeeId}/own?date=${start}&kpi=${k.id}`}
             />
           ))}
       </div>

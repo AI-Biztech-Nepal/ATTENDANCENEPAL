@@ -4,20 +4,16 @@ import Link from 'next/link';
 import { useParams, usePathname, useSearchParams } from 'next/navigation';
 import { isKpiOn, type KpiId } from '@/lib/kpiSettings';
 import { useKpiSettings } from '@/lib/useKpiSettings';
-import { useOwnKpis } from '@/lib/useOwnKpis';
 
 // The sections of one person's KPIs (/kpis/<employee>/...). Each is its own page, so these are links (the current
-// one is marked with aria-current), not in-page tabs. Import and Settings are for the whole company, and show the
-// same on every person's page. A section whose KPIs this company turned off (Settings) is left out, unless it is
-// the page being looked at. "Your own KPIs" (where the numbers for the KPIs the company added are typed in) is there only
-// while the company has at least one in use. The month on screen (`?date=`) is carried from one section to the next.
-const SECTIONS: { path: string; label: string; uses?: KpiId[]; own?: boolean }[] = [
+// one is marked with aria-current), not in-page tabs. Import is for the whole company and shows the same on every
+// person's page. A section whose KPIs this company turned off is left out, unless it is the page being looked at.
+// The month on screen (`?date=`) is carried from one section to the next.
+const SECTIONS: { path: string; label: string; uses?: KpiId[] }[] = [
   { path: '', label: 'Overview' },
   { path: '/feedback', label: 'Customer feedback', uses: ['feedback', 'nps'] },
   { path: '/reviews', label: 'Colleague reviews', uses: ['peers', 'manager', 'clevel', 'training'] },
   { path: '/import', label: 'Import', uses: ['services', 'rebooking', 'utilisation'] },
-  { path: '/own', label: 'Your own KPIs', own: true },
-  { path: '/settings', label: 'Settings' },
 ];
 
 export default function KpiTabs() {
@@ -25,13 +21,12 @@ export default function KpiTabs() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const date = useSearchParams().get('date');
   const { settings, words, loaded } = useKpiSettings();
-  const own = useOwnKpis();
   const query = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? `?date=${date}` : '';
   // Until the settings are read the tabs keep their place but are not shown, so a renamed or hidden tab does not flash.
   return (
-    <nav aria-label="KPI sections" className={`flex flex-wrap gap-x-7 border-b border-slate-200 print:hidden ${loaded && own.loaded ? '' : 'invisible'}`}>
+    <nav aria-label="KPI sections" className={`flex flex-wrap gap-x-7 border-b border-slate-200 print:hidden ${loaded ? '' : 'invisible'}`}>
       {SECTIONS.map(s => ({ ...s, href: `/kpis/${employeeId}${s.path}` }))
-        .filter(s => pathname === s.href || (s.own ? own.inUse.length > 0 : !s.uses || s.uses.some(id => isKpiOn(id, settings))))
+        .filter(s => pathname === s.href || !s.uses || s.uses.some(id => isKpiOn(id, settings)))
         .map(s => {
           const current = pathname === s.href;
           return (
