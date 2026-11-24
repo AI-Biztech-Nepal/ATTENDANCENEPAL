@@ -7,6 +7,8 @@ attendance.db-*
 !.env.example
 .expo/
 .next/
+.next-build/
+.next-old/
 .vercel/
 dist/
 tsconfig.tsbuildinfo

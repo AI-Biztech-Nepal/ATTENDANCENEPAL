@@ -6,6 +6,10 @@ module.exports = phase => {
 
   return {
     reactStrictMode: true,
+    // deploy/redeploy.sh builds into a separate folder (NEXT_DIST_DIR=.next-build) and only swaps it in for
+    // .next once the build has succeeded, so the running site never serves pages whose CSS/JS the build is
+    // busy replacing. Unset (dev, `next start`), it is the usual .next.
+    distDir: process.env.NEXT_DIST_DIR || '.next',
     // Every page here is an authenticated, per-user dashboard — Next's default
     // long s-maxage on prerendered pages assumes a CDN that understands its
     // ISR revalidation protocol (Vercel's edge does; Hostinger's generic nginx
