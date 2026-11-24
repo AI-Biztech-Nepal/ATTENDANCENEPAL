@@ -9,7 +9,6 @@ import { kpiLabel } from '@/lib/kpiSettings';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { daysBetween } from '@/lib/rebookingKpi';
 import { servicesByDay, servicesByType, utilisationByDay, type ReportKind } from '@/lib/reportKpi';
-import { serviceWord } from '@/lib/serviceKpi';
 import { useReportRebooking, useReportServices } from '@/lib/useKpiReport';
 import { useFeedbackAbout, useMyCustomerForms, useMyFeedback, type FeedbackRead, type MyCustomerForm } from '@/lib/useFeedback';
 import { averageText, formWord, summariseRatings } from '@/lib/feedbackKpi';
@@ -72,7 +71,6 @@ function Bar({ pct, color = KPI_COLORS.accent }: { pct: number; color?: string }
 }
 
 const Heading = ({ children }: { children: React.ReactNode }) => <h3 className="m-0 mb-1.5 mt-5 text-[13px] font-extrabold text-ink">{children}</h3>;
-const Note = ({ children }: { children: React.ReactNode }) => <p className="m-0 mt-3 text-[12.5px] leading-relaxed text-slate-600">{children}</p>;
 
 /** Loading, or why it could not be read, or the report itself. */
 function Gate({ loading, error, children }: { loading: boolean; error: string; children: React.ReactNode }) {
@@ -159,7 +157,6 @@ function AttendanceReport({ ctx }: { ctx: ReportContext }) {
           </table>
         </div>
       )}
-      <Note>Out of {a.expectedDays} working days so far. Days off, holidays and approved leave are not counted. Times are the first and last punch of the day.</Note>
     </>
   );
 }
@@ -232,7 +229,6 @@ function ServicesReport({ ctx }: { ctx: ReportContext }) {
               </tbody>
             </table>
           </div>
-          <Note>{rows.length} {serviceWord(rows.length)} from the booking files imported for {ctx.monthLabel}.</Note>
         </>
       )}
     </Gate>
@@ -296,7 +292,6 @@ function RebookingReport({ ctx }: { ctx: ReportContext }) {
               </tbody>
             </table>
           </div>
-          <Note>{words.t(`A customer counts as booked again if they come back within ${ctx.repeatDays} days of a visit, to anyone. Customers are only shown as codes: names and phone numbers are never imported.`)}</Note>
         </>
       )}
     </Gate>
@@ -355,7 +350,6 @@ function UtilisationReport({ ctx }: { ctx: ReportContext }) {
               </tbody>
             </table>
           </div>
-          <Note>Time with {words.many} is the minutes of each service, from the booking file, out of a {hoursText(ctx.hoursPerDay)}-hour working day, averaged over the days worked. A day at work with no service counts as 0 and pulls the average down.</Note>
         </>
       )}
     </Gate>
@@ -412,7 +406,6 @@ function GuestFeedbackReport({ ctx }: { ctx: ReportContext }) {
               </li>
             ))}
           </ol>
-          <Note>{words.t('The forms are the paper forms customers filled in, typed in by the admin.')}</Note>
         </>
       )}
     </Gate>
@@ -457,7 +450,6 @@ function NpsReport({ ctx }: { ctx: ReportContext }) {
               );
             })}
           </ol>
-          <Note>The NPS is the share who would recommend minus the share who are not likely, from -100 to +100. Forms without a recommend number are left out.</Note>
         </>
       )}
     </Gate>
@@ -492,7 +484,6 @@ function ColleagueBody({ read, ctx }: { read: FeedbackRead; ctx: ReportContext }
               </li>
             ))}
           </ol>
-          <Note>{ctx.mine ? 'You see' : 'This shows'} the kind of colleague who gave each piece of feedback, never their name.</Note>
         </>
       )}
     </Gate>

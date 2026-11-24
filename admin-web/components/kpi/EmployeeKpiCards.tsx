@@ -277,12 +277,6 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
           <LegendRow color={KPI_COLORS.good} label="On time" value={dayCount(onTime)} />
           <LegendRow color={KPI_COLORS.warn} label="Late" value={dayCount(current.lateDays)} />
           <LegendRow color={KPI_COLORS.bad} label="Absent" value={dayCount(absent)} />
-          {current.expectedDays > 0 && (
-            <p className="m-0 mt-1 text-xs leading-normal text-slate-600">
-              Out of {dayCount(current.expectedDays)} of work. Leave, week-offs and holidays are not counted.
-              {current.leaveDays > 0 && ` On leave: ${dayCount(current.leaveDays)}.`}
-            </p>
-          )}
         </div>
         <div className="flex flex-col gap-3.5">
           <Stat big={rates.present == null ? '–' : `${rates.present}%`} label="present" />
@@ -429,9 +423,6 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
           <LegendRow color={KPI_COLORS.accent} label="Booked again" value={String(cur.back)} />
           <LegendRow color={KPI_COLORS.track} bordered label="Not yet" value={String(cur.served - cur.back)} />
         </div>
-        <p className="m-0 mt-2.5 text-xs leading-normal text-slate-600">
-          {words.t(`Out of ${cur.served} ${cur.served === 1 ? 'customer' : 'customers'} served. A customer counts as booked again if they come back within ${windowDays} days of a visit. Recent visits may still come back.`)}
-        </p>
       </>
     );
   }
@@ -502,9 +493,6 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
           <LegendRow color={KPI_COLORS.accent} label={`With a ${words.one}`} value={`${hoursText(cur.avgHours)} h a day`} />
           <LegendRow color={KPI_COLORS.track} bordered label="Rest of the day" value={`${hoursText(restOfDay(cur))} h`} />
         </div>
-        <p className="m-0 mt-2.5 text-xs leading-normal text-slate-600">
-          {words.t(`Time with customers, out of a ${hoursText(cur.hoursPerDay)}-hour working day, averaged over ${cur.days} ${cur.days === 1 ? 'day' : 'days'} worked.`)}
-        </p>
       </>
     );
   }
@@ -658,9 +646,6 @@ export function NpsCard({ eyebrow, name, data, monthName, previousName, notStart
           <LegendRow color={KPI_COLORS.warn} label="Neutral" value={`${s.passives} · ${sharePct(s.passives, s.count)}%`} />
           <LegendRow color={KPI_COLORS.bad} label="Not likely" value={`${s.detractors} · ${sharePct(s.detractors, s.count)}%`} />
         </div>
-        <p className="m-0 mt-2.5 text-xs leading-normal text-slate-600">
-          Out of {s.count} {formWord(s.count)}: 9 or 10 would recommend, 7 or 8 are neutral, 0 to 6 are not likely. The NPS is the share who would recommend minus the share who are not likely.
-        </p>
       </>
     );
   }
@@ -696,17 +681,16 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
 }) {
   const mode = useCardMode();
   const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label, relation: RELATION_OF_KPI[c.id as keyof typeof RELATION_OF_KPI] }));
-  const footer = `${group.source}. ${mode.mine ? 'You never see' : 'The person never sees'} who said what.`;
   if (data.loading) {
     return (
-      <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
+      <Card eyebrow={group.title} name="Feedback from colleagues" className={className}>
         <Message title="Loading…" />
       </Card>
     );
   }
   const anyFeedback = rows.some(r => roleState(data.current?.[r.relation]).kind === 'ok');
   return (
-    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer} report="colleagues" reportable={!data.error && !notStarted && anyFeedback}>
+    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} report="colleagues" reportable={!data.error && !notStarted && anyFeedback}>
       <div className="flex flex-col">
         <div aria-hidden="true" className="hidden flex-wrap items-center gap-x-6 sm:flex">
           <div className="sm:w-[250px]" />

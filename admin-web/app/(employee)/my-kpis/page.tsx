@@ -110,9 +110,6 @@ function MyKpis({ employeeId }: { employeeId: string }) {
           <MonthStepper label={label} subtitle={subtitle} onPrevious={() => setAnchor(a => stepAnchor(system, a, -1))} onNext={() => setAnchor(a => stepAnchor(system, a, 1))} />
         </div>
 
-        <p className="m-0 max-w-[760px] text-[13px] leading-relaxed text-slate-600">
-          Your KPIs for {label}, with last month next to each. You see only your own numbers, and nothing here is added up or ranked.
-        </p>
 
         {/* A table that is missing or a refused read is said out loud, so a dash never hides a number that could not be read. */}
         <LoadProblems problems={problemsOf(serviceData.error, rebookingData.error, feedbackData.error, colleagueData.error, ownKpis.error, ownData.error)} />
@@ -204,8 +201,6 @@ function MyKpis({ employeeId }: { employeeId: string }) {
               />
             ))}
         </div>
-
-        <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up or ranked, and you are never compared with anyone else, only with your own last month.</p>
       </div>
 
       {report && (

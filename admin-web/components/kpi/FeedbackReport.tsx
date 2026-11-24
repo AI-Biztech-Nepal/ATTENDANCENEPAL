@@ -47,7 +47,7 @@ export function FeedbackReport({ title, periodLabel, read, subject, actions }: {
             {title}
           </h2>
           <p className="m-0 mt-1 text-[13px] leading-relaxed text-slate-600">
-            {read.loading ? 'Loading…' : `${periodLabel} · ${feedbackCount(report.count)}`}. Colleagues give feedback to each other at any time. {subject.you ? 'You see' : 'This shows'} the kind of colleague, never the name.
+            {read.loading ? 'Loading…' : `${periodLabel} · ${feedbackCount(report.count)}`}
           </p>
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2.5">{actions}</div>}
@@ -114,7 +114,7 @@ export function CustomerFormsReport({ periodLabel, forms, loading, error }: { pe
           Feedback from customers
         </h2>
         <p className="m-0 mt-1 text-[13px] leading-relaxed text-slate-600">
-          {loading ? 'Loading…' : `${periodLabel} · ${forms.length} ${formWord(forms.length)}${summary ? ` · average ${averageText(summary.average)} out of 5` : ''}`}. The forms are typed in by the admin. You can read them here, but not change them.
+          {loading ? 'Loading…' : `${periodLabel} · ${forms.length} ${formWord(forms.length)}${summary ? ` · average ${averageText(summary.average)} out of 5` : ''}`}
         </p>
       </div>
 

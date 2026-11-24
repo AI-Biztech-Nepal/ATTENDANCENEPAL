@@ -166,9 +166,6 @@ function FeedbackSection() {
     <>
       <div className="flex flex-col gap-5 print:hidden">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <p className="m-0 max-w-[680px] text-[13.5px] leading-relaxed text-slate-600">
-            {words.t("Customers fill in a paper form. Type each form in here, so it counts toward the right employee's KPIs. Customer feedback and NPS both come from this form.")}
-          </p>
           <button
             type="button"
             onClick={() => window.print()}

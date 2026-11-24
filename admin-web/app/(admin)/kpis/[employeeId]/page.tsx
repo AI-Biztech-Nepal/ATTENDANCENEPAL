@@ -213,8 +213,6 @@ function EmployeeKpiBody({ report, onClose }: { report: ReportKind | null; onClo
           ))}
       </div>
 
-      <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up or ranked, and no one is compared with anyone else, only with their own last month.</p>
-
       {report && employee && (
         <KpiReportDialog
           kind={report}

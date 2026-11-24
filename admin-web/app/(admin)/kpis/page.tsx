@@ -107,9 +107,6 @@ function Kpis() {
         </select>
       </div>
 
-      <p className="m-0 text-[13px] leading-relaxed text-slate-600">
-        Listed by name. Each KPI stands on its own: nothing is added up, ranked or compared. A dash means there is nothing to show yet.
-      </p>
 
       {error && (
         <p role="alert" className="m-0 rounded-xl border border-critical/30 bg-critical-bg px-4 py-3 text-sm font-semibold text-critical-text">

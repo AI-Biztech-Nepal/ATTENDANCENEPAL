@@ -134,9 +134,6 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
           </tbody>
         </table>
       </div>
-      <p className="m-0 border-t border-slate-200 bg-slate-50 px-5 py-3 text-[12.5px] leading-relaxed text-slate-600">
-        Click a name to open that person&apos;s KPIs. Attendance counts the working days so far: week-offs, holidays and approved leave are left out.
-      </p>
     </section>
   );
 }
