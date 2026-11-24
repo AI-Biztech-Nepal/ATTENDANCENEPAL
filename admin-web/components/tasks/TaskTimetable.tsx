@@ -16,7 +16,7 @@ import {
 } from '@/lib/taskSchedule';
 import type { Employee, LeaveRequest, Task, TaskStatus } from '@/lib/types';
 import DayStrip from './DayStrip';
-import { BLOCK_TONE, STATUS_LABEL, blockStatusText, isOverdue } from './taskStyles';
+import { BLOCK_TONE, STATUS_LABEL, blockStatusText, isOverdue, showsElapsed } from './taskStyles';
 
 const GRID_LINES = 'repeating-linear-gradient(to right,#e2e8f0 0,#e2e8f0 1px,transparent 1px,transparent 11.1111%)';
 const LEAVE_HATCH = 'repeating-linear-gradient(135deg,#e2e8f0 0,#e2e8f0 6px,#f1f5f9 6px,#f1f5f9 12px)';
@@ -25,6 +25,16 @@ const DAY_HOURS = DAY_END_HOUR - DAY_START_HOUR;
 /** "9–10", "12–1": the hour a column stands for. */
 function hourHeading(h: number) {
   return `${h % 12 || 12}–${(h + 1) % 12 || 12}`;
+}
+
+/** How much of a block the "Now" line has already passed, from 0 (not reached) to 1 (all of it behind the line), measured across the
+ * block as it is drawn, so the green fill ends exactly at the line. `dayOver` is true after 6 PM, when the whole day is behind it. */
+function elapsedShare(p: Placement, nowPct: number | null, dayOver: boolean): number {
+  if (dayOver) return 1;
+  if (nowPct === null) return 0;
+  const left = ((p.colStart - 1) / DAY_HOURS) * 100;
+  const width = (p.span / DAY_HOURS) * 100;
+  return Math.min(1, Math.max(0, (nowPct - left) / width));
 }
 
 /** Which hour column a click landed in, from where it fell across the track. */
@@ -49,6 +59,8 @@ type Props = {
   /** Where "now" falls across the 9-6 columns (0-100), or null when it is not today / outside working hours. */
   nowPct: number | null;
   nowLabel: string;
+  /** Today, and the working day (9-6) is over: everything is behind the "Now" line. */
+  dayOver: boolean;
   /** Tasks whose timer is running right now. */
   runningTaskIds: Set<string>;
   onOpenTask: (task: Task) => void;
@@ -71,6 +83,7 @@ export default function TaskTimetable({
   today,
   nowPct,
   nowLabel,
+  dayOver,
   runningTaskIds,
   onOpenTask,
   onAssign,
@@ -168,6 +181,7 @@ export default function TaskTimetable({
                         employee={emp}
                         today={today}
                         running={runningTaskIds.has(p.task.id)}
+                        elapsed={showsElapsed(p.task.status) ? elapsedShare(p, nowPct, dayOver) : 0}
                         onOpen={() => onOpenTask(p.task)}
                       />
                     ))}
@@ -178,7 +192,7 @@ export default function TaskTimetable({
 
             {nowPct !== null && (
               <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-[256px] right-0 top-0">
-                <div className="absolute bottom-0 top-[30px] w-0.5 bg-ink" style={{ left: `${nowPct}%` }} />
+                <div data-now-line className="absolute bottom-0 top-[30px] w-0.5 bg-ink" style={{ left: `${nowPct}%` }} />
                 <div
                   className="absolute top-1.5 -translate-x-1/2 whitespace-nowrap rounded-full bg-ink px-2.5 py-0.5 text-[11px] font-extrabold text-white"
                   style={{ left: `${nowPct}%` }}
@@ -270,12 +284,15 @@ function TimetableBlock({
   employee,
   today,
   running,
+  elapsed,
   onOpen,
 }: {
   placement: Placement;
   employee: Employee;
   today: string;
   running: boolean;
+  /** The share of the block (0 to 1) that the "Now" line has passed: filled green from the left edge to the line. */
+  elapsed: number;
   onOpen: () => void;
 }) {
   const { task, slot, colStart, span } = placement;
@@ -292,20 +309,23 @@ function TimetableBlock({
       aria-label={`${task.title}, ${employee.name}, ${formatSlot(slot)}, ${STATUS_LABEL[task.status]}${overdue ? ', overdue' : ''}${running ? ', timer on' : ''}. Open details`}
       title={`${task.title} · ${formatSlot(slot)}`}
       style={{ gridColumn: `${colStart} / span ${span}`, gridRow: 1 }}
-      className={`mx-[3px] flex min-w-0 cursor-pointer flex-col justify-center gap-[3px] overflow-hidden rounded-lg border px-3 py-2 text-left hover:brightness-95 ${tone.box} ${span === 1 ? 'px-2.5' : ''}`}
+      className={`relative mx-[3px] flex min-w-0 cursor-pointer flex-col justify-center gap-[3px] overflow-hidden rounded-lg border px-3 py-2 text-left hover:brightness-95 ${tone.box} ${span === 1 ? 'px-2.5' : ''}`}
     >
+      {elapsed > 0 && (
+        <span aria-hidden="true" data-elapsed={Math.round(elapsed * 100)} className="pointer-events-none absolute inset-y-0 left-0 bg-emerald-200" style={{ width: `${elapsed * 100}%` }} />
+      )}
       {span === 1 ? (
-        <span className="line-clamp-2 text-[12.5px] font-extrabold leading-tight">{task.title}</span>
+        <span className="relative line-clamp-2 text-[12.5px] font-extrabold leading-tight">{task.title}</span>
       ) : (
         <>
-          <span className="truncate text-[13px] font-extrabold">{task.title}</span>
-          <span className="whitespace-nowrap text-xs font-semibold">
+          <span className="relative truncate text-[13px] font-extrabold">{task.title}</span>
+          <span className="relative whitespace-nowrap text-xs font-semibold">
             {formatSlot(slot)}
             {running ? ' · timer on' : ` · ${formatDuration(slotLength(slot))}`}
           </span>
         </>
       )}
-      <span className={`flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.06em] ${overdue ? 'text-rose-700' : tone.label}`}>
+      <span className={`relative flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.06em] ${overdue ? 'text-rose-700' : tone.label}`}>
         <StatusMark status={task.status} running={running} />
         <span className="truncate">{statusText}</span>
       </span>

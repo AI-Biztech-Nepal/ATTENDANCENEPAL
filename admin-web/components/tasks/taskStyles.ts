@@ -34,6 +34,12 @@ export function isOpen(status: TaskStatus): boolean {
   return status === 'pending' || status === 'in_progress';
 }
 
+/** Whether the timetable fills a block with green as the "Now" line crosses it: a task that is still to be done. One that is
+ * submitted, completed or rejected keeps its own colour. */
+export function showsElapsed(status: TaskStatus): boolean {
+  return isOpen(status);
+}
+
 /** A task a manager can still close as completed: one not started, one under way, or one sent in for review. */
 export function canComplete(status: TaskStatus): boolean {
   return isOpen(status) || status === 'submitted';

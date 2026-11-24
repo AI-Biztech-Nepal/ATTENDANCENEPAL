@@ -16,6 +16,7 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso, punchMinuteOfDay } from '@/lib/shift';
 import { totalsByTask } from '@/lib/taskHours';
 import {
+  DAY_END_HOUR,
   addDays,
   formatHourFull,
   formatSlot,
@@ -194,6 +195,8 @@ export default function TasksPage() {
 
   const nowPct = date === todayIso && nowMin !== null ? nowPercent(nowMin) : null;
   const nowLabel = nowMin !== null ? formatHourFull(nowMin / 60) : '';
+  // After 6 PM the whole working day is behind the "Now" line (there is no line then), so the open tasks are filled all the way.
+  const dayOver = date === todayIso && nowMin !== null && nowMin / 60 > DAY_END_HOUR;
 
   const hoursTaskTotals = useMemo(() => totalsByTask(hoursLogs), [hoursLogs]);
   const employeeTasks = useMemo(() => tasks.filter(t => t.assigned_to === hoursEmployeeId), [tasks, hoursEmployeeId]);
@@ -445,6 +448,7 @@ export default function TasksPage() {
             today={todayIso}
             nowPct={nowPct}
             nowLabel={nowLabel}
+            dayOver={dayOver}
             runningTaskIds={runningTaskIds}
             onOpenTask={t => setSelectedId(t.id)}
             onAssign={openAssign}
