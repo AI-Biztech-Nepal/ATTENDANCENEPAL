@@ -22,7 +22,9 @@ import { usePersonOwn } from '@/lib/useOwnKpiValues';
 import Avatar from '@/components/Avatar';
 import LoadProblems from '@/components/kpi/LoadProblems';
 import MonthStepper from '@/components/kpi/MonthStepper';
-import { AttendanceCard, ColleagueCard, FeedbackCard, NpsCard, OwnKpiCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
+import { AttendanceCard, CardModeProvider, ColleagueCard, FeedbackCard, NpsCard, OwnKpiCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
+import KpiReportDialog from '@/components/kpi/KpiReports';
+import type { ReportKind } from '@/lib/reportKpi';
 
 // One person's KPIs: the Overview section of their pages (the layout has the way back, their name and the other
 // sections). It is opened by clicking a name on the KPI list, which also passes the month it was looking at
@@ -39,6 +41,17 @@ export default function EmployeeKpiPage() {
 }
 
 function EmployeeKpi() {
+  // Clicking a graph card opens the report behind it in a pop-up (components/kpi/KpiReports.tsx).
+  const [report, setReport] = useState<ReportKind | null>(null);
+  const mode = useMemo(() => ({ mine: false, feedbackHref: null, openReport: setReport }), []);
+  return (
+    <CardModeProvider value={mode}>
+      <EmployeeKpiBody report={report} onClose={() => setReport(null)} />
+    </CardModeProvider>
+  );
+}
+
+function EmployeeKpiBody({ report, onClose }: { report: ReportKind | null; onClose: () => void }) {
   const { employeeId } = useParams<{ employeeId: string }>();
   const params = useSearchParams();
   const { system } = useCalendarSystem();
@@ -201,6 +214,14 @@ function EmployeeKpi() {
       </div>
 
       <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up or ranked, and no one is compared with anyone else, only with their own last month.</p>
+
+      {report && employee && (
+        <KpiReportDialog
+          kind={report}
+          onClose={onClose}
+          ctx={{ employeeId, start, end, monthLabel: label, personName: employee.name, mine: false, hoursPerDay: settings.hoursPerDay, repeatDays: settings.repeatDays, today, attendance: current }}
+        />
+      )}
     </div>
   );
 }

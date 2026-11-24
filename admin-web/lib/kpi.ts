@@ -128,6 +128,12 @@ export function visibleGroups(settings: KpiSettings, own: OwnKpi[] = []): KpiGro
 // Attendance and punctuality
 // ---------------------------------------------------------------------------
 
+/** How one day went, for the attendance report: on time, late, absent, on approved leave, or a day off (week-off or holiday). */
+export type AttendanceDayStatus = 'on_time' | 'late' | 'absent' | 'leave' | 'off';
+
+/** One day of the month as the KPI judged it. `checkIn` and `checkOut` are the day's first and last punch (ISO times), when there were any. */
+export type AttendanceDay = { date: string; status: AttendanceDayStatus; checkIn: string | null; checkOut: string | null; lateMinutes: number };
+
 export type AttendanceKpi = {
   /** False for someone excused from attendance: there is nothing to measure. */
   tracked: boolean;
@@ -139,6 +145,8 @@ export type AttendanceKpi = {
   lateDays: number;
   /** Working days spent on approved leave (they are left out of expectedDays). */
   leaveDays: number;
+  /** Every day from the start of the month (or the joining date) to today or the month's end, for the attendance report. */
+  days: AttendanceDay[];
 };
 
 /** Whole-number percentages for the two lines in the cell; null when there is nothing to divide by. */
@@ -212,7 +220,7 @@ export function computeAttendanceKpis(i: AttendanceInputs): Map<string, Attendan
   }
 
   for (const emp of i.employees) {
-    const kpi: AttendanceKpi = { tracked: !emp.attendance_exempt, expectedDays: 0, presentDays: 0, lateDays: 0, leaveDays: 0 };
+    const kpi: AttendanceKpi = { tracked: !emp.attendance_exempt, expectedDays: 0, presentDays: 0, lateDays: 0, leaveDays: 0, days: [] };
     out.set(emp.id, kpi);
     if (!kpi.tracked || days.length === 0) continue;
 
@@ -241,16 +249,26 @@ export function computeAttendanceKpis(i: AttendanceInputs): Map<string, Attendan
       const summary = day === i.today ? undefined : summaryByDay.get(day);
       let present = false;
       let late = false;
+      let checkIn: string | null = null;
+      let checkOut: string | null = null;
+      let lateMinutes = 0;
       if (summary?.check_in) {
         present = true;
         late = summary.is_late;
+        checkIn = summary.check_in;
+        checkOut = summary.check_out;
+        lateMinutes = summary.late_minutes;
       } else {
         const dayLogs = isDeletedDay(summary) ? [] : (byDate.get(day) ?? []);
         if (dayLogs.length > 0) {
+          const sorted = [...dayLogs].sort((a, b) => a.punch_time.localeCompare(b.punch_time));
           present = true;
-          late = computeDayStatusForResolvedShift([...dayLogs].sort((a, b) => a.punch_time.localeCompare(b.punch_time)), resolved).isLate;
+          late = computeDayStatusForResolvedShift(sorted, resolved).isLate;
+          checkIn = sorted[0].punch_time;
+          checkOut = sorted.length > 1 ? sorted[sorted.length - 1].punch_time : null;
         }
       }
+      kpi.days.push({ date: day, status: off ? 'off' : onLeave ? 'leave' : !present ? 'absent' : late ? 'late' : 'on_time', checkIn, checkOut, lateMinutes });
 
       if (off || onLeave) {
         if (onLeave && !off) kpi.leaveDays += 1;

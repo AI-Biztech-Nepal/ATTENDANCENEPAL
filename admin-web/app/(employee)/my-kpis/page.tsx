@@ -21,6 +21,8 @@ import { PageBody } from '@/components/employee/parts';
 import LoadProblems from '@/components/kpi/LoadProblems';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import { AttendanceCard, CardModeProvider, ColleagueCard, FeedbackCard, NpsCard, OwnKpiCard, RebookingCard, ServicesCard, UtilisationCard } from '@/components/kpi/EmployeeKpiCards';
+import KpiReportDialog from '@/components/kpi/KpiReports';
+import type { ReportKind } from '@/lib/reportKpi';
 
 // My KPIs: the person's own KPIs from the owner's sheet (and any the company added), each with the chart that suits it, next to last
 // month's. It is the same numbers, worked out the same way, as the admin's page for this person, but it is read only, it talks to
@@ -87,7 +89,9 @@ function MyKpis({ employeeId }: { employeeId: string }) {
   const colleagueData = useMyColleagues({ start, end }, previous, COLLEAGUE_KPIS.some(on) && start <= today);
   const ownData = usePersonOwn(employeeId, ownIds, { start, end }, previous, ownIds.length > 0 && start <= today);
   const rebookingData = useMyRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
-  const mode = useMemo(() => ({ mine: true, feedbackHref: '/my-feedback' }), []);
+  // Clicking a graph card opens the report behind it in a pop-up (components/kpi/KpiReports.tsx): only this person's own rows.
+  const [report, setReport] = useState<ReportKind | null>(null);
+  const mode = useMemo(() => ({ mine: true, feedbackHref: '/my-feedback', openReport: setReport }), []);
 
   if (notFound || error) {
     return (
@@ -203,6 +207,14 @@ function MyKpis({ employeeId }: { employeeId: string }) {
 
         <p className="m-0 text-[12.5px] text-slate-600">Each KPI stands on its own. Nothing is added up or ranked, and you are never compared with anyone else, only with your own last month.</p>
       </div>
+
+      {report && (
+        <KpiReportDialog
+          kind={report}
+          onClose={() => setReport(null)}
+          ctx={{ employeeId, start, end, monthLabel: label, personName: 'You', mine: true, hoursPerDay: settings.hoursPerDay, repeatDays: settings.repeatDays, today, attendance: current }}
+        />
+      )}
     </CardModeProvider>
   );
 }

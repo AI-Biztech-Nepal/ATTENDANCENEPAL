@@ -18,6 +18,7 @@ import Link from 'next/link';
 import type { PersonRebooking } from '@/lib/useRebookingKpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { Bars, KPI_COLORS, Pie, Ring } from './KpiCharts';
+import type { ReportKind } from '@/lib/reportKpi';
 
 const dayCount = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
@@ -34,6 +35,8 @@ export type CardMode = {
   mine: boolean;
   /** Where "See your forms" and "See what colleagues said" go (the employee's Feedback page). */
   feedbackHref: string | null;
+  /** Opens the report behind a card (the page shows it in a pop-up). Without it the cards are not clickable. */
+  openReport?: (kind: ReportKind) => void;
 };
 const CardModeContext = createContext<CardMode>({ mine: false, feedbackHref: null });
 export const CardModeProvider = CardModeContext.Provider;
@@ -54,20 +57,43 @@ function CardLink({ href, children, plus = false }: { href: string; children: Re
   );
 }
 
-function Card({ eyebrow, name, className = '', footer, children }: {
+function Card({ eyebrow, name, className = '', footer, children, report, reportable = true }: {
   eyebrow: string;
   name: string;
   className?: string;
   footer?: React.ReactNode;
   children: React.ReactNode;
+  /** The report this card opens when it is clicked, once there is something to report (`reportable`). */
+  report?: ReportKind;
+  reportable?: boolean;
 }) {
+  const { openReport } = useCardMode();
+  const open = openReport && report && reportable ? () => openReport(report) : null;
   return (
-    <section aria-label={name} className={`flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
-      <div className="text-[11.5px] font-extrabold uppercase tracking-wider text-slate-600">{eyebrow}</div>
-      <h2 className="m-0 mb-3 mt-0.5 text-[15px] font-extrabold text-ink">{name}</h2>
+    // Clicking anywhere on the card opens the report, except on a link or button inside it; the corner button is the same thing for the keyboard.
+    <section
+      aria-label={name}
+      onClick={open ? e => !(e.target as HTMLElement).closest('a, button') && open() : undefined}
+      className={`relative flex flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${open ? 'cursor-pointer transition-shadow hover:border-teal-300 hover:shadow-md' : ''} ${className}`}
+    >
+      <div className="pr-11 text-[11.5px] font-extrabold uppercase tracking-wider text-slate-600">{eyebrow}</div>
+      <h2 className="m-0 mb-3 mt-0.5 pr-11 text-[15px] font-extrabold text-ink">{name}</h2>
       {/* A column, so a message that fills the card and a link after it stack instead of the link spilling over what is below. */}
       <div className="flex flex-1 flex-col">{children}</div>
       {footer && <div className="mt-auto pt-3 text-xs text-slate-600">{footer}</div>}
+      {/* Last in the card (it sits in the corner by position), so the card's chart stays the first graphic in it. */}
+      {open && (
+        <button
+          type="button"
+          onClick={open}
+          aria-label={`Open the report for ${name}`}
+          className="absolute right-2 top-2 flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          <svg viewBox="0 0 24 24" width={18} height={18} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          </svg>
+        </button>
+      )}
     </section>
   );
 }
@@ -284,7 +310,7 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
     }
   }
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} report="attendance" reportable={!loading && !notStarted && !!current?.tracked}>
       {body}
     </Card>
   );
@@ -347,7 +373,7 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
       </div>
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} report="services" reportable={!data.loading && !data.error && !notStarted && data.monthHasData}>
       {body}
     </Card>
   );
@@ -416,7 +442,7 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
       <Compare change={compare(currentPct, previousPct, { name: previousName, unit: 'points', shown: `${previousPct}%` })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} report="rebooking" reportable={!data.loading && !data.error && !notStarted && !!cur}>
       {body}
     </Card>
   );
@@ -487,7 +513,7 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
       <Compare change={compare(cur.pct, prev.pct, { name: previousName, unit: 'points', shown: `${prev.pct}%` })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} report="utilisation" reportable={!data.loading && !attendanceLoading && !data.error && !notStarted && !!cur}>
       {body}
     </Card>
   );
@@ -546,7 +572,7 @@ export function FeedbackCard({ eyebrow, name, data, monthName, previousName, not
       <Compare change={compare(state.summary.average, previous.summary.average, { name: previousName, unit: 'rating' })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} report="feedback" reportable={!data.loading && !data.error && !notStarted && state.kind === 'ok'}>
       {body}
       {typeInHref && !mode.mine && (
         <CardLink href={typeInHref} plus>
@@ -644,7 +670,7 @@ export function NpsCard({ eyebrow, name, data, monthName, previousName, notStart
       <Compare change={compare(state.summary.score, previous.summary.score, { name: previousName, unit: 'points', shown: scoreText(previous.summary.score) })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} report="nps" reportable={!data.loading && !data.error && !notStarted && state.kind === 'ok'}>
       {body}
     </Card>
   );
@@ -678,8 +704,9 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
       </Card>
     );
   }
+  const anyFeedback = rows.some(r => roleState(data.current?.[r.relation]).kind === 'ok');
   return (
-    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
+    <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer} report="colleagues" reportable={!data.error && !notStarted && anyFeedback}>
       <div className="flex flex-col">
         <div aria-hidden="true" className="hidden flex-wrap items-center gap-x-6 sm:flex">
           <div className="sm:w-[250px]" />
