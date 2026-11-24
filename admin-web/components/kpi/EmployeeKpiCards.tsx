@@ -11,7 +11,7 @@ import { rebookingPct } from '@/lib/rebookingKpi';
 import { hoursText, restOfDay, utilisation } from '@/lib/utilisationKpi';
 import { averageText, feedbackState, formWord } from '@/lib/feedbackKpi';
 import { npsState, scoreText, scoreWords, sharePct } from '@/lib/npsKpi';
-import { PEER_MIN, RELATION_OF_KPI, reviewWord, roleState } from '@/lib/colleagueKpi';
+import { RELATION_OF_KPI, reviewWord, roleState } from '@/lib/colleagueKpi';
 import type { PersonColleagues } from '@/lib/useColleagueKpi';
 import type { PersonFeedback } from '@/lib/useFeedbackKpi';
 import Link from 'next/link';
@@ -493,14 +493,12 @@ export function UtilisationCard({ eyebrow, name, data, presentDays, previousPres
   );
 }
 
-/** Customer feedback: the average rating out of 5 with how many forms it comes from, and a bar for each rating. Held back
- * until the month has as many forms as Settings asks for. Always offers to type in a form. */
-export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previousName, notStarted, typeInHref, className = '' }: {
+/** Customer feedback: the average rating out of 5 with how many forms it comes from, and a bar for each rating. It shows
+ * from the first form. Always offers to type in a form. */
+export function FeedbackCard({ eyebrow, name, data, monthName, previousName, notStarted, typeInHref, className = '' }: {
   eyebrow: string;
   name: string;
   data: PersonFeedback;
-  /** Forms a month needs before the average shows (Settings). */
-  minForms: number;
   monthName: string;
   previousName: string;
   notStarted: boolean;
@@ -510,7 +508,7 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
 }) {
   const mode = useCardMode();
   const { words } = useKpiSettings();
-  const state = feedbackState(data.current, minForms);
+  const state = feedbackState(data.current);
   const hint = mode.mine || notStarted ? undefined : !data.monthHasForms ? words.t('No forms typed in for this month. Type in the paper forms customers filled in, in the Customer feedback section.') : `No forms typed in for this employee in ${monthName}`;
   let body: React.ReactNode;
   if (!data.loading && !data.error && (notStarted || !data.monthHasForms || state.kind === 'none')) {
@@ -527,9 +525,7 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
     );
   } else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (state.kind === 'few') {
-    body = <Message title="Not enough forms yet" text={`${state.count} of ${state.need} ${formWord(state.need)} typed in. The average shows once there are ${state.need}, so one or two forms do not stand for a whole month.`} />;
-  } else if (state.kind === 'ok') {
+  else if (state.kind === 'ok') {
     const s = state.summary;
     body = (
       <>
@@ -544,7 +540,7 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
       </>
     );
   }
-  const previous = feedbackState(data.previous, minForms);
+  const previous = feedbackState(data.previous);
   const footer =
     !notStarted && !data.loading && state.kind === 'ok' && previous.kind === 'ok' ? (
       <Compare change={compare(state.summary.average, previous.summary.average, { name: previousName, unit: 'rating' })} />
@@ -563,13 +559,11 @@ export function FeedbackCard({ eyebrow, name, data, minForms, monthName, previou
 }
 
 /** NPS: a donut of who would recommend (9 or 10), who is neutral (7 or 8) and who is not likely (0 to 6), with the score in the
- * middle (from -100 to +100). Held back until the month has as many forms as Settings asks for. */
-export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName, notStarted, className = '' }: {
+ * middle (from -100 to +100). It shows from the first form. */
+export function NpsCard({ eyebrow, name, data, monthName, previousName, notStarted, className = '' }: {
   eyebrow: string;
   name: string;
   data: PersonFeedback;
-  /** Forms a month needs before the NPS shows (Settings). */
-  minForms: number;
   monthName: string;
   previousName: string;
   notStarted: boolean;
@@ -577,7 +571,7 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
 }) {
   const mode = useCardMode();
   const { words } = useKpiSettings();
-  const state = npsState(data.nps, minForms);
+  const state = npsState(data.nps);
   const hint =
     mode.mine || notStarted
       ? undefined
@@ -609,9 +603,7 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
     );
   } else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (state.kind === 'few') {
-    body = <Message title="Not enough forms yet" text={`${state.count} of ${state.need} ${formWord(state.need)} with a recommend number. The NPS shows once there are ${state.need}, so one or two forms do not stand for a whole month.`} />;
-  } else if (state.kind === 'ok') {
+  else if (state.kind === 'ok') {
     const s = state.summary;
     body = (
       <>
@@ -646,7 +638,7 @@ export function NpsCard({ eyebrow, name, data, minForms, monthName, previousName
       </>
     );
   }
-  const previous = npsState(data.npsPrevious, minForms);
+  const previous = npsState(data.npsPrevious);
   const footer =
     !notStarted && !data.loading && state.kind === 'ok' && previous.kind === 'ok' ? (
       <Compare change={compare(state.summary.score, previous.summary.score, { name: previousName, unit: 'points', shown: scoreText(previous.summary.score) })} />
@@ -666,8 +658,8 @@ const COLLEAGUES: { id: KpiId; label: string }[] = [
 ];
 
 /** The four colleague-feedback KPIs on one scale of 0 to 5: the average rating from peers, from the manager, from the C-level
- * executive and from training and compliance, in the month's round of reviews. A role shows once enough reviews are in
- * (three from peers, one from each of the others). Under each, how many reviews it is and last month's average. */
+ * executive and from training and compliance. A role shows from its first review. Under each, how many reviews it is and
+ * last month's average. */
 export function ColleagueCard({ group, settings, data, previousName, notStarted, className = '' }: {
   group: KpiGroup;
   settings: KpiSettings;
@@ -678,7 +670,7 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
 }) {
   const mode = useCardMode();
   const rows = COLLEAGUES.filter(c => isKpiOn(c.id, settings)).map(c => ({ id: c.id, label: settings.names[c.id] ?? c.label, relation: RELATION_OF_KPI[c.id as keyof typeof RELATION_OF_KPI] }));
-  const footer = `${group.source}. Peers count once ${PEER_MIN} reviews are in, the others once one is in. ${mode.mine ? 'You never see' : 'The person never sees'} who said what.`;
+  const footer = `${group.source}. ${mode.mine ? 'You never see' : 'The person never sees'} who said what.`;
   if (data.loading) {
     return (
       <Card eyebrow={group.title} name="Feedback from colleagues" className={className} footer={footer}>
@@ -701,12 +693,11 @@ export function ColleagueCard({ group, settings, data, previousName, notStarted,
           <div className="w-[74px]" />
         </div>
         {rows.map(({ id, label, relation }) => {
-          const state = roleState(data.current?.[relation], relation);
-          const last = roleState(data.previous?.[relation], relation);
+          const state = roleState(data.current?.[relation]);
+          const last = roleState(data.previous?.[relation]);
           let meta: string;
           if (data.error) meta = UNREAD.title;
           else if (state.kind === 'none') meta = '';
-          else if (state.kind === 'few') meta = `${state.given} of ${state.need} ${reviewWord(state.need)}. Shown once ${state.need === 1 ? 'it is' : `${state.need} are`} in.`;
           else meta = `${state.given} ${reviewWord(state.given)}${last.kind === 'ok' ? ` · ${lowerFirst(compare(state.average, last.average, { name: previousName, unit: 'rating' }).text)}` : ''}`;
           return (
             <div key={id} className="flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-200 py-3">

@@ -56,12 +56,11 @@ export function summariseNpsByEmployee(rows: RecommendForm[]): Map<string, NpsSu
   return out;
 }
 
-/** Nothing yet, too few forms to stand for a month (Settings holds how many are needed), or the NPS. */
-export type NpsState = { kind: 'none' } | { kind: 'few'; count: number; need: number } | { kind: 'ok'; summary: NpsSummary };
+/** Nothing yet, or the NPS. It shows from the first form, with the number of forms beside it. */
+export type NpsState = { kind: 'none' } | { kind: 'ok'; summary: NpsSummary };
 
-export function npsState(summary: NpsSummary | null | undefined, minForms: number): NpsState {
+export function npsState(summary: NpsSummary | null | undefined): NpsState {
   if (!summary) return { kind: 'none' };
-  if (summary.count < minForms) return { kind: 'few', count: summary.count, need: minForms };
   return { kind: 'ok', summary };
 }
 

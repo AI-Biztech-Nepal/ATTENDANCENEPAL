@@ -24,9 +24,6 @@ export const RELATION_OF_KPI: Record<'peers' | 'manager' | 'clevel' | 'training'
 export const COLLEAGUE_KPIS = Object.keys(RELATION_OF_KPI) as (keyof typeof RELATION_OF_KPI)[];
 export const isColleagueKpi = (id: KpiId): id is keyof typeof RELATION_OF_KPI => id in RELATION_OF_KPI;
 
-/** Peers must have given at least this much feedback before their average shows, so one or two do not stand for everybody. */
-export const PEER_MIN = 3;
-
 const noRoles = (): Roles => ({
   peer: { given: 0, average: null },
   manager: { given: 0, average: null },
@@ -58,16 +55,11 @@ export function summariseFeedback(rows: FeedbackRow[]): Map<string, Roles> {
   return out;
 }
 
-/** How much feedback a kind needs before its average shows: three from peers, one from each of the others. */
-export const neededFeedback = (relation: FeedbackRelation) => (relation === 'peer' ? PEER_MIN : 1);
+/** Nobody of that kind gave any ('none'), or the average ('ok'). The average shows from the first review, with how many it comes from. */
+export type RoleState = { kind: 'none' } | { kind: 'ok'; average: number; given: number };
 
-/** Nobody of that kind gave any ('none'), some did but not enough yet ('few'), or the average ('ok'). */
-export type RoleState = { kind: 'none' } | { kind: 'few'; given: number; need: number } | { kind: 'ok'; average: number; given: number };
-
-export function roleState(summary: RoleSummary | null | undefined, relation: FeedbackRelation): RoleState {
-  if (!summary || summary.given === 0) return { kind: 'none' };
-  const need = neededFeedback(relation);
-  if (summary.given < need || summary.average == null) return { kind: 'few', given: summary.given, need };
+export function roleState(summary: RoleSummary | null | undefined): RoleState {
+  if (!summary || summary.given === 0 || summary.average == null) return { kind: 'none' };
   return { kind: 'ok', average: summary.average, given: summary.given };
 }
 

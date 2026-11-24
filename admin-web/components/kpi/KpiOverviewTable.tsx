@@ -29,9 +29,8 @@ type Props = {
   /** Rebooking per person: of the customers served, how many booked again within `windowDays`. */
   rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string };
   windowDays: number;
-  /** Customer feedback and NPS per person from the forms typed in, and how many forms a month needs before they show (Settings). */
+  /** Customer feedback and NPS per person from the forms typed in. */
   feedback: FeedbackMonth;
-  minForms: number;
   /** Colleague feedback per person, from the feedback colleagues gave during the month. `bySubject` is null when nobody was given any. */
   colleagues: { loading: boolean; bySubject: Map<string, Roles> | null; error: string };
   /** The numbers typed in for the KPIs the company added itself, per KPI and person. */
@@ -46,7 +45,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place). Nothing is
  * added up, ranked or compared: a dash means there is nothing to show yet, or its numbers could not be read (the note
  * above the table says so in that case). */
-export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, minForms, colleagues, own, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, colleagues, own, loading, notStarted, monthStart }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -114,11 +113,11 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                         ) : c.id === 'utilisation' ? (
                           <UtilisationCell key={c.id} group={g} first={i === 0} services={services} kpi={kpi} hoursPerDay={hoursPerDay} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'feedback' ? (
-                          <FeedbackCell key={c.id} group={g} first={i === 0} loading={feedback.loading} byEmployee={feedback.byEmployee} unread={!!feedback.error} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
+                          <FeedbackCell key={c.id} group={g} first={i === 0} loading={feedback.loading} byEmployee={feedback.byEmployee} unread={!!feedback.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'peers' || c.id === 'manager' || c.id === 'clevel' || c.id === 'training' ? (
                           <ColleagueCell key={c.id} group={g} first={i === 0} loading={colleagues.loading} bySubject={colleagues.bySubject} unread={!!colleagues.error} kpiId={c.id} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'nps' ? (
-                          <NpsCell key={c.id} group={g} first={i === 0} loading={feedback.loading} nps={feedback.nps} unread={!!feedback.error} minForms={minForms} employeeId={emp.id} notStarted={notStarted} />
+                          <NpsCell key={c.id} group={g} first={i === 0} loading={feedback.loading} nps={feedback.nps} unread={!!feedback.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : isOwnColumn(c.id) ? (
                           <OwnCell key={c.id} group={g} first={i === 0} loading={own.loading} values={own.byKpi.get(ownIdOf(c.id))} unread={!!own.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'rebooking' ? (
@@ -252,11 +251,10 @@ function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId,
   );
 }
 
-/** The average service rating out of 5 from the customer forms, with how many forms under it. Held back (a dash and "3 of 5
- * forms") until the month has as many forms as Settings asks for, so one or two forms never stand for a whole month. */
-function FeedbackCell({ group, first, loading, byEmployee, unread, minForms, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, FeedbackSummary> | null; unread: boolean; minForms: number; employeeId: string; notStarted: boolean }) {
+/** The average service rating out of 5 from the customer forms, with how many forms under it. It shows from the first form. */
+function FeedbackCell({ group, first, loading, byEmployee, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, FeedbackSummary> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
-  const state = feedbackState(byEmployee?.get(employeeId), minForms);
+  const state = feedbackState(byEmployee?.get(employeeId));
   if (loading || notStarted || unread || !byEmployee || state.kind === 'none') {
     const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !byEmployee ? group.emptyNote : 'No forms';
     return (
@@ -264,18 +262,6 @@ function FeedbackCell({ group, first, loading, byEmployee, unread, minForms, emp
         <div className="text-[15px] font-bold text-slate-600">
           <span aria-hidden="true">–</span>
           <span className="sr-only">{why}</span>
-        </div>
-      </td>
-    );
-  }
-  if (state.kind === 'few') {
-    return (
-      <td className={cell} title={`Held back until there are ${state.need} forms for the month`}>
-        <div className="text-[15px] font-bold text-slate-600" aria-hidden="true">
-          –
-        </div>
-        <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
-          {state.count} of {state.need} forms
         </div>
       </td>
     );
@@ -294,10 +280,10 @@ function FeedbackCell({ group, first, loading, byEmployee, unread, minForms, emp
 }
 
 /** The NPS: the share who would recommend minus the share who are not likely to, from -100 to +100, with how many forms
- * under it. Held back like customer feedback until the month has the forms Settings asks for. */
-function NpsCell({ group, first, loading, nps, unread, minForms, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; nps: Map<string, NpsSummary> | null; unread: boolean; minForms: number; employeeId: string; notStarted: boolean }) {
+ * under it. It shows from the first form. */
+function NpsCell({ group, first, loading, nps, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; nps: Map<string, NpsSummary> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
-  const state = npsState(nps?.get(employeeId), minForms);
+  const state = npsState(nps?.get(employeeId));
   if (loading || notStarted || unread || !nps || state.kind === 'none') {
     const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !nps ? group.emptyNote : 'No forms';
     return (
@@ -305,18 +291,6 @@ function NpsCell({ group, first, loading, nps, unread, minForms, employeeId, not
         <div className="text-[15px] font-bold text-slate-600">
           <span aria-hidden="true">–</span>
           <span className="sr-only">{why}</span>
-        </div>
-      </td>
-    );
-  }
-  if (state.kind === 'few') {
-    return (
-      <td className={cell} title={`Held back until there are ${state.need} forms for the month`}>
-        <div className="text-[15px] font-bold text-slate-600" aria-hidden="true">
-          –
-        </div>
-        <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
-          {state.count} of {state.need} forms
         </div>
       </td>
     );
@@ -332,12 +306,12 @@ function NpsCell({ group, first, loading, nps, unread, minForms, employeeId, not
   );
 }
 
-/** The average rating out of 5 a person got from one kind of colleague in the month's round, with how many reviews under it.
- * Held back (a dash and "2 of 3 reviews") until enough are in: three from peers, one from each of the others. */
+/** The average rating out of 5 a person got from one kind of colleague in the month, with how many reviews under it. It
+ * shows from the first review. */
 function ColleagueCell({ group, first, loading, bySubject, unread, kpiId, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; bySubject: Map<string, Roles> | null; unread: boolean; kpiId: keyof typeof RELATION_OF_KPI; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
   const relation = RELATION_OF_KPI[kpiId];
-  const state = roleState(bySubject?.get(employeeId)?.[relation], relation);
+  const state = roleState(bySubject?.get(employeeId)?.[relation]);
   if (loading || notStarted || unread || !bySubject || state.kind === 'none') {
     const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !bySubject ? group.emptyNote : 'No feedback from them';
     return (
@@ -345,18 +319,6 @@ function ColleagueCell({ group, first, loading, bySubject, unread, kpiId, employ
         <div className="text-[15px] font-bold text-slate-600">
           <span aria-hidden="true">–</span>
           <span className="sr-only">{why}</span>
-        </div>
-      </td>
-    );
-  }
-  if (state.kind === 'few') {
-    return (
-      <td className={cell} title={`Held back until ${state.need} ${reviewWord(state.need)} ${state.need === 1 ? 'is' : 'are'} in`}>
-        <div className="text-[15px] font-bold text-slate-600" aria-hidden="true">
-          –
-        </div>
-        <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
-          {state.given} of {state.need} {reviewWord(state.need)}
         </div>
       </td>
     );

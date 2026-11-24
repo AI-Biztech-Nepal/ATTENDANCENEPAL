@@ -47,14 +47,13 @@ export function summariseFeedback(rows: RatedForm[]): Map<string, FeedbackSummar
 }
 
 /**
- * What to show for one person: nothing yet ('none'), too few forms to stand for a whole month ('few', so one or two
- * forms never decide the number: Settings holds how many are needed), or the average ('ok').
+ * What to show for one person: nothing yet ('none') or the average ('ok'). The average shows from the first form, and the
+ * card says how many forms it comes from, so a month with one or two is never hidden.
  */
-export type FeedbackState = { kind: 'none' } | { kind: 'few'; count: number; need: number } | { kind: 'ok'; summary: FeedbackSummary };
+export type FeedbackState = { kind: 'none' } | { kind: 'ok'; summary: FeedbackSummary };
 
-export function feedbackState(summary: FeedbackSummary | null | undefined, minForms: number): FeedbackState {
+export function feedbackState(summary: FeedbackSummary | null | undefined): FeedbackState {
   if (!summary) return { kind: 'none' };
-  if (summary.count < minForms) return { kind: 'few', count: summary.count, need: minForms };
   return { kind: 'ok', summary };
 }
 

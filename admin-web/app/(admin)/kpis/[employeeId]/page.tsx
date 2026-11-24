@@ -167,7 +167,6 @@ function EmployeeKpi() {
             eyebrow={customers.title}
             name={kpiLabel('feedback', settings)}
             data={loaded ? feedbackData : { ...feedbackData, loading: true }}
-            minForms={settings.minResponses}
             monthName={monthName}
             previousName={previousName}
             notStarted={start > today}
@@ -179,7 +178,6 @@ function EmployeeKpi() {
             eyebrow={customers.title}
             name={kpiLabel('nps', settings)}
             data={loaded ? feedbackData : { ...feedbackData, loading: true }}
-            minForms={settings.minResponses}
             monthName={monthName}
             previousName={previousName}
             notStarted={start > today}
