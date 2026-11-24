@@ -34,6 +34,14 @@ html, body {
   --info-text: 51 65 85; /* slate-700 */
 }
 
+/* Text only a screen reader reads (Tailwind's sr-only). It is positioned on the window, not on the page: an absolutely
+   positioned element with no positioned parent ignores the overflow clipping of every container it sits in, so the
+   hidden labels in the KPI table's rows stretched the whole document and gave the page a second scrollbar (and the
+   sidebar scrolled away with it). A fixed element adds nothing to any scroll area, and is read the same. */
+.sr-only {
+  position: fixed;
+}
+
 /* Dropdowns (every <select>): the browser's own arrow sits hard against the right edge, so it is drawn here instead, a
    little chevron with room around it, and the text keeps clear of it. This is a plain element selector on purpose (with
    :not() it outranks a component's px-3), so every dropdown in the app looks the same without touching each one.
