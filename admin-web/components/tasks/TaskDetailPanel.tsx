@@ -17,7 +17,7 @@ type Props = {
   employee: Employee | undefined;
   today: string;
   onClose: () => void;
-  /** Approve or reject a submitted task. Resolves to an error message, or null when it worked. */
+  /** Approve or reject. Resolves to an error message, or null when it worked. */
   onReview: (task: Task, status: 'approved' | 'rejected', note: string) => Promise<string | null>;
   /** "Pick a time" for a task that has no slot yet. */
   onPickTime: (task: Task) => void;
@@ -30,8 +30,8 @@ const FIELD = 'w-full rounded-[10px] border border-slate-300 bg-white px-3 text-
 
 /** Everything about one task, in a panel that slides in from the right when its block (or row) is clicked: when,
  * who, the description, the time actually tracked, the employee's note — and, for a submitted task, the
- * review. A task completes by itself when its time is over (nobody marks it), so there is no button for that. A task that has
- * not been reviewed yet can be cancelled from the bottom of the panel: it is deleted, after asking. Completed and rejected
+ * review. It replaces the separate Review dialog; the approve/reject rules are unchanged. A task that has not been
+ * reviewed yet can be cancelled from the bottom of the panel: it is deleted, after asking. Approved and rejected
  * tasks are the record of work that was done, so they have no Cancel. */
 export default function TaskDetailPanel({ task, employee, today, onClose, onReview, onPickTime, onCancel }: Props) {
   const { system } = useCalendarSystem();
@@ -181,13 +181,6 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
 
           <dt className="border-b border-slate-100 py-3.5 text-[13px] font-bold text-slate-600">Created</dt>
           <dd className="border-b border-slate-100 py-3.5 font-semibold text-ink">{formatAdDate(localDateKey(task.created_at), system)}</dd>
-
-          {task.status === 'approved' && task.reviewed_at && (
-            <>
-              <dt className="border-b border-slate-100 py-3.5 text-[13px] font-bold text-slate-600">Completed</dt>
-              <dd className="border-b border-slate-100 py-3.5 font-bold text-emerald-800">{formatAdDate(localDateKey(task.reviewed_at), system)}</dd>
-            </>
-          )}
         </dl>
 
         {task.description && (
@@ -225,7 +218,7 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
                   <li key={l.id} className="flex justify-between gap-3 border-t border-slate-100 py-2.5 text-[13px]">
                     <span className="text-slate-700">
                       {formatTime(l.started_at)} – {l.ended_at ? formatTime(l.ended_at) : 'now'}
-                      {!l.ended_at && <span className="ml-2 font-bold text-blue-700">timer running</span>}
+                      {!l.ended_at && <span className="ml-2 font-bold text-emerald-700">timer running</span>}
                     </span>
                     <span className="font-bold tabular-nums text-ink">{formatHoursMinutes(minutes)}</span>
                   </li>
