@@ -57,7 +57,7 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
             <tr className="border-b border-slate-200 bg-slate-50">
               <th
                 scope="col"
-                className="w-[210px] bg-slate-50 px-5 py-3.5 align-bottom md:sticky md:left-0 md:z-10 text-xs font-extrabold uppercase tracking-wider text-slate-600"
+                className="w-[210px] bg-slate-50 px-5 py-3.5 align-middle md:sticky md:left-0 md:z-10 text-xs font-extrabold uppercase tracking-wider text-slate-600"
               >
                 Employee
               </th>
@@ -67,7 +67,7 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                     key={c.id}
                     scope="col"
                     style={{ width: c.width }}
-                    className={`px-3 py-3.5 align-bottom text-xs font-bold text-slate-700 ${i === 0 ? 'border-l border-slate-200' : ''}`}
+                    className={`px-3 py-3.5 text-center align-middle text-xs font-bold leading-snug text-slate-700 ${i === 0 ? 'border-l border-slate-200' : ''}`}
                   >
                     {c.label}
                   </th>
@@ -154,7 +154,7 @@ function subtitle(emp: Employee, kpi: AttendanceKpi | undefined) {
 }
 
 function AttendanceCell({ kpi, notStarted }: { kpi: AttendanceKpi | undefined; notStarted: boolean }) {
-  const cell = 'border-l border-slate-100 px-3 py-3.5';
+  const cell = 'border-l border-slate-100 px-3 py-3.5 text-center align-middle';
   if (!kpi || !kpi.tracked || kpi.expectedDays === 0) {
     const note = !kpi ? '' : !kpi.tracked ? 'Not tracked' : notStarted ? 'Month has not started' : 'No working days yet';
     return (
@@ -181,7 +181,7 @@ function AttendanceCell({ kpi, notStarted }: { kpi: AttendanceKpi | undefined; n
 /** How many services this person performed in the month. A dash when no booking file covers the month (that is not
  * the same as 0: someone with nothing in a month the others have services in did perform none). */
 function ServicesCell({ group, first, loading, counts, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; counts: Map<string, number> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
-  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
   if (loading || unread || !counts) {
     return (
       <td className={cell}>
@@ -203,7 +203,7 @@ function ServicesCell({ group, first, loading, counts, unread, employeeId, notSt
 /** Of the customers this person served in the month, the share who booked again, with the numbers under it. A dash says
  * why there is nothing to show (not imported, no customer codes, no customers) for screen readers. */
 function RebookingCell({ group, first, loading, byEmployee, reason, unread, employeeId, notStarted, windowDays }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; unread: boolean; employeeId: string; notStarted: boolean; windowDays: number }) {
-  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
   const r = byEmployee?.get(employeeId);
   const pct = r ? rebookingPct(r) : null;
   if (loading || notStarted || unread || reason || !r || pct == null) {
@@ -230,7 +230,7 @@ function RebookingCell({ group, first, loading, byEmployee, reason, unread, empl
 /** The share of the working day this person spent with customers, averaged over the days they worked, with the hours a day
  * under it. A dash says why there is nothing to show (not imported, no time in the file, no timed services). */
 function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId, notStarted }: { group: KpiGroup; first: boolean; services: ServiceMonth; kpi: AttendanceKpi | undefined; hoursPerDay: number; employeeId: string; notStarted: boolean }) {
-  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
   const u = services.time ? utilisation(services.time.get(employeeId), kpi?.tracked ? kpi.presentDays : null, hoursPerDay) : null;
   if (services.loading || notStarted || services.error || services.reason || !u) {
     const why = services.loading ? 'Loading' : notStarted ? 'Month has not started' : services.error ? UNREAD : services.reason === 'notime' ? 'No time in the file' : services.reason === 'none' ? group.emptyNote : 'No services with a time';
@@ -253,7 +253,7 @@ function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId,
 
 /** The average service rating out of 5 from the customer forms, with how many forms under it. It shows from the first form. */
 function FeedbackCell({ group, first, loading, byEmployee, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, FeedbackSummary> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
-  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
   const state = feedbackState(byEmployee?.get(employeeId));
   if (loading || notStarted || unread || !byEmployee || state.kind === 'none') {
     const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !byEmployee ? group.emptyNote : 'No forms';
@@ -282,7 +282,7 @@ function FeedbackCell({ group, first, loading, byEmployee, unread, employeeId, n
 /** The NPS: the share who would recommend minus the share who are not likely to, from -100 to +100, with how many forms
  * under it. It shows from the first form. */
 function NpsCell({ group, first, loading, nps, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; nps: Map<string, NpsSummary> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
-  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
   const state = npsState(nps?.get(employeeId));
   if (loading || notStarted || unread || !nps || state.kind === 'none') {
     const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !nps ? group.emptyNote : 'No forms';
@@ -309,7 +309,7 @@ function NpsCell({ group, first, loading, nps, unread, employeeId, notStarted }:
 /** The average rating out of 5 a person got from one kind of colleague in the month, with how many reviews under it. It
  * shows from the first review. */
 function ColleagueCell({ group, first, loading, bySubject, unread, kpiId, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; bySubject: Map<string, Roles> | null; unread: boolean; kpiId: keyof typeof RELATION_OF_KPI; employeeId: string; notStarted: boolean }) {
-  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
   const relation = RELATION_OF_KPI[kpiId];
   const state = roleState(bySubject?.get(employeeId)?.[relation]);
   if (loading || notStarted || unread || !bySubject || state.kind === 'none') {
@@ -338,7 +338,7 @@ function ColleagueCell({ group, first, loading, bySubject, unread, kpiId, employ
 /** The number typed in for this person for a KPI of the company's own, as it was typed in. A dash when none was typed in
  * (for anyone, or only for this person: the hidden text says which). */
 function OwnCell({ group, first, loading, values, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; values: Map<string, number> | undefined; unread: boolean; employeeId: string; notStarted: boolean }) {
-  const cell = `px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`;
+  const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
   const n = values?.get(employeeId);
   if (loading || notStarted || unread || n == null) {
     const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : values && values.size > 0 ? 'Not typed in for this person' : group.emptyNote;
@@ -360,7 +360,7 @@ function OwnCell({ group, first, loading, values, unread, employeeId, notStarted
 
 function EmptyCell({ group, first }: { group: KpiGroup; first: boolean }) {
   return (
-    <td className={`px-3 py-3.5 ${first ? 'border-l border-slate-100' : ''}`}>
+    <td className={`px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`}>
       <div className="text-[15px] font-bold text-slate-600">
         <span aria-hidden="true">–</span>
         <span className="sr-only">{group.emptyNote}</span>
