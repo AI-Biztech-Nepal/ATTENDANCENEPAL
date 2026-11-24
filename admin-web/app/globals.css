@@ -54,6 +54,16 @@ select.text-xs:not([multiple]):not([size]) {
   padding-right: 1.6rem;
 }
 
+/* The phone's "More" sheet (components/EmployeeShell.tsx) rises a few pixels as it fades in. */
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+.sheet-in { animation: sheet-in 160ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .sheet-in { animation: none; }
+}
+
 /* Today's attendance bar (app/(admin)/page.tsx): each coloured segment grows in from the left once
    when the numbers arrive, and re-balances smoothly when a live punch changes them. */
 @keyframes att-seg-in {

@@ -14,18 +14,16 @@ import EmployeeBell from './EmployeeBell';
 import { useMyNotifications } from '@/lib/employeeNotifications';
 import BodyFontClass from './BodyFontClass';
 
-// `label` is the full name (the computer's sidebar); `short` is what fits under an icon on a phone, where seven tabs share
-// the width, so every label stays on one line and the icons line up.
 const TABS = [
-  { href: '/checkin', label: 'Check In/Out', short: 'Check In', icon: CheckInIcon },
-  { href: '/my-calendar', label: 'Calendar', short: 'Calendar', icon: CalendarTabIcon },
-  { href: '/my-payroll', label: 'Payroll', short: 'Payroll', icon: PayrollTabIcon },
-  { href: '/my-tasks', label: 'My Tasks', short: 'Tasks', icon: TaskTabIcon },
-  { href: '/my-kpis', label: 'My KPIs', short: 'KPIs', icon: KpiTabIcon },
-  { href: '/my-profile', label: 'Profile', short: 'Profile', icon: ProfileTabIcon },
+  { href: '/checkin', label: 'Check In/Out', icon: CheckInIcon },
+  { href: '/my-calendar', label: 'Calendar', icon: CalendarTabIcon },
+  { href: '/my-payroll', label: 'Payroll', icon: PayrollTabIcon },
+  { href: '/my-tasks', label: 'My Tasks', icon: TaskTabIcon },
+  { href: '/my-kpis', label: 'My KPIs', icon: KpiTabIcon },
+  { href: '/my-profile', label: 'Profile', icon: ProfileTabIcon },
 ];
 // Feedback: what colleagues and customers said about this person, and giving feedback to colleagues. Everyone has it.
-const FEEDBACK_TAB = { href: '/my-feedback', label: 'Feedback', short: 'Feedback', icon: FeedbackTabIcon };
+const FEEDBACK_TAB = { href: '/my-feedback', label: 'Feedback', icon: FeedbackTabIcon };
 
 /**
  * The employee pages' frame, mounted ONCE by app/(employee)/layout.tsx and kept
@@ -192,29 +190,7 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Phone: the bottom tab bar */}
-      <nav
-        aria-label="Employee pages"
-        className="fixed inset-x-0 bottom-0 z-20 flex border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] pt-1.5 lg:hidden"
-      >
-        {tabs.map(tab => {
-          const active = pathname === tab.href;
-          const Icon = tab.icon;
-          return (
-            <Link
-              key={tab.href}
-              href={tab.href}
-              aria-current={active ? 'page' : undefined}
-              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-[3px] py-1 text-[10.5px] leading-none max-[340px]:text-[9.5px] ${
-                active ? 'font-extrabold text-brand' : 'font-semibold text-slate-500'
-              }`}
-            >
-              <Icon className="h-[22px] w-[22px]" />
-              <span className="whitespace-nowrap">{tab.short}</span>
-              <span className={`h-[5px] w-[5px] rounded-full ${active ? 'bg-brand' : 'bg-transparent'}`} />
-            </Link>
-          );
-        })}
-      </nav>
+      <PhoneTabBar pathname={pathname} tabs={tabs} />
     </div>
   );
 }
@@ -419,6 +395,107 @@ function AccountMenu({
   );
 }
 
+// The pages kept off the phone's bottom bar, so it holds five slots and not seven: the daily and weekly pages stay on it,
+// and the ones opened now and then sit behind "More". The computer's sidebar still lists every page.
+const PHONE_MORE = ['/my-payroll', '/my-feedback', '/my-profile'];
+// One slot of the phone bar: icon, name and the dot under the open page, all on one line and level with its neighbours.
+const SLOT = 'flex min-w-0 flex-1 flex-col items-center justify-center gap-[3px] py-1 text-[11px] leading-none';
+
+/**
+ * The phone's bottom bar: Calendar and Tasks on the left, Check In in the middle as a raised round button (the page
+ * used most), My KPIs and More on the right. More opens a small sheet above the bar with the rest of the pages; it
+ * closes when a page is chosen, when anywhere else is tapped, and on Escape. More shows as the open tab while the
+ * person is on one of the pages inside it.
+ */
+function PhoneTabBar({ pathname, tabs }: { pathname: string; tabs: typeof TABS }) {
+  const [open, setOpen] = useState(false);
+  const pick = (href: string) => tabs.find(t => t.href === href)!;
+  const more = PHONE_MORE.map(pick);
+  const moreActive = more.some(t => t.href === pathname);
+  const home = pick('/checkin');
+  const homeActive = pathname === home.href;
+  const HomeIcon = home.icon;
+
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  const slot = (tab: (typeof TABS)[number]) => {
+    const active = pathname === tab.href;
+    const Icon = tab.icon;
+    return (
+      <Link key={tab.href} href={tab.href} aria-current={active ? 'page' : undefined} className={`${SLOT} ${active ? 'font-extrabold text-brand' : 'font-semibold text-slate-500'}`}>
+        <Icon className="h-[22px] w-[22px]" />
+        <span className="whitespace-nowrap">{tab.label}</span>
+        <span className={`h-[5px] w-[5px] rounded-full ${active ? 'bg-brand' : 'bg-transparent'}`} />
+      </Link>
+    );
+  };
+
+  return (
+    <>
+      {open && <button type="button" tabIndex={-1} aria-label="Close" onClick={() => setOpen(false)} className="fixed inset-0 z-10 cursor-default bg-slate-900/25 lg:hidden" />}
+      {open && (
+        <div
+          id="phone-more-sheet"
+          role="dialog"
+          aria-label="More pages"
+          className="sheet-in fixed inset-x-3 bottom-[calc(6rem+env(safe-area-inset-bottom))] z-30 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl lg:hidden"
+        >
+          {more.map(tab => {
+            const active = pathname === tab.href;
+            const Icon = tab.icon;
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                aria-current={active ? 'page' : undefined}
+                className={`flex min-h-[52px] items-center gap-3 rounded-xl px-3.5 text-[15px] ${active ? 'bg-brand/10 font-extrabold text-brand' : 'font-semibold text-slate-700 active:bg-slate-100'}`}
+              >
+                <Icon className="h-[22px] w-[22px]" />
+                <span className="flex-1">{tab.label}</span>
+                <ChevronRightIcon className="h-4 w-4 text-slate-400" />
+              </Link>
+            );
+          })}
+        </div>
+      )}
+      <nav aria-label="Employee pages" className="fixed inset-x-0 bottom-0 z-20 flex border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] pt-1.5 lg:hidden">
+        {slot(pick('/my-calendar'))}
+        {slot(pick('/my-tasks'))}
+        <Link href={home.href} aria-current={homeActive ? 'page' : undefined} className={`${SLOT} ${homeActive ? 'font-extrabold text-brand' : 'font-semibold text-slate-600'}`}>
+          <span className="-mt-[34px] flex h-14 w-14 items-center justify-center rounded-full bg-brand text-white shadow-lg ring-4 ring-white">
+            <HomeIcon className="h-7 w-7" />
+          </span>
+          <span className="whitespace-nowrap">{home.label}</span>
+          <span className={`h-[5px] w-[5px] rounded-full ${homeActive ? 'bg-brand' : 'bg-transparent'}`} />
+        </Link>
+        {slot(pick('/my-kpis'))}
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-controls="phone-more-sheet"
+          onClick={() => setOpen(o => !o)}
+          className={`${SLOT} ${open || moreActive ? 'font-extrabold text-brand' : 'font-semibold text-slate-500'}`}
+        >
+          <MoreTabIcon className="h-[22px] w-[22px]" />
+          <span>More</span>
+          <span className={`h-[5px] w-[5px] rounded-full ${moreActive ? 'bg-brand' : 'bg-transparent'}`} />
+        </button>
+      </nav>
+    </>
+  );
+}
+
 type IconProps = { className?: string };
 function CheckInIcon({ className }: IconProps) {
   return (
@@ -473,6 +550,15 @@ function ProfileTabIcon({ className }: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className} aria-hidden="true">
       <circle cx="12" cy="8" r="3.5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 20c1.2-3.5 4-5.5 7.5-5.5s6.3 2 7.5 5.5" />
+    </svg>
+  );
+}
+function MoreTabIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <circle cx="5.5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="18.5" cy="12" r="2" />
     </svg>
   );
 }
