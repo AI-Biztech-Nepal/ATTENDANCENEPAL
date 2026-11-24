@@ -14,16 +14,18 @@ import EmployeeBell from './EmployeeBell';
 import { useMyNotifications } from '@/lib/employeeNotifications';
 import BodyFontClass from './BodyFontClass';
 
+// `label` is the full name (the computer's sidebar); `short` is what fits under an icon on a phone, where seven tabs share
+// the width, so every label stays on one line and the icons line up.
 const TABS = [
-  { href: '/checkin', label: 'Check In/Out', icon: CheckInIcon },
-  { href: '/my-calendar', label: 'Calendar', icon: CalendarTabIcon },
-  { href: '/my-payroll', label: 'Payroll', icon: PayrollTabIcon },
-  { href: '/my-tasks', label: 'My Tasks', icon: TaskTabIcon },
-  { href: '/my-kpis', label: 'My KPIs', icon: KpiTabIcon },
-  { href: '/my-profile', label: 'Profile', icon: ProfileTabIcon },
+  { href: '/checkin', label: 'Check In/Out', short: 'Check In', icon: CheckInIcon },
+  { href: '/my-calendar', label: 'Calendar', short: 'Calendar', icon: CalendarTabIcon },
+  { href: '/my-payroll', label: 'Payroll', short: 'Payroll', icon: PayrollTabIcon },
+  { href: '/my-tasks', label: 'My Tasks', short: 'Tasks', icon: TaskTabIcon },
+  { href: '/my-kpis', label: 'My KPIs', short: 'KPIs', icon: KpiTabIcon },
+  { href: '/my-profile', label: 'Profile', short: 'Profile', icon: ProfileTabIcon },
 ];
 // Feedback: what colleagues and customers said about this person, and giving feedback to colleagues. Everyone has it.
-const FEEDBACK_TAB = { href: '/my-feedback', label: 'Feedback', icon: FeedbackTabIcon };
+const FEEDBACK_TAB = { href: '/my-feedback', label: 'Feedback', short: 'Feedback', icon: FeedbackTabIcon };
 
 /**
  * The employee pages' frame, mounted ONCE by app/(employee)/layout.tsx and kept
@@ -202,12 +204,12 @@ function EmployeeShellInner({ children }: { children: React.ReactNode }) {
               key={tab.href}
               href={tab.href}
               aria-current={active ? 'page' : undefined}
-              className={`flex flex-1 flex-col items-center justify-center gap-[3px] py-1 text-[11px] ${
+              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-[3px] py-1 text-[10.5px] leading-none max-[340px]:text-[9.5px] ${
                 active ? 'font-extrabold text-brand' : 'font-semibold text-slate-500'
               }`}
             >
               <Icon className="h-[22px] w-[22px]" />
-              <span>{tab.label}</span>
+              <span className="whitespace-nowrap">{tab.short}</span>
               <span className={`h-[5px] w-[5px] rounded-full ${active ? 'bg-brand' : 'bg-transparent'}`} />
             </Link>
           );
