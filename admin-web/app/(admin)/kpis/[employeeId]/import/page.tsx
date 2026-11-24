@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useParams } from 'next/navigation';
-import { isKpiOn, kpiLabel } from '@/lib/kpiSettings';
+import { isKpiOn } from '@/lib/kpiSettings';
 import { publishKpiSettings, useKpiSettings } from '@/lib/useKpiSettings';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatAdDate } from '@/lib/calendar';
@@ -11,6 +10,7 @@ import { nepalTodayIso } from '@/lib/shift';
 import {
   CHUNK_SIZE,
   ROLE_LABEL,
+  SKIP_NOTE,
   analyse,
   buildRecords,
   chunk,
@@ -27,22 +27,23 @@ import {
   type Table,
 } from '@/lib/serviceImport';
 import { useConfirm } from '@/components/ConfirmDialog';
-
-type PastImport = { id: string; file_name: string; rows_read: number; rows_imported: number; first_date: string | null; last_date: string | null; created_at: string };
+import Sheet, { type RowTone, type SheetColumn } from '@/components/kpi/Sheet';
+import ImportSheetDialog, { type PastImport } from '@/components/kpi/ImportSheetDialog';
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ROLES: ColumnRole[] = ['employee', 'date', 'service', 'minutes', 'customer', 'status', 'ignore'];
-const SELECT = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-semibold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
 const CARD = 'rounded-xl border border-slate-200 bg-white shadow-sm';
+const ROLE_SELECT = 'h-10 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
+const OPTION_SELECT = 'h-10 rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-semibold text-ink';
 
-// Service import (for the whole company: the same on every person's page): the booking system's file (a CSV) is read here in the browser. The admin says what each column is, names
-// the file does not match to an employee are matched by hand, and the rows are saved. Customer names, phone numbers
-// and IDs are never kept: only a scrambled code, enough to tell that two services were for the same customer. Rows
-// that were already imported (an export that overlaps an earlier one) are left out, and a whole import can be removed.
+// Service import (for the whole company: the same on every person's page): the booking system's file (a CSV) is read here in the browser and
+// shown as a sheet, like Excel. The admin says what each column is (in the box at the top of the column), names the file does not match to an
+// employee are matched by hand, and the rows are saved. Customer names, phone numbers and IDs are never kept: only a scrambled code, enough to
+// tell that two services were for the same customer. Rows that were already imported (an export that overlaps an earlier one) are left out, and
+// a whole import can be removed. An earlier import opens as a sheet in a pop-up.
 export default function ImportPage() {
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
-  const { employeeId } = useParams<{ employeeId: string }>();
   // Which KPIs this company uses, what it calls them and its people (KPIs > Settings).
   const { settings, words } = useKpiSettings();
   const today = useMemo(nepalTodayIso, []);
@@ -52,6 +53,7 @@ export default function ImportPage() {
   const [people, setPeople] = useState<(EmployeeRef & { status: string })[]>([]);
   const [past, setPast] = useState<PastImport[] | null>(null);
   const [pastError, setPastError] = useState('');
+  const [opened, setOpened] = useState<PastImport | null>(null);
 
   const [file, setFile] = useState<{ name: string; table: Table } | null>(null);
   const [readError, setReadError] = useState('');
@@ -229,19 +231,25 @@ export default function ImportPage() {
     loadPast();
   }
 
-  async function removeImport(p: PastImport) {
+  /** Asks first, then removes an earlier import and every service it added. */
+  async function removeImport(p: PastImport): Promise<{ removed: boolean; error: string }> {
     const ok = await confirm(
       `Remove the import of ${p.file_name}? The ${p.rows_imported === 1 ? 'service' : `${p.rows_imported} services`} it added will no longer count. The file itself is not touched. This cannot be undone.`,
       { title: 'Remove import', confirmLabel: 'Remove import', tone: 'danger' }
     );
-    if (!ok) return;
+    if (!ok) return { removed: false, error: '' };
     const res = await supabase.from('service_imports').delete().eq('id', p.id).select('id');
-    if (res.error || !((res.data as unknown[] | null) ?? []).length) setPastError(`Could not remove it: ${res.error?.message ?? 'it was not found'}`);
-    else {
+    let result: { removed: boolean; error: string };
+    if (res.error || !((res.data as unknown[] | null) ?? []).length) {
+      result = { removed: false, error: `Could not remove it: ${res.error?.message ?? 'it was not found'}` };
+      setPastError(result.error);
+    } else {
+      result = { removed: true, error: '' };
       setPastError('');
       setDone('');
     }
     loadPast();
+    return result;
   }
 
   const c = analysis?.counts;
@@ -260,48 +268,64 @@ export default function ImportPage() {
   const dateCol = roles.indexOf('date');
   const dateInfo = useMemo(() => (file && dateCol >= 0 ? detectDateOrder(file.table.rows.map(r => r[dateCol])) : null), [file, dateCol]);
   const slashDates = useMemo(() => !!file && dateCol >= 0 && file.table.rows.some(r => /^\d{1,2}[-/. ]\d{1,2}[-/. ]\d{2,4}/.test(r[dateCol])), [file, dateCol]);
-  const dayText = (d: string) => formatAdDate(d, system);
-  const fills = (['services', 'rebooking', 'utilisation'] as const).filter(id => isKpiOn(id, settings));
-  const stepNo = !file ? 1 : missing.length > 0 || (c?.import ?? 0) === 0 ? 2 : 3;
+  const dayText = useCallback((d: string) => formatAdDate(d, system), [system]);
+  const heading = useCallback((role: ColumnRole) => words.t(ROLE_LABEL[role]), [words]);
+  const closeSheet = useCallback(() => setOpened(null), []);
 
-  const steps = ['Upload the file', 'Match the columns', 'Check and import'];
+  // How wide each column of the sheet is: its longest text in the first rows, but wide enough for the "Use it for" box above it.
+  const widths = useMemo(
+    () =>
+      file
+        ? file.table.headers.map((h, i) => {
+            let longest = h.length;
+            for (let r = 0; r < Math.min(file.table.rows.length, 200); r++) longest = Math.max(longest, file.table.rows[r][i].length);
+            return Math.min(300, Math.max(184, longest * 8 + 28));
+          })
+        : [],
+    [file]
+  );
+  const sheetColumns: SheetColumn[] = file
+    ? file.table.headers.map((h, i) => ({
+        header: h,
+        width: widths[i],
+        muted: (roles[i] ?? 'ignore') === 'ignore',
+        top: (
+          <select aria-label={`Use ${h} for`} value={roles[i] ?? 'ignore'} onChange={e => changeRole(i, e.target.value as ColumnRole)} className={ROLE_SELECT}>
+            {ROLES.map(r => (
+              <option key={r} value={r}>
+                {heading(r)}
+              </option>
+            ))}
+          </select>
+        ),
+      }))
+    : [];
+  const rowTone = (i: number): RowTone => {
+    const why = analysis?.rowStatus[i];
+    return why ? (why === 'unmatched' ? 'alert' : 'skip') : null;
+  };
+  const rowNote = (i: number) => {
+    const why = analysis?.rowStatus[i];
+    return why ? SKIP_NOTE[why] : analysis && analysis.rowStatus.length > 0 ? 'Will be imported.' : undefined;
+  };
 
-  const checkRows: [string, number, boolean][] = c
+  const checkRows: [string, number, boolean, RowTone][] = c
     ? [
-        ['Rows read', c.read, true],
-        ['Will be imported', c.import, true],
-        ['Skipped, status not counted', c.notCounted, false],
-        ['Skipped, no employee named', c.noName, false],
-        ['Need a name matched', c.unmatched, false],
-        ['Left out by your choice', c.skippedByChoice, false],
-        ['Skipped, date not understood', c.badDate, false],
-        ['Skipped, time not understood', c.badTime, false],
-        ['Skipped, dated in the future', c.future, false],
+        ['Rows read', c.read, true, null],
+        ['Will be imported', c.import, true, null],
+        ['Skipped, status not counted', c.notCounted, false, 'skip'],
+        ['Skipped, no employee named', c.noName, false, 'skip'],
+        ['Need a name matched', c.unmatched, false, 'alert'],
+        ['Left out by your choice', c.skippedByChoice, false, 'skip'],
+        ['Skipped, date not understood', c.badDate, false, 'skip'],
+        ['Skipped, time not understood', c.badTime, false, 'skip'],
+        ['Skipped, dated in the future', c.future, false, 'skip'],
       ]
     : [];
+  const alertsShown = missing.length > 0 || personalWarning || !!error;
 
   return (
     <div className="flex flex-col gap-5">
-      <ol aria-label="Steps" className="m-0 flex list-none flex-wrap gap-x-7 gap-y-2.5 p-0 text-[13.5px]">
-        {steps.map((s, i) => {
-          const n = i + 1;
-          const isDone = n < stepNo;
-          const current = n === stepNo;
-          return (
-            <li key={s} aria-current={current ? 'step' : undefined} className={`flex items-center gap-2 ${current ? 'font-extrabold text-ink' : 'text-slate-600'}`}>
-              <span
-                className={`flex h-[26px] w-[26px] items-center justify-center rounded-full text-xs ${
-                  isDone ? 'bg-teal-700 text-white' : current ? 'border-2 border-teal-700 text-teal-700' : 'border-2 border-slate-300 text-slate-600'
-                }`}
-              >
-                {isDone ? '✓' : n}
-              </span>
-              {s}
-            </li>
-          );
-        })}
-      </ol>
-
       {done && (
         <p role="status" className="m-0 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-800">
           {done}
@@ -347,71 +371,91 @@ export default function ImportPage() {
         </section>
       ) : (
         <>
-          <div className="flex flex-wrap items-start gap-5">
-            <section aria-labelledby="match-heading" className={`${CARD} min-w-0 flex-[3_1_640px] px-7 pb-5 pt-6`}>
-              <div className="flex flex-wrap items-center justify-between gap-2.5">
-                <h2 id="match-heading" className="m-0 text-lg font-extrabold text-ink">
-                  Match the columns
+          <section aria-labelledby="sheet-heading" className={`${CARD} overflow-hidden`}>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <svg viewBox="0 0 24 24" width={22} height={22} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" className="shrink-0 text-teal-700" aria-hidden="true">
+                  <rect x="3.5" y="3.5" width="17" height="17" rx="2" />
+                  <path d="M3.5 9.5h17M3.5 15h17M9.5 3.5v17" />
+                </svg>
+                <h2 id="sheet-heading" className="m-0 min-w-0 truncate text-[15px] font-extrabold text-ink">
+                  {file.name}
                 </h2>
-                <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-[12.5px] font-bold text-slate-700">
-                  {file.name} · {file.table.rows.length} rows
-                </span>
+                <span className="shrink-0 text-[13px] font-semibold text-slate-600">{file.table.rows.length} rows</span>
               </div>
-              <p className="m-0 mb-4 mt-1.5 text-[13px] leading-normal text-slate-600">Tell us what each column in your file is. We guessed most of them.</p>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button type="button" onClick={reset} disabled={busy} className="min-h-[44px] rounded-[10px] border border-slate-300 bg-white px-5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={runImport}
+                  disabled={busy || !companyId || missing.length > 0 || (c?.import ?? 0) === 0}
+                  className="min-h-[44px] rounded-[10px] bg-teal-700 px-6 text-sm font-extrabold text-white hover:bg-teal-800 disabled:opacity-50"
+                >
+                  {busy ? 'Importing…' : `Import ${c?.import ?? 0} ${c?.import === 1 ? 'row' : 'rows'}`}
+                </button>
+              </div>
+            </div>
 
-              <div aria-hidden="true" className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_250px] gap-x-4 border-b border-slate-200 pb-2.5 text-xs font-extrabold uppercase tracking-wider text-slate-600 sm:grid">
-                <span>Column in your file</span>
-                <span>Example</span>
-                <span>Use it for</span>
-              </div>
-              <ul aria-label="Columns in your file" className="m-0 list-none p-0">
-                {file.table.headers.map((h, i) => (
-                  <li key={i} className="grid grid-cols-1 gap-y-1.5 border-b border-slate-100 py-3 last:border-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_250px] sm:items-center sm:gap-x-4 sm:gap-y-0 sm:py-2">
-                    <span className="truncate text-sm font-bold text-ink">{h}</span>
-                    <span className="truncate text-[13px] text-slate-600">
-                      <span className="sm:hidden">Example: </span>
-                      {file.table.rows.find(r => r[i])?.[i] ?? ''}
-                    </span>
-                    <select aria-label={`Use ${h} for`} value={roles[i] ?? 'ignore'} onChange={e => changeRole(i, e.target.value as ColumnRole)} className={SELECT}>
-                      {ROLES.map(r => (
-                        <option key={r} value={r}>
-                          {words.t(ROLE_LABEL[r])}
-                        </option>
-                      ))}
+            {(roles.includes('minutes') || slashDates || statusValues.length > 0 || isKpiOn('rebooking', settings)) && (
+              <div className="flex flex-wrap items-center gap-x-7 gap-y-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[13px] text-slate-700">
+                {roles.includes('minutes') && (
+                  <div className="flex items-center gap-2.5">
+                    <label htmlFor="import-unit" className="font-bold">
+                      {words.t('The time with the customer is in')}
+                    </label>
+                    <select id="import-unit" value={unit} onChange={e => setUnit(e.target.value as 'minutes' | 'hours')} className={OPTION_SELECT}>
+                      <option value="minutes">minutes</option>
+                      <option value="hours">hours</option>
                     </select>
-                  </li>
-                ))}
-              </ul>
-
-              {missing.length > 0 && (
-                <p role="alert" className="m-0 mt-3 text-sm font-semibold text-critical-text">
-                  Choose which column is the {missing.map(m => ROLE_LABEL[m].toLowerCase()).join(' and the ')}.
-                </p>
-              )}
-
-              {roles.includes('minutes') && (
-                <div className="mt-4 flex flex-wrap items-center gap-2.5 text-[13px] text-slate-700">
-                  <label htmlFor="import-unit" className="font-bold">{words.t('The time with the customer is in')}</label>
-                  <select id="import-unit" value={unit} onChange={e => setUnit(e.target.value as 'minutes' | 'hours')} className="h-10 rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-semibold text-ink">
-                    <option value="minutes">minutes</option>
-                    <option value="hours">hours</option>
-                  </select>
-                </div>
-              )}
-              {slashDates && (
-                <div className="mt-3 flex flex-wrap items-center gap-2.5 text-[13px] text-slate-700">
-                  <label htmlFor="import-date-order" className="font-bold">Dates are written</label>
-                  <select id="import-date-order" value={dateOrder} onChange={e => setDateOrder(e.target.value as DateOrder)} className="h-10 rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-semibold text-ink">
-                    <option value="dmy">day / month / year</option>
-                    <option value="mdy">month / day / year</option>
-                  </select>
-                  {dateInfo?.ambiguous && <span className="text-xs font-semibold text-amber-800">Check this: your dates could be read either way.</span>}
-                </div>
-              )}
-              {statusValues.length > 0 && (
-                <fieldset className="m-0 mt-4 border-0 p-0">
-                  <legend className="mb-1.5 p-0 text-[13px] font-bold text-slate-700">Count these statuses as a service performed</legend>
-                  <div className="flex flex-wrap gap-x-5 gap-y-1">
+                  </div>
+                )}
+                {slashDates && (
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <label htmlFor="import-date-order" className="font-bold">
+                      Dates are written
+                    </label>
+                    <select id="import-date-order" value={dateOrder} onChange={e => setDateOrder(e.target.value as DateOrder)} className={OPTION_SELECT}>
+                      <option value="dmy">day / month / year</option>
+                      <option value="mdy">month / day / year</option>
+                    </select>
+                    {dateInfo?.ambiguous && <span className="text-xs font-semibold text-amber-800">Check this: your dates could be read either way.</span>}
+                  </div>
+                )}
+                {isKpiOn('rebooking', settings) && (
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <label htmlFor="rb-days" className="font-bold">
+                      Counts as back if they return within
+                    </label>
+                    <input
+                      id="rb-days"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={365}
+                      value={windowDays}
+                      onChange={e => {
+                        setWindowDays(e.target.value);
+                        setWindowNote('');
+                      }}
+                      onBlur={saveWindow}
+                      className="h-10 w-[72px] rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-bold text-ink"
+                    />
+                    <span>days</span>
+                    {windowNote && (
+                      <span role={windowNote === 'Saved.' ? 'status' : 'alert'} className={`text-xs font-semibold ${windowNote === 'Saved.' ? 'text-emerald-800' : 'text-critical-text'}`}>
+                        {windowNote}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {statusValues.length > 0 && (
+                  <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1 border-0 p-0">
+                    <legend className="sr-only">Count these statuses as a service performed</legend>
+                    <span aria-hidden="true" className="font-bold">
+                      Count as a service
+                    </span>
                     {statusValues.map(v => (
                       <label key={v.value} className="flex min-h-[36px] cursor-pointer items-center gap-2 text-[13.5px] text-ink">
                         <input
@@ -430,136 +474,77 @@ export default function ImportPage() {
                         {v.value || '(blank)'} <span className="text-slate-600">({v.rows})</span>
                       </label>
                     ))}
-                  </div>
-                </fieldset>
-              )}
-              {personalWarning && (
-                <p role="alert" className="m-0 mt-4 rounded-[10px] border border-amber-200 bg-amber-50 px-3.5 py-3 text-[13px] font-semibold leading-normal text-amber-900">
-                  {words.t('The column used for the customer code looks like names, phone numbers or email addresses. Choose a customer ID column instead, or set it to "Do not import". Codes are scrambled before they are saved, but it is better not to send them at all.')}
-                </p>
-              )}
-              <p className="m-0 mt-4 rounded-[10px] bg-slate-100 px-3.5 py-3 text-[13px] leading-normal text-slate-700">
-                {words.t('Customer names and phone numbers are never imported. A customer is only a code, used to tell who came back.')}
-              </p>
-            </section>
+                  </fieldset>
+                )}
+              </div>
+            )}
 
-            <div className="flex min-w-0 flex-[2_1_380px] flex-col gap-5">
-              <section aria-labelledby="fills-heading" className={`${CARD} px-6 pb-2 pt-5`}>
-                <h2 id="fills-heading" className="m-0 mb-1.5 text-base font-extrabold text-ink">What this fills in</h2>
-                {fills.length === 0 && (
-                  <p className="m-0 border-t border-slate-200 py-3.5 text-[13px] leading-normal text-slate-600">
-                    None of the KPIs this file fills in are turned on for this company.
+            {alertsShown && (
+              <div className="flex flex-col gap-1.5 border-b border-slate-200 px-4 py-3">
+                {missing.length > 0 && (
+                  <p role="alert" className="m-0 text-sm font-semibold text-critical-text">
+                    Choose which column is the {missing.map(m => ROLE_LABEL[m].toLowerCase()).join(' and the ')}.
                   </p>
                 )}
-                {isKpiOn('services', settings) && (
-                  <div className="border-t border-slate-200 py-3.5">
-                    <div className="text-sm font-bold text-ink">{kpiLabel('services', settings)}</div>
-                    <div className="mt-0.5 text-[13px] leading-normal text-slate-600">Completed services per employee, per month.</div>
-                  </div>
+                {personalWarning && (
+                  <p role="alert" className="m-0 rounded-[10px] border border-amber-200 bg-amber-50 px-3.5 py-3 text-[13px] font-semibold leading-normal text-amber-900">
+                    {words.t('The column used for the customer code looks like names, phone numbers or email addresses. Choose a customer ID column instead, or set it to "Do not import". Codes are scrambled before they are saved, but it is better not to send them at all.')}
+                  </p>
                 )}
-                {isKpiOn('rebooking', settings) && (
-                  <div className="border-t border-slate-200 py-3.5">
-                    <div className="text-sm font-bold text-ink">{kpiLabel('rebooking', settings)}</div>
-                    <div className="mt-0.5 text-[13px] leading-normal text-slate-600">{words.t('Customers who came back, out of the customers served that month.')}</div>
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2.5 text-[13px] text-slate-700">
-                      <label htmlFor="rb-days">Counts as back if they return within</label>
-                      <input
-                        id="rb-days"
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        max={365}
-                        value={windowDays}
-                        onChange={e => {
-                          setWindowDays(e.target.value);
-                          setWindowNote('');
-                        }}
-                        onBlur={saveWindow}
-                        className="h-10 w-[72px] rounded-[10px] border border-slate-300 px-2.5 text-sm font-bold text-ink"
-                      />
-                      days
-                    </div>
-                    {windowNote && (
-                      <p role={windowNote === 'Saved.' ? 'status' : 'alert'} className={`m-0 mt-1.5 text-xs font-semibold ${windowNote === 'Saved.' ? 'text-emerald-800' : 'text-critical-text'}`}>
-                        {windowNote}
-                      </p>
-                    )}
-                  </div>
+                {error && (
+                  <p role="alert" className="m-0 text-sm font-semibold text-critical-text">
+                    {error}
+                  </p>
                 )}
-                {isKpiOn('utilisation', settings) && (
-                  <div className="border-t border-slate-200 py-3.5">
-                    <div className="text-sm font-bold text-ink">{kpiLabel('utilisation', settings)}</div>
-                    <div className="mt-0.5 text-[13px] leading-normal text-slate-600">
-                      {words.t(`Time with customers, out of a ${settings.hoursPerDay}-hour working day, averaged over the days worked.`)}
-                    </div>
-                  </div>
-                )}
-              </section>
+              </div>
+            )}
 
-              <section aria-labelledby="check-heading" className={`${CARD} px-6 pb-5 pt-5`}>
-                <h2 id="check-heading" className="m-0 mb-2.5 text-base font-extrabold text-ink">Check before importing</h2>
-                <ul className="m-0 list-none p-0 text-[13.5px] leading-normal text-slate-700">
-                  {checkRows
-                    .filter(([, n, always]) => always || n > 0)
-                    .map(([label, n], i) => (
-                      <li key={label} className={`flex justify-between gap-3 py-1.5 ${i > 0 ? 'border-t border-slate-100' : ''}`}>
-                        <span>{label}</span>
-                        <b className="tabular-nums text-ink">{n}</b>
-                      </li>
-                    ))}
-                </ul>
-                {analysis && nameList.length > 0 && (
-                  <div className={`mt-3 rounded-[10px] border px-3.5 py-3 ${analysis.counts.unmatched > 0 ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
-                    <div className={`text-[13px] font-extrabold ${analysis.counts.unmatched > 0 ? 'text-amber-900' : 'text-slate-700'}`}>
-                      {analysis.counts.unmatched > 0
-                        ? `${analysis.counts.unmatched} ${analysis.counts.unmatched === 1 ? 'row has' : 'rows have'} a name we do not know`
-                        : 'Names you matched by hand'}
-                    </div>
-                    {nameList.slice(0, 20).map(name => (
-                      <div key={name} className="mt-2 flex items-center gap-2.5 text-[13px] text-slate-700">
-                        <span className="min-w-[74px] max-w-[40%] truncate font-bold">“{name}”</span>
-                        <select
-                          aria-label={`Match ${name} to`}
-                          value={nameMap[name] ?? ''}
-                          onChange={e => setNameMap(m => ({ ...m, [name]: e.target.value }))}
-                          className="h-10 min-w-0 flex-1 rounded-[10px] border border-slate-300 bg-white px-2.5 text-[13px] font-semibold text-ink"
-                        >
-                          <option value="">Choose an employee…</option>
-                          <option value="skip">Skip these rows</option>
-                          {people.map(p => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                              {p.status !== 'active' ? ' (left)' : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                    {nameList.length > 20 && <div className="mt-2 text-xs text-amber-900">…and {nameList.length - 20} more names. Rows with a name left unmatched are skipped.</div>}
-                  </div>
-                )}
-              </section>
-            </div>
-          </div>
+            <Sheet key={file.name} label={`The rows of ${file.name}`} columns={sheetColumns} rows={file.table.rows} tone={rowTone} note={rowNote} />
 
-          {error && (
-            <p role="alert" className="m-0 text-sm font-semibold text-critical-text">
-              {error}
-            </p>
+            <ul aria-label="Import check" className="m-0 flex list-none flex-wrap items-center gap-x-6 gap-y-1 border-t border-slate-300 bg-slate-100 px-4 py-2 text-[12.5px] text-slate-700">
+              {checkRows
+                .filter(([, n, always]) => always || n > 0)
+                .map(([label, n, always, tone]) => (
+                  <li key={label} className="flex items-center gap-1.5">
+                    {!always && <span aria-hidden="true" className={`h-3 w-3 rounded-[3px] border ${tone === 'alert' ? 'border-rose-300 bg-rose-100' : 'border-amber-300 bg-amber-100'}`} />}
+                    <span>{label}</span> <b className="tabular-nums text-ink">{n}</b>
+                  </li>
+                ))}
+            </ul>
+          </section>
+
+          {analysis && nameList.length > 0 && (
+            <section aria-labelledby="names-heading" className={`rounded-xl border px-5 py-4 ${analysis.counts.unmatched > 0 ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+              <h2 id="names-heading" className={`m-0 text-[14px] font-extrabold ${analysis.counts.unmatched > 0 ? 'text-amber-900' : 'text-slate-700'}`}>
+                {analysis.counts.unmatched > 0
+                  ? `${analysis.counts.unmatched} ${analysis.counts.unmatched === 1 ? 'row has' : 'rows have'} a name we do not know`
+                  : 'Names you matched by hand'}
+              </h2>
+              <div className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2.5 md:grid-cols-2 xl:grid-cols-3">
+                {nameList.slice(0, 20).map(name => (
+                  <div key={name} className="flex items-center gap-2.5 text-[13px] text-slate-700">
+                    <span className="min-w-[74px] max-w-[40%] truncate font-bold">“{name}”</span>
+                    <select
+                      aria-label={`Match ${name} to`}
+                      value={nameMap[name] ?? ''}
+                      onChange={e => setNameMap(m => ({ ...m, [name]: e.target.value }))}
+                      className="h-10 min-w-0 flex-1 rounded-[10px] border border-slate-300 bg-white px-2.5 text-[13px] font-semibold text-ink"
+                    >
+                      <option value="">Choose an employee…</option>
+                      <option value="skip">Skip these rows</option>
+                      {people.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {p.status !== 'active' ? ' (left)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              {nameList.length > 20 && <div className="mt-2 text-xs text-amber-900">…and {nameList.length - 20} more names. Rows with a name left unmatched are skipped.</div>}
+            </section>
           )}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <button type="button" onClick={reset} disabled={busy} className="min-h-[44px] rounded-[10px] border border-slate-300 bg-white px-5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={runImport}
-              disabled={busy || !companyId || missing.length > 0 || (c?.import ?? 0) === 0}
-              className="min-h-[44px] rounded-[10px] bg-teal-700 px-6 text-sm font-extrabold text-white hover:bg-teal-800 disabled:opacity-50"
-            >
-              {busy ? 'Importing…' : `Import ${c?.import ?? 0} ${c?.import === 1 ? 'row' : 'rows'}`}
-            </button>
-          </div>
         </>
       )}
 
@@ -587,11 +572,15 @@ export default function ImportPage() {
             <tbody>
               {past === null ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-600">Loading…</td>
+                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-600">
+                    Loading…
+                  </td>
                 </tr>
               ) : past.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-600">Nothing has been imported yet.</td>
+                  <td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-600">
+                    Nothing has been imported yet.
+                  </td>
                 </tr>
               ) : (
                 past.map(p => (
@@ -604,7 +593,10 @@ export default function ImportPage() {
                       {p.rows_imported} of {p.rows_read}
                     </td>
                     <td className="px-3 py-[13px] text-[13px] text-slate-700">{dayText(p.created_at.slice(0, 10))}</td>
-                    <td className="px-6 py-[13px] text-right">
+                    <td className="whitespace-nowrap px-6 py-[13px] text-right">
+                      <button type="button" onClick={() => setOpened(p)} aria-label={`Open the import of ${p.file_name}`} className="inline-flex min-h-[40px] items-center px-2 text-[12.5px] font-bold text-accent hover:underline">
+                        Open
+                      </button>
                       <button type="button" onClick={() => removeImport(p)} aria-label={`Remove the import of ${p.file_name}`} className="inline-flex min-h-[40px] items-center px-2 text-[12.5px] font-bold text-critical-text hover:underline">
                         Remove
                       </button>
@@ -616,6 +608,22 @@ export default function ImportPage() {
           </table>
         </div>
       </section>
+
+      {opened && (
+        <ImportSheetDialog
+          key={opened.id}
+          item={opened}
+          people={people}
+          dayText={dayText}
+          heading={heading}
+          onClose={closeSheet}
+          onRemove={async () => {
+            const r = await removeImport(opened);
+            if (r.removed) setOpened(null);
+            return r;
+          }}
+        />
+      )}
     </div>
   );
 }

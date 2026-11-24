@@ -264,10 +264,27 @@ export type Mapping = {
 
 export type ImportRow = { employeeId: string; date: string; service: string | null; minutes: number | null; customer: string | null };
 
+/** Why a row of the file is left out. */
+export type SkipReason = 'notCounted' | 'noName' | 'skippedByChoice' | 'unmatched' | 'badDate' | 'badTime' | 'future';
+
+/** One sentence per reason, for the person looking at the row. */
+export const SKIP_NOTE: Record<SkipReason, string> = {
+  notCounted: 'Left out: this status is not counted.',
+  noName: 'Left out: no employee is named on this row.',
+  unmatched: 'Left out until this name is matched to an employee.',
+  skippedByChoice: 'Left out: you chose to skip this name.',
+  badDate: 'Left out: the date is not understood.',
+  badTime: 'Left out: the time is not understood.',
+  future: 'Left out: dated in the future.',
+};
+
 export type Analysis = {
   /** The columns that are needed and not chosen. */
   missing: ColumnRole[];
   rows: ImportRow[];
+  /** One entry per row of the file, in the file's order: why it is left out, or null when it will be imported. Empty while a
+   * needed column is missing. */
+  rowStatus: (SkipReason | null)[];
   counts: {
     read: number;
     import: number;
@@ -294,7 +311,7 @@ export function analyse(table: Table, mapping: Mapping, people: EmployeeRef[], n
   const { roles } = mapping;
   const missing = REQUIRED_ROLES.filter(r => indexOfRole(roles, r) === -1);
   const c = { read: table.rows.length, import: 0, notCounted: 0, noName: 0, skippedByChoice: 0, unmatched: 0, badDate: 0, badTime: 0, future: 0 };
-  const result: Analysis = { missing, rows: [], counts: c, unmatchedNames: [], firstDate: null, lastDate: null };
+  const result: Analysis = { missing, rows: [], rowStatus: [], counts: c, unmatchedNames: [], firstDate: null, lastDate: null };
   if (missing.length > 0) return result;
 
   const iEmp = indexOfRole(roles, 'employee');
@@ -309,15 +326,18 @@ export function analyse(table: Table, mapping: Mapping, people: EmployeeRef[], n
   for (const row of table.rows) {
     if (iStat !== -1 && mapping.counted && !mapping.counted.has(row[iStat])) {
       c.notCounted += 1;
+      result.rowStatus.push('notCounted');
       continue;
     }
     const name = row[iEmp];
     if (!name) {
       c.noName += 1;
+      result.rowStatus.push('noName');
       continue;
     }
     if (nameMap[name] === 'skip') {
       c.skippedByChoice += 1;
+      result.rowStatus.push('skippedByChoice');
       continue;
     }
     let employeeId: string | null = nameMap[name] ?? null;
@@ -328,15 +348,18 @@ export function analyse(table: Table, mapping: Mapping, people: EmployeeRef[], n
     if (!employeeId) {
       c.unmatched += 1;
       unknown.set(name, (unknown.get(name) ?? 0) + 1);
+      result.rowStatus.push('unmatched');
       continue;
     }
     const date = parseDate(row[iDate], mapping.dateOrder);
     if (!date) {
       c.badDate += 1;
+      result.rowStatus.push('badDate');
       continue;
     }
     if (date > today) {
       c.future += 1;
+      result.rowStatus.push('future');
       continue;
     }
     let minutes: number | null = null;
@@ -344,6 +367,7 @@ export function analyse(table: Table, mapping: Mapping, people: EmployeeRef[], n
       const t = parseMinutes(row[iMin], mapping.unit);
       if (t.bad) {
         c.badTime += 1;
+        result.rowStatus.push('badTime');
         continue;
       }
       minutes = t.minutes;
@@ -351,6 +375,7 @@ export function analyse(table: Table, mapping: Mapping, people: EmployeeRef[], n
     const service = iSvc !== -1 ? row[iSvc].replace(/\s+/g, ' ').trim().slice(0, 120) || null : null;
     const customer = iCust !== -1 ? row[iCust] || null : null;
     result.rows.push({ employeeId, date, service, minutes, customer });
+    result.rowStatus.push(null);
     if (!result.firstDate || date < result.firstDate) result.firstDate = date;
     if (!result.lastDate || date > result.lastDate) result.lastDate = date;
   }
