@@ -37,22 +37,23 @@ export default function FeedbackEditDialog({ row, staff, today, onClose, onChang
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
-    const problem = validateFeedback(draft, today);
+    // A form typed in before guests were kept has none on file: it may stay without one, but a guest that is typed in must be complete.
+    const problem = validateFeedback(draft, today, { guestOptional: !row.guest });
     if (problem) return setError(words.t(problem));
     setBusy('save');
     setError('');
     // .select() so a row the security rules hide (or one already deleted) is noticed instead of "saving" nothing.
-    const { data, error: updateError } = await supabase.from('customer_feedback').update(feedbackRow(draft, !!row.visit_date)).eq('id', row.id).select('id');
+    const { data, error: updateError } = await supabase.from('customer_feedback').update(feedbackRow(draft)).eq('id', row.id).select('id');
     if (updateError) {
       setBusy(null);
-      return setError(needsGuestMigration(updateError.message) ? `Guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `Could not save: ${updateError.message}`);
+      return setError(`Could not save: ${updateError.message}`);
     }
     if (!data || data.length === 0) {
       setBusy(null);
       return setError('That form could not be changed. It may already have been deleted.');
     }
-    // The guest's name, phone and email are kept in their own table: saved, or removed when all three boxes were emptied.
-    const guestError = await saveGuest(draft, row.id, !row.guest);
+    // The guest's name, phone and email are kept in their own table.
+    const guestError = await saveGuest(draft, row.id);
     setBusy(null);
     if (guestError) return setError(needsGuestMigration(guestError) ? `The form was changed, but guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `The form was changed, but the guest's details were not: ${guestError}`);
     onChanged();

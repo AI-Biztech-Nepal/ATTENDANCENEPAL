@@ -11,7 +11,7 @@ import { weekdayName } from '@/lib/taskSchedule';
 import { otherCalendarSpan, parseMonthParam } from '@/lib/kpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useMonthInUrl } from '@/lib/useMonthInUrl';
-import { FEEDBACK_COLUMNS, FEEDBACK_COLUMNS_WITHOUT_VISIT, FEEDBACK_PAGE_SIZE, emptyDraft, feedbackRow, needsGuestMigration, rangeText, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
+import { FEEDBACK_COLUMNS, FEEDBACK_PAGE_SIZE, emptyDraft, feedbackRow, needsGuestMigration, rangeText, validateFeedback, type FeedbackDraft } from '@/lib/customerFeedback';
 import { MIGRATION } from '@/lib/kpiLoad';
 import { loadGuests, saveGuest } from '@/lib/guestDetails';
 import type { CustomerFeedback, Employee } from '@/lib/types';
@@ -80,21 +80,16 @@ function FeedbackSection() {
 
   useEffect(() => {
     let live = true;
-    const read = (columns: string) =>
-      supabase
+    (async () => {
+      const { data, count, error } = await supabase
         .from('customer_feedback')
-        .select(columns, { count: 'exact' })
+        .select(FEEDBACK_COLUMNS, { count: 'exact' })
         .eq('employee_id', employeeId)
         .gte('given_on', start)
         .lte('given_on', end)
         .order('given_on', { ascending: false })
         .order('created_at', { ascending: false })
         .range(page * FEEDBACK_PAGE_SIZE, page * FEEDBACK_PAGE_SIZE + FEEDBACK_PAGE_SIZE - 1);
-    (async () => {
-      let res = (await read(FEEDBACK_COLUMNS)) as { data: unknown; count: number | null; error: { message: string } | null };
-      // Before the guest-details migration is run there is no visit_date column: read the forms without it, so the page keeps working.
-      if (res.error && needsGuestMigration(res.error.message)) res = (await read(FEEDBACK_COLUMNS_WITHOUT_VISIT)) as typeof res;
-      const { data, count, error } = res;
       if (!live) return;
       if (error) {
         setListError(`Could not load the forms: ${error.message}`);
@@ -140,19 +135,26 @@ function FeedbackSection() {
     const { data: made, error } = await supabase.from('customer_feedback').insert(feedbackRow(draft)).select('id');
     if (error) {
       setSaving(false);
-      setFormError(needsGuestMigration(error.message) ? `Guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `Could not save: ${error.message}`);
+      setFormError(`Could not save: ${error.message}`);
       return;
     }
     // The guest's name, phone and email go to their own table, with the id of the form just made.
     const formId = (made as { id: string }[] | null)?.[0]?.id;
-    const guestError = formId ? await saveGuest(draft, formId, true) : '';
-    setSaving(false);
+    const guestError = formId ? await saveGuest(draft, formId) : 'the form could not be found again';
     if (guestError) {
-      setFormError(needsGuestMigration(guestError) ? `The form was saved, but guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `The form was saved, but the guest's details were not: ${guestError}. Open the form from the list and add them again.`);
-      setDraft(keep ? { ...blank(), date: draft.date } : blank());
-      setReloadKey(k => k + 1);
+      // A form always has its guest: take the form back out, and keep what was typed so nothing has to be typed twice.
+      const { error: undoError } = formId ? await supabase.from('customer_feedback').delete().eq('id', formId) : { error: null };
+      setSaving(false);
+      if (undoError || !formId) {
+        setFormError(`The form was saved, but the guest's details were not: ${guestError}. Open the form from the list and add them.`);
+        setDraft(keep ? { ...blank(), date: draft.date } : blank());
+        setReloadKey(k => k + 1);
+        return;
+      }
+      setFormError(needsGuestMigration(guestError) ? `Guest details are not set up in the database yet: run the migration ${MIGRATION.guests}.` : `Could not save the guest's details: ${guestError}`);
       return;
     }
+    setSaving(false);
     setNotice(`Saved for ${personName(draft.employeeId)} · ${dayText(draft.date)}.`);
     // Ready for the next paper form: the answers are cleared, and the date stays when asked to.
     setDraft(keep ? { ...blank(), date: draft.date } : blank());
@@ -299,10 +301,7 @@ function FeedbackSection() {
                   ) : (
                     rows.map(r => (
                       <tr key={r.id} className="border-b border-slate-100 last:border-0">
-                        <td className="whitespace-nowrap px-6 py-[13px] text-[13px] text-slate-700">
-                          {dayText(r.given_on)}
-                          {r.visit_date && <span className="mt-0.5 block text-xs text-slate-600">Visited {dayText(r.visit_date)}</span>}
-                        </td>
+                        <td className="whitespace-nowrap px-6 py-[13px] text-[13px] text-slate-700">{dayText(r.given_on)}</td>
                         <td className="max-w-[170px] px-3 py-[13px] text-[13px] text-slate-700">
                           {r.guest ? (
                             <>

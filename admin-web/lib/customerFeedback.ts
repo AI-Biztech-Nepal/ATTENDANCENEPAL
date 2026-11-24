@@ -11,23 +11,20 @@ export const GUEST_PHONE_MAX = 30;
 export const GUEST_EMAIL_MAX = 120;
 
 /** The columns the page reads from the form table (the guest's name, phone and email are read separately, from the table only admin
- * and HR can read: see lib/guestDetails.ts). `visit_date` is new: until the migration is run the page reads the columns without it. */
-export const FEEDBACK_COLUMNS = 'id, employee_id, given_on, visit_date, reference, rating, recommend, comment, created_at';
-export const FEEDBACK_COLUMNS_WITHOUT_VISIT = 'id, employee_id, given_on, reference, rating, recommend, comment, created_at';
+ * and HR can read: see lib/guestDetails.ts). */
+export const FEEDBACK_COLUMNS = 'id, employee_id, given_on, reference, rating, recommend, comment, created_at';
 
 /** Who the guest is, as kept apart from the form. */
 export type GuestDetails = { guest_name: string | null; guest_phone: string | null; guest_email: string | null };
 
-/** True when a database message is about the guest-details migration not having been run (the visit-date column or the table is missing). */
-export const needsGuestMigration = (message: string) => /visit_date|customer_feedback_guests/.test(message) && /does not exist|schema cache|could not find/i.test(message);
+/** True when a database message is about the guest-details migration not having been run (the guest table is missing). */
+export const needsGuestMigration = (message: string) => /customer_feedback_guests/.test(message) && /does not exist|schema cache|could not find/i.test(message);
 
 /** What is typed into the form, as text, exactly as typed. */
 export type FeedbackDraft = {
   employeeId: string;
-  /** AD date key, YYYY-MM-DD. */
+  /** The date of the visit, which is the date of the form. AD date key, YYYY-MM-DD. */
   date: string;
-  /** The day of the visit, AD date key, or '' when the form does not say. */
-  visitDate: string;
   guestName: string;
   guestPhone: string;
   guestEmail: string;
@@ -37,7 +34,7 @@ export type FeedbackDraft = {
   comment: string;
 };
 
-export const emptyDraft = (date: string): FeedbackDraft => ({ employeeId: '', date, visitDate: '', guestName: '', guestPhone: '', guestEmail: '', reference: '', rating: '', recommend: '', comment: '' });
+export const emptyDraft = (date: string): FeedbackDraft => ({ employeeId: '', date, guestName: '', guestPhone: '', guestEmail: '', reference: '', rating: '', recommend: '', comment: '' });
 
 /** A whole number written as digits only ("7"), or null for anything else ("", "7.5", "-1", "seven"). */
 function wholeNumber(text: string): number | null {
@@ -52,18 +49,23 @@ export const validPhone = (text: string) => text.length <= GUEST_PHONE_MAX && /^
 export const validEmail = (text: string) => text.length <= GUEST_EMAIL_MAX && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text);
 
 /** What is wrong with the form, in a sentence the person typing can act on, or null when it can be saved.
- * `today` is the Nepal date; a form cannot be dated after it. The database holds the same limits. */
-export function validateFeedback(d: FeedbackDraft, today: string): string | null {
+ * `today` is the Nepal date; a form cannot be dated after it. The guest's name and phone number are required and the email is not.
+ * `guestOptional` is for editing a form typed in before guests were kept (it has none on file): it may stay without one, but as soon
+ * as any of the three boxes is filled in the rules above apply. The database holds the same limits. */
+export function validateFeedback(d: FeedbackDraft, today: string, { guestOptional = false }: { guestOptional?: boolean } = {}): string | null {
   if (!d.employeeId) return 'Pick who served the customer.';
-  if (!d.date) return 'Pick the date on the form.';
-  if (d.date > today) return 'That date is in the future. Use the date written on the form.';
-  if (d.visitDate) {
-    if (d.visitDate > today) return 'The date of the visit is in the future.';
-    if (d.visitDate > d.date) return 'The visit cannot be after the date on the form.';
+  if (!d.date) return 'Pick the date of the visit.';
+  if (d.date > today) return 'That date is in the future. Use the date of the visit.';
+  const name = d.guestName.trim();
+  const phone = d.guestPhone.trim();
+  const email = d.guestEmail.trim();
+  if (!(guestOptional && !name && !phone && !email)) {
+    if (!name) return "Type the customer's name.";
+    if (name.length > GUEST_NAME_MAX) return `The customer's name is too long (${GUEST_NAME_MAX} characters at most).`;
+    if (!phone) return "Type the customer's phone number.";
+    if (!validPhone(phone)) return 'The phone number looks wrong. Use digits, spaces, + and -, with at least 5 digits.';
+    if (email !== '' && !validEmail(email)) return 'The email address looks wrong. It should look like name@example.com.';
   }
-  if (d.guestName.trim().length > GUEST_NAME_MAX) return `The customer's name is too long (${GUEST_NAME_MAX} characters at most).`;
-  if (d.guestPhone.trim() !== '' && !validPhone(d.guestPhone.trim())) return 'The phone number looks wrong. Use digits, spaces, + and -, with at least 5 digits.';
-  if (d.guestEmail.trim() !== '' && !validEmail(d.guestEmail.trim())) return 'The email address looks wrong. It should look like name@example.com.';
   if (d.rating.trim() !== '') {
     const n = wholeNumber(d.rating);
     if (n == null || n < 1 || n > 5) return 'The service rating must be a whole number from 1 to 5.';
@@ -80,14 +82,11 @@ export function validateFeedback(d: FeedbackDraft, today: string): string | null
   return null;
 }
 
-/** The row to send for a form that passed validateFeedback(): empty boxes become null. The visit date is only sent when there is
- * one (or `hadVisit`: the form had one, so emptying the box must clear it), so a form without it saves even on a database that
- * has not had the guest-details migration run yet. */
-export function feedbackRow(d: FeedbackDraft, hadVisit = false) {
+/** The row to send for a form that passed validateFeedback(): empty boxes become null. */
+export function feedbackRow(d: FeedbackDraft) {
   return {
     employee_id: d.employeeId,
     given_on: d.date,
-    ...(d.visitDate || hadVisit ? { visit_date: d.visitDate || null } : {}),
     reference: d.reference.trim() || null,
     rating: d.rating.trim() === '' ? null : Number(d.rating),
     recommend: d.recommend.trim() === '' ? null : Number(d.recommend),
@@ -108,7 +107,6 @@ export function draftFromRow(r: CustomerFeedback): FeedbackDraft {
   return {
     employeeId: r.employee_id,
     date: r.given_on,
-    visitDate: r.visit_date ?? '',
     guestName: r.guest?.guest_name ?? '',
     guestPhone: r.guest?.guest_phone ?? '',
     guestEmail: r.guest?.guest_email ?? '',

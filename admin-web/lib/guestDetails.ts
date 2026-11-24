@@ -16,16 +16,11 @@ export async function loadGuests(formIds: string[]): Promise<Map<string, GuestDe
   return out;
 }
 
-/** Keeps the guest details typed for a form: saved when any of the three boxes is filled in, and removed when they were all emptied.
- * `hadNone` is true for a form with no guest on file (a new one, or an old one that never had any), so there is nothing to remove.
- * Returns the database's message when it failed, or ''. */
-export async function saveGuest(draft: FeedbackDraft, formId: string, hadNone: boolean): Promise<string> {
+/** Keeps the guest details typed for a form. A guest is never removed on its own (it goes when the form is deleted); an old form
+ * with none on file and nothing typed has nothing to keep. Returns the database's message when it failed, or ''. */
+export async function saveGuest(draft: FeedbackDraft, formId: string): Promise<string> {
   const row = guestRow(draft, formId);
-  if (row) {
-    const { error } = await supabase.from('customer_feedback_guests').upsert(row, { onConflict: 'feedback_id' });
-    return error ? error.message : '';
-  }
-  if (hadNone) return '';
-  const { error } = await supabase.from('customer_feedback_guests').delete().eq('feedback_id', formId);
+  if (!row) return '';
+  const { error } = await supabase.from('customer_feedback_guests').upsert(row, { onConflict: 'feedback_id' });
   return error ? error.message : '';
 }

@@ -1,22 +1,23 @@
--- Guest details on the customer feedback form: the date of the visit, and who the guest is (name, phone, email).
+-- Guest details on the customer feedback form: who the guest is (name, phone, email).
 --
--- Why two places: the date of the visit is just a date, so it sits on the form itself (customer_feedback.visit_date).
--- A name, phone number and email are personal. An employee may read the forms about themselves (see
--- 20261123140000_colleague_feedback.sql), and a policy gives them the whole row, so the guest's contact details are
--- kept in their own table that only admin / HR of the same company can read or write, and there is deliberately NO
--- policy for anyone else. Deleting a form deletes the guest's details with it.
+-- The form's one date is the date of the visit (customer_feedback.given_on, which the KPIs group the forms by). Nothing is added to
+-- customer_feedback itself: a name, phone number and email are personal, and an employee may read the forms about themselves (see
+-- 20261123140000_colleague_feedback.sql) with a policy that gives them the whole row. So the guest's details are kept in their own
+-- table that only admin / HR of the same company can read or write, and there is deliberately NO policy for anyone else. Deleting a
+-- form deletes the guest's details with it.
 --
--- The visit cannot be after the date written on the form. Every detail is optional; a guest row exists only when at
--- least one of the three was filled in.
+-- The name and the phone number are required for every guest row; the email is optional. A form with no guest row is an older form
+-- typed in before this existed: it stays as it is. The rules apply to rows saved from now on (the constraints are NOT VALID, so a row
+-- that exists already is never checked again until it is changed).
+--
+-- If an earlier version of this file was already run (it added customer_feedback.visit_date), running this one is still fine: it
+-- replaces the guest rules, and drops the visit-date rule that no longer applies. The visit_date column, if it exists, is left alone
+-- and unused.
 --
 -- Run once, in the Supabase SQL editor, after 20261122140000_customer_feedback.sql (and the later feedback migrations).
 -- Re-runnable.
 
-alter table customer_feedback add column if not exists visit_date date;
-
 alter table customer_feedback drop constraint if exists customer_feedback_visit_date_check;
-alter table customer_feedback add constraint customer_feedback_visit_date_check
-  check (visit_date is null or visit_date <= given_on);
 
 create table if not exists customer_feedback_guests (
   -- One row per form, and it goes with the form.
@@ -27,20 +28,26 @@ create table if not exists customer_feedback_guests (
   guest_email text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  updated_by uuid default auth.uid(),
-  constraint customer_feedback_guests_name_check check (guest_name is null or char_length(guest_name) <= 100),
-  constraint customer_feedback_guests_phone_check check (
-    guest_phone is null or (char_length(guest_phone) <= 30 and guest_phone ~ '^[0-9+()./ -]+$' and guest_phone ~ '[0-9].*[0-9].*[0-9].*[0-9].*[0-9]')
-  ),
-  constraint customer_feedback_guests_email_check check (
-    guest_email is null or (char_length(guest_email) <= 120 and guest_email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$')
-  ),
-  constraint customer_feedback_guests_not_empty_check check (
-    nullif(btrim(coalesce(guest_name, '')), '') is not null
-    or nullif(btrim(coalesce(guest_phone, '')), '') is not null
-    or nullif(btrim(coalesce(guest_email, '')), '') is not null
-  )
+  updated_by uuid default auth.uid()
 );
+
+-- The rules, written so they can be run again (and replace the looser ones of an earlier version).
+alter table customer_feedback_guests drop constraint if exists customer_feedback_guests_not_empty_check;
+alter table customer_feedback_guests drop constraint if exists customer_feedback_guests_name_check;
+alter table customer_feedback_guests drop constraint if exists customer_feedback_guests_phone_check;
+alter table customer_feedback_guests drop constraint if exists customer_feedback_guests_email_check;
+
+alter table customer_feedback_guests add constraint customer_feedback_guests_name_check
+  check (nullif(btrim(coalesce(guest_name, '')), '') is not null and char_length(guest_name) <= 100) not valid;
+alter table customer_feedback_guests add constraint customer_feedback_guests_phone_check
+  check (
+    nullif(btrim(coalesce(guest_phone, '')), '') is not null
+    and char_length(guest_phone) <= 30
+    and guest_phone ~ '^[0-9+()./ -]+$'
+    and guest_phone ~ '[0-9].*[0-9].*[0-9].*[0-9].*[0-9]'
+  ) not valid;
+alter table customer_feedback_guests add constraint customer_feedback_guests_email_check
+  check (guest_email is null or (char_length(guest_email) <= 120 and guest_email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$')) not valid;
 
 -- company_id comes from the form it belongs to, never from the caller.
 create or replace function stamp_company_id_from_feedback()
