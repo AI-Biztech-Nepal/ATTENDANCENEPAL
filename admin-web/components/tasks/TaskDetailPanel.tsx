@@ -10,17 +10,15 @@ import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatHoursMinutes } from '@/lib/shift';
 import { formatDuration, formatSlot, slotLength, taskSlot, weekdayName } from '@/lib/taskSchedule';
 import type { Employee, Task, TaskTimeLog } from '@/lib/types';
-import { STATUS_LABEL, STATUS_TONE, completeQuestion, isOpen, isOverdue } from './taskStyles';
+import { STATUS_LABEL, STATUS_TONE, isOverdue } from './taskStyles';
 
 type Props = {
   task: Task;
   employee: Employee | undefined;
   today: string;
   onClose: () => void;
-  /** Send a submitted task back. Resolves to an error message, or null when it worked. */
+  /** Approve or reject a submitted task. Resolves to an error message, or null when it worked. */
   onReview: (task: Task, status: 'approved' | 'rejected', note: string) => Promise<string | null>;
-  /** Mark the task completed (it turns green). Resolves to an error message, or null when it worked. */
-  onComplete: (task: Task, note: string) => Promise<string | null>;
   /** "Pick a time" for a task that has no slot yet. */
   onPickTime: (task: Task) => void;
   /** Cancel (delete) the task. Resolves to an error message, or null when it worked. */
@@ -29,23 +27,20 @@ type Props = {
 
 const LABEL = 'mb-1.5 block text-xs font-bold text-slate-700';
 const FIELD = 'w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm text-ink';
-const COMPLETE_BUTTON =
-  'flex min-h-[44px] items-center justify-center gap-2 rounded-[10px] bg-emerald-700 px-6 text-sm font-extrabold text-white hover:bg-emerald-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:opacity-50';
 
 /** Everything about one task, in a panel that slides in from the right when its block (or row) is clicked: when,
  * who, the description, the time actually tracked, the employee's note — and, for a submitted task, the
- * review. A task that is not finished has a green "Mark as completed" button (after asking, for one the employee has not
- * sent in; a running timer is stopped); a submitted one has it in the review, next to Reject. A task that has not been
- * reviewed yet can be cancelled from the bottom of the panel: it is deleted, after asking. Completed and rejected
+ * review. A task completes by itself when its time is over (nobody marks it), so there is no button for that. A task that has
+ * not been reviewed yet can be cancelled from the bottom of the panel: it is deleted, after asking. Completed and rejected
  * tasks are the record of work that was done, so they have no Cancel. */
-export default function TaskDetailPanel({ task, employee, today, onClose, onReview, onComplete, onPickTime, onCancel }: Props) {
+export default function TaskDetailPanel({ task, employee, today, onClose, onReview, onPickTime, onCancel }: Props) {
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
   const closeRef = useRef<HTMLButtonElement>(null);
   const [logs, setLogs] = useState<TaskTimeLog[]>([]);
   const [now, setNow] = useState<number | null>(null);
   const [note, setNote] = useState('');
-  const [busy, setBusy] = useState<'completed' | 'rejected' | null>(null);
+  const [busy, setBusy] = useState<'approved' | 'rejected' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -109,35 +104,13 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
     else onClose();
   }
 
-  async function reject() {
-    setBusy('rejected');
+  async function review(status: 'approved' | 'rejected') {
+    setBusy(status);
     setError(null);
-    const message = await onReview(task, 'rejected', note);
+    const message = await onReview(task, status, note);
     setBusy(null);
     if (message) setError(message);
     else onClose();
-  }
-
-  async function finish() {
-    setBusy('completed');
-    setError(null);
-    const message = await onComplete(task, note);
-    setBusy(null);
-    if (message) setError(message);
-    else onClose();
-  }
-
-  // A task the employee has not sent in: the manager closes it for them, after being asked.
-  async function completeOpenTask() {
-    if (busy) return;
-    asking.current = true;
-    const sure = await confirm(completeQuestion(task.title, employee?.name ?? 'the employee', running), {
-      title: 'Mark as completed?',
-      confirmLabel: 'Mark as completed',
-      cancelLabel: 'Not yet',
-    });
-    asking.current = false;
-    if (sure) await finish();
   }
 
   return (
@@ -172,20 +145,6 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
           {overdue && <Badge tone="critical">Overdue</Badge>}
           {task.source === 'self' && <Badge tone="info">Self-assigned</Badge>}
         </div>
-
-        {isOpen(task.status) && (
-          <div className="mt-4">
-            {error && (
-              <p role="alert" className="mb-2 text-sm font-semibold text-critical-text">
-                {error}
-              </p>
-            )}
-            <button type="button" disabled={busy !== null} onClick={completeOpenTask} className={`${COMPLETE_BUTTON} w-full sm:w-auto`}>
-              <CheckIcon />
-              {busy === 'completed' ? 'Saving…' : 'Mark as completed'}
-            </button>
-          </div>
-        )}
 
         <dl className="mt-6 grid grid-cols-[110px_minmax(0,1fr)] border-t border-slate-200 text-sm sm:grid-cols-[130px_minmax(0,1fr)]">
           <dt className="border-b border-slate-100 py-3.5 text-[13px] font-bold text-slate-600">When</dt>
@@ -266,7 +225,7 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
                   <li key={l.id} className="flex justify-between gap-3 border-t border-slate-100 py-2.5 text-[13px]">
                     <span className="text-slate-700">
                       {formatTime(l.started_at)} – {l.ended_at ? formatTime(l.ended_at) : 'now'}
-                      {!l.ended_at && <span className="ml-2 font-bold text-emerald-700">timer running</span>}
+                      {!l.ended_at && <span className="ml-2 font-bold text-blue-700">timer running</span>}
                     </span>
                     <span className="font-bold tabular-nums text-ink">{formatHoursMinutes(minutes)}</span>
                   </li>
@@ -311,14 +270,18 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
               <button
                 type="button"
                 disabled={busy !== null}
-                onClick={reject}
+                onClick={() => review('rejected')}
                 className="min-h-[44px] rounded-[10px] border border-slate-300 bg-white px-5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
                 {busy === 'rejected' ? 'Saving…' : 'Reject'}
               </button>
-              <button type="button" disabled={busy !== null} onClick={finish} className={COMPLETE_BUTTON}>
-                <CheckIcon />
-                {busy === 'completed' ? 'Saving…' : 'Mark as completed'}
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={() => review('approved')}
+                className="min-h-[44px] rounded-[10px] bg-teal-700 px-6 text-sm font-extrabold text-white hover:bg-teal-800 disabled:opacity-50"
+              >
+                {busy === 'approved' ? 'Saving…' : 'Approve'}
               </button>
             </div>
           </section>
@@ -347,13 +310,5 @@ export default function TaskDetailPanel({ task, employee, today, onClose, onRevi
         )}
       </aside>
     </div>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" className="h-[17px] w-[17px]" aria-hidden="true">
-      <path d="m5 12.5 4.5 4.5L19 7.5" />
-    </svg>
   );
 }

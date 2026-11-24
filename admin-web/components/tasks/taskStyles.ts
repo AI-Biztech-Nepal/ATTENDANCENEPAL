@@ -40,16 +40,6 @@ export function showsElapsed(status: TaskStatus): boolean {
   return isOpen(status);
 }
 
-/** A task a manager can still close as completed: one not started, one under way, or one sent in for review. */
-export function canComplete(status: TaskStatus): boolean {
-  return isOpen(status) || status === 'submitted';
-}
-
-/** The question asked before a manager closes someone's open task for them. */
-export function completeQuestion(title: string, who: string, timerRunning: boolean): string {
-  return `Mark "${title}" as completed for ${who}? It turns green and counts as done.${timerRunning ? ' Its running timer stops.' : ''}`;
-}
-
 /** Still open after its day has gone by. */
 export function isOverdue(task: Pick<Task, 'status' | 'due_date'>, today: string): boolean {
   return isOpen(task.status) && !!task.due_date && task.due_date < today;

@@ -32,6 +32,24 @@ export function taskSlot(task: Pick<Task, 'start_time' | 'end_time'>): Slot | nu
   return { start, end };
 }
 
+/** The moment a task's time is over: its day and its end time, read as Nepal time (UTC+5:45), as milliseconds. Null when it has
+ * no slot or no day. */
+export function slotEndMs(task: Pick<Task, 'due_date' | 'start_time' | 'end_time'>): number | null {
+  if (!task.due_date || !taskSlot(task)) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(task.end_time ?? '');
+  if (!m) return null;
+  const ms = Date.parse(`${task.due_date}T${m[1].padStart(2, '0')}:${m[2]}:00+05:45`);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** A task that is still to be done (pending or in progress) and has a time slot is completed once the slot's end has passed: this is
+ * the task as it is to be shown at `nowMs`. Anything else (no slot, already sent in, completed, rejected) comes back as it is. */
+export function withTimeStatus<T extends Task>(task: T, nowMs: number): T {
+  if (task.status !== 'pending' && task.status !== 'in_progress') return task;
+  const end = slotEndMs(task);
+  return end !== null && nowMs >= end ? { ...task, status: 'approved' } : task;
+}
+
 export function slotsOverlap(a: Slot, b: Slot): boolean {
   return a.start < b.end && a.end > b.start;
 }

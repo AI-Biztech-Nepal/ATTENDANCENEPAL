@@ -12,6 +12,7 @@ import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso } from '@/lib/shift';
 import { totalsByTask } from '@/lib/taskHours';
+import { withTimeStatus } from '@/lib/taskSchedule';
 import { STATUS_LABEL, STATUS_TONE } from '@/components/tasks/taskStyles';
 import type { Task, TaskTimeLog } from '@/lib/types';
 
@@ -23,8 +24,7 @@ const LABEL = 'mb-1 block text-xs font-medium text-slate-600';
 const INPUT = 'w-full rounded-lg border border-slate-200 px-3 py-2 text-sm';
 const PRIMARY_SM = 'rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90 disabled:opacity-50';
 const OUTLINE_SM = 'rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50';
-// "Complete" is green, the colour of a finished task. (Sending it in puts it with the manager as "Submitted" until they close it.)
-const COMPLETE_SM = 'rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50';
+
 
 function formatElapsed(startedAt: string, now: number) {
   const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
@@ -42,7 +42,9 @@ export default function MyTasksPage() {
   const { system } = useCalendarSystem();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  // The tasks as stored. `tasks` (below) is what is shown: a task whose time is over counts as completed.
+  const [rawTasks, setRawTasks] = useState<Task[]>([]);
+  const [clock, setClock] = useState(() => Date.now());
   const [logs, setLogs] = useState<TaskTimeLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('All');
@@ -62,7 +64,7 @@ export default function MyTasksPage() {
       .select('*')
       .eq('assigned_to', empId)
       .order('created_at', { ascending: false })
-      .then(({ data }) => setTasks(data ?? []));
+      .then(({ data }) => setRawTasks(data ?? []));
     supabase
       .from('task_time_logs')
       .select('*')
@@ -84,6 +86,13 @@ export default function MyTasksPage() {
   }, []);
 
   const runningLog = logs.find(l => l.ended_at === null) ?? null;
+
+  // A task with a time slot is completed once its time is over, so the list is read again every minute.
+  useEffect(() => {
+    const id = setInterval(() => setClock(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
+  const tasks = useMemo(() => rawTasks.map(t => withTimeStatus(t, clock)), [rawTasks, clock]);
 
   useEffect(() => {
     if (!runningLog) return;
@@ -219,6 +228,14 @@ export default function MyTasksPage() {
 
   function actions(t: Task) {
     const running = runningLog?.task_id === t.id;
+    // Its time is over and it counts as completed, but a timer is still running on it: that can still be stopped.
+    if (t.status === 'approved' && running && runningLog) {
+      return (
+        <button disabled={busyId === runningLog.id} onClick={() => stopTimer(runningLog.id)} className={OUTLINE_SM}>
+          Stop timer
+        </button>
+      );
+    }
     if (t.status === 'pending') {
       return (
         <button disabled={busyId === t.id} onClick={() => startTimer(t.id)} className={PRIMARY_SM}>
@@ -240,7 +257,7 @@ export default function MyTasksPage() {
           ) : (
             <span className="text-xs text-slate-400">Timer running on another task</span>
           )}
-          <button disabled={busyId === t.id} onClick={() => submit(t.id)} className={COMPLETE_SM}>
+          <button disabled={busyId === t.id} onClick={() => submit(t.id)} className={PRIMARY_SM}>
             Complete
           </button>
         </div>
