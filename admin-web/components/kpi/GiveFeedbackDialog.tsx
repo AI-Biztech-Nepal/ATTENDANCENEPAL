@@ -12,7 +12,7 @@ const FIELD = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3 
  * The colleague feedback form, built like the customer review form: who it is for, then numbered questions in boxes (1. a rating
  * from 1 to 5 with a word under each round number, 2. an optional comment). Anyone who works in the company can give it to anyone
  * else, from an employee's own page or from an admin's. Sending feedback to someone who already has some from you this month
- * replaces it, and the form says so. The person never sees who gave it.
+ * replaces it, and the form says so. The person and management see who gave it.
  */
 export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', onClose, onSent }: {
   /** Everyone feedback can be given to (feedback_colleagues()). */
@@ -84,7 +84,7 @@ export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', 
         <h2 id="give-feedback-title" className="m-0 text-[22px] font-extrabold tracking-tight text-ink">
           {person ? `Feedback for ${person.name}` : 'Give feedback'}
         </h2>
-        <p className="mb-4 mt-1.5 text-[13.5px] leading-relaxed text-slate-600">Management reads your comment. {person ? name : 'The person'} never sees your name.</p>
+        <p className="mb-4 mt-1.5 text-[13.5px] leading-relaxed text-slate-600">{person ? name : 'The person'} and management see your name with this feedback.</p>
 
         <div className="mb-3.5">
           <label htmlFor="give-feedback-who" className="mb-1.5 block text-xs font-bold text-slate-700">

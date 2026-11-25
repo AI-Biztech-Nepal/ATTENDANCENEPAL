@@ -12,9 +12,9 @@ import MonthStepper from '@/components/kpi/MonthStepper';
 import { CustomerFormsReport, FeedbackReport } from '@/components/kpi/FeedbackReport';
 import GiveFeedbackDialog from '@/components/kpi/GiveFeedbackDialog';
 
-// Feedback, for the person signed in: what colleagues said about them, laid out as a report (by the kind of colleague, never by
-// name), with a "Give feedback" button that opens the feedback form so they can give feedback to anyone they work with; and the
-// customer forms typed in about them, to read only (the admin types them in and changes them).
+// Feedback, for the person signed in: what colleagues said about them, laid out as a report (with who gave each piece), with a
+// "Give feedback" button that opens the feedback form so they can give feedback to anyone they work with; and the customer forms
+// typed in about them with each guest's name, to read only (the admin types them in and changes them).
 export default function MyFeedbackPage() {
   usePageTitle('Feedback');
   const { system } = useCalendarSystem();
@@ -68,7 +68,7 @@ export default function MyFeedbackPage() {
           </p>
         )}
 
-        <CustomerFormsReport periodLabel={label} forms={forms.forms} loading={employeeId === undefined || forms.loading} error={forms.error} />
+        <CustomerFormsReport periodLabel={label} forms={forms.forms} loading={employeeId === undefined || forms.loading} error={forms.error} namesError={forms.namesError} />
       </div>
 
       {formOpen && (

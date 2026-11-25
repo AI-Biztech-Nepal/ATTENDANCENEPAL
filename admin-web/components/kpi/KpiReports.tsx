@@ -14,7 +14,8 @@ import { useFeedbackAbout, useMyCustomerForms, useMyFeedback, type FeedbackRead,
 import { averageText, formWord, summariseRatings } from '@/lib/feedbackKpi';
 import { scoreText, summariseNps } from '@/lib/npsKpi';
 import { hoursText, monthTime, utilisation } from '@/lib/utilisationKpi';
-import { RELATION_FROM, RELATION_LABEL, feedbackCount, ratingWord, summariseReport } from '@/lib/colleagueFeedback';
+import { RELATION_LABEL, feedbackCount, ratingWord, summariseReport } from '@/lib/colleagueFeedback';
+import { GiverLabel } from './FeedbackReport';
 
 /** What a report needs to know about the page it was opened from. */
 export type ReportContext = {
@@ -364,6 +365,19 @@ function useForms(ctx: ReportContext) {
   return useMyCustomerForms(ctx.employeeId, ctx.start, ctx.end);
 }
 
+/** A small note when the names could not be read; the forms or feedback are still listed without them. */
+function NamesNote({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <p role="alert" className="m-0 mb-3 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[13px] font-semibold text-amber-900">
+      {text}
+    </p>
+  );
+}
+
+/** The guest's name on a form, when it is on file. */
+const GuestName = ({ f }: { f: MyCustomerForm }) => (f.guest_name ? <span className="text-[13.5px] font-extrabold text-ink">{f.guest_name}</span> : null);
+
 function FormComment({ f }: { f: MyCustomerForm }) {
   return f.comment ? <p className="m-0 mt-1 whitespace-pre-line text-sm leading-relaxed text-ink">{f.comment}</p> : <p className="m-0 mt-1 text-sm italic text-slate-500">No comment.</p>;
 }
@@ -371,7 +385,7 @@ function FormComment({ f }: { f: MyCustomerForm }) {
 function GuestFeedbackReport({ ctx }: { ctx: ReportContext }) {
   const { words } = useKpiSettings();
   const day = useDayLabel();
-  const { forms, loading, error } = useForms(ctx);
+  const { forms, loading, error, namesError } = useForms(ctx);
   const summary = summariseRatings(forms.map(f => f.rating));
   const top = summary ? Math.max(...summary.byRating, 1) : 1;
   return (
@@ -393,10 +407,12 @@ function GuestFeedbackReport({ ctx }: { ctx: ReportContext }) {
             </div>
           )}
           <Heading>The forms</Heading>
+          <NamesNote text={namesError} />
           <ol className="m-0 list-none p-0">
             {forms.map(f => (
               <li key={f.id} className="border-b border-slate-100 py-3 last:border-0">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
+                  <GuestName f={f} />
                   <span className="font-bold text-slate-700">{day(f.given_on)}</span>
                   <Stars rating={f.rating} />
                   {f.recommend != null && <span>Would recommend: {f.recommend} out of 10</span>}
@@ -415,7 +431,7 @@ function GuestFeedbackReport({ ctx }: { ctx: ReportContext }) {
 function NpsReport({ ctx }: { ctx: ReportContext }) {
   const { words } = useKpiSettings();
   const day = useDayLabel();
-  const { forms, loading, error } = useForms(ctx);
+  const { forms, loading, error, namesError } = useForms(ctx);
   const withNumber = forms.filter(f => f.recommend != null);
   const nps = summariseNps(withNumber.map(f => f.recommend));
   const kind = (n: number) => (n >= 9 ? { label: 'Would recommend', cls: 'bg-teal-50 text-teal-800' } : n >= 7 ? { label: 'Neutral', cls: 'bg-amber-50 text-amber-800' } : { label: 'Not likely', cls: 'bg-rose-50 text-rose-800' });
@@ -434,12 +450,14 @@ function NpsReport({ ctx }: { ctx: ReportContext }) {
             ]}
           />
           <Heading>The numbers given</Heading>
+          <NamesNote text={namesError} />
           <ol className="m-0 list-none p-0">
             {withNumber.map(f => {
               const k = kind(f.recommend as number);
               return (
                 <li key={f.id} className="border-b border-slate-100 py-3 last:border-0">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
+                    <GuestName f={f} />
                     <span className="font-bold text-slate-700">{day(f.given_on)}</span>
                     <b className="text-[15px] tabular-nums text-ink">{f.recommend} <span className="text-[12px] font-medium text-slate-600">out of 10</span></b>
                     <span className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold ${k.cls}`}>{k.label}</span>
@@ -457,7 +475,7 @@ function NpsReport({ ctx }: { ctx: ReportContext }) {
 }
 
 // ---------------------------------------------------------------------------
-// Feedback from colleagues: each piece, by the kind of colleague (never the name)
+// Feedback from colleagues: each piece, with who gave it
 // ---------------------------------------------------------------------------
 
 function ColleagueBody({ read, ctx }: { read: FeedbackRead; ctx: ReportContext }) {
@@ -471,12 +489,13 @@ function ColleagueBody({ read, ctx }: { read: FeedbackRead; ctx: ReportContext }
         <>
           <Tiles items={report.roles.map(r => ({ label: RELATION_LABEL[r.relation], value: r.average != null ? `${r.average.toFixed(1)} / 5` : '–', note: r.count > 0 ? `${r.count} ${r.count === 1 ? 'review' : 'reviews'}` : 'none' }))} />
           <Heading>{feedbackCount(report.count)}</Heading>
+          <NamesNote text={read.namesError} />
           <ol className="m-0 list-none p-0">
             {read.items.map(i => (
               <li key={i.id} className="border-b border-slate-100 py-3 last:border-0">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
+                  <GiverLabel item={i} />
                   <span className="font-bold text-slate-700">{day(i.given_on)}</span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[12px] font-bold text-slate-700">{RELATION_FROM[i.relation]}</span>
                   <b className="tabular-nums text-ink">{i.rating} / 5</b>
                   <span>{ratingWord(i.rating)}</span>
                 </div>
@@ -489,7 +508,7 @@ function ColleagueBody({ read, ctx }: { read: FeedbackRead; ctx: ReportContext }
     </Gate>
   );
 }
-// An admin reads the table; an employee goes through the function that hands over only their own feedback and never who gave it.
+// An admin reads the table; an employee goes through the function that hands over only their own feedback. Both then read who gave it.
 const ColleaguesAdmin = ({ ctx }: { ctx: ReportContext }) => <ColleagueBody read={useFeedbackAbout(ctx.employeeId, ctx.start, ctx.end)} ctx={ctx} />;
 const ColleaguesMine = ({ ctx }: { ctx: ReportContext }) => <ColleagueBody read={useMyFeedback(ctx.start, ctx.end)} ctx={ctx} />;
 

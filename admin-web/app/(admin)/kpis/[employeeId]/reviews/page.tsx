@@ -17,8 +17,8 @@ import FeedbackRolesDialog, { type FeedbackRole } from '@/components/kpi/Feedbac
 const SECONDARY = 'min-h-[44px] rounded-[10px] border border-teal-700 bg-white px-[18px] text-sm font-extrabold text-teal-700 hover:bg-teal-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50';
 const PRIMARY = 'min-h-[44px] rounded-[10px] bg-teal-700 px-5 text-sm font-extrabold text-white hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50';
 
-// Colleague reviews of one person, as a report: the feedback colleagues gave them in the month on screen, by the kind of colleague
-// who gave it (never by name). Everyone who works in the company, admin and HR accounts included, can give feedback to anyone at
+// Colleague reviews of one person, as a report: the feedback colleagues gave them in the month on screen, with who gave each piece
+// and what kind of colleague they are. Everyone who works in the company, admin and HR accounts included, can give feedback to anyone at
 // any time, with the "Give feedback" button, which opens the feedback form on this person. An admin also chooses who counts as
 // C-level and as training and compliance. Employees give and read their own feedback on their own Feedback page.
 export default function ColleagueReviewsPage() {

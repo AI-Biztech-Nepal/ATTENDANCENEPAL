@@ -1,16 +1,24 @@
 // Colleague feedback: everyone who works in the company can give feedback to anyone else, at any time (a rating from 1 to 5
-// and an optional comment). It is shown to the person it is about as a report, and it feeds the four colleague KPIs. The
-// person never learns who said what. Plain code with no network, so it can be tested on its own.
+// and an optional comment). It is shown to the person it is about as a report, with the name of the colleague who gave it,
+// and it feeds the four colleague KPIs. Plain code with no network, so it can be tested on its own.
 
 export type FeedbackRelation = 'peer' | 'manager' | 'c_level' | 'training';
 export const FEEDBACK_RELATIONS: FeedbackRelation[] = ['peer', 'manager', 'c_level', 'training'];
 
-/** The kind of colleague a piece of feedback came from, as a report says it. The giver is never named. */
+/** The kind of colleague a piece of feedback came from, as a report says it when the giver's name is not on file. */
 export const RELATION_FROM: Record<FeedbackRelation, string> = {
   peer: 'From a peer',
   manager: 'From the manager',
   c_level: 'From C-level',
   training: 'From training and compliance',
+};
+
+/** The kind of colleague, beside the giver's name. */
+export const RELATION_ONE: Record<FeedbackRelation, string> = {
+  peer: 'Peer',
+  manager: 'Manager',
+  c_level: 'C-level',
+  training: 'Training and compliance',
 };
 
 /** The same four kinds as a name for each KPI's row in the report. */
@@ -30,8 +38,9 @@ export const COMMENT_MAX = 1000;
 /** A colleague feedback can be given to (feedback_colleagues()). */
 export type Colleague = { id: string; name: string; department: string | null };
 
-/** One piece of feedback about the signed-in person, as the report shows it (my_feedback_received()). */
-export type FeedbackItem = { id: string; relation: FeedbackRelation; rating: number; comment: string | null; given_on: string };
+/** One piece of feedback about a person, as the report shows it. `giver_name` is who gave it (colleague_feedback_givers()),
+ * null when that is not on file. */
+export type FeedbackItem = { id: string; relation: FeedbackRelation; rating: number; comment: string | null; given_on: string; giver_name: string | null };
 
 /** What the signed-in person already gave this month (feedback_i_gave()), so sending again can say it replaces it. */
 export type GivenFeedback = { id: string; subject_id: string; subject_name: string; rating: number; comment: string | null; given_on: string };
@@ -47,7 +56,7 @@ export function validateGive(subjectId: string, rating: number | null, comment: 
   return null;
 }
 
-/** The first word of a name, for "Maya never sees your name". */
+/** The first word of a name, for "how was working with Maya". */
 export const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
 
 // ---------------------------------------------------------------------------

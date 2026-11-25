@@ -13,7 +13,7 @@ import type { MonthRange } from './useServiceKpi';
 
 // The pieces of the employee's own KPI page (/my-kpis) that cannot be read the way an admin reads them. An employee reads only
 // their own rows, so the numbers that need other people's rows come through functions that hand over just what is needed
-// and never who: rebooking (a customer's later visit to ANYONE) and colleague feedback (the kind of colleague, not the name).
+// and never who: rebooking (a customer's later visit to ANYONE). Colleague feedback comes through my_feedback_received().
 
 /** The signed-in person's employee id: undefined while it is being read, null when the account is not linked to an employee. */
 export function useMyEmployeeId(): string | null | undefined {
@@ -83,7 +83,7 @@ export function useMyRebooking(employeeId: string | null | undefined, cur: Month
 
 /**
  * The signed-in person's colleague feedback for the month `cur` and the month `prev` before it, by the kind of colleague who
- * gave it, read through my_feedback_received() (the kind and never who). The same counting as the admin's page.
+ * gave it, read through my_feedback_received() (the KPIs count by the kind of colleague). The same counting as the admin's page.
  */
 export function useMyColleagues(cur: MonthRange, prev: MonthRange, enabled = true): PersonColleagues {
   const key = `${cur.start}|${cur.end}|${prev.start}|${prev.end}`;

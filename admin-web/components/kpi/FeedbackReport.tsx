@@ -2,7 +2,7 @@
 
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatAdDate } from '@/lib/calendar';
-import { RELATION_FROM, RELATION_LABEL, feedbackCount, ratingWord, summariseReport } from '@/lib/colleagueFeedback';
+import { RELATION_FROM, RELATION_LABEL, RELATION_ONE, feedbackCount, ratingWord, summariseReport, type FeedbackItem } from '@/lib/colleagueFeedback';
 import { averageText, formWord, summariseRatings } from '@/lib/feedbackKpi';
 import type { FeedbackRead, MyCustomerForm } from '@/lib/useFeedback';
 
@@ -22,9 +22,31 @@ function RatingBadge({ rating }: { rating: number | null }) {
   );
 }
 
+/** Who gave a piece of colleague feedback: their name and what kind of colleague they are, or just the kind when the name is not
+ * on file. Shared by the report below and the colleague report pop-up. */
+export function GiverLabel({ item }: { item: FeedbackItem }) {
+  if (!item.giver_name) return <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[12px] font-extrabold text-slate-700">{RELATION_FROM[item.relation]}</span>;
+  return (
+    <>
+      <span className="text-[13.5px] font-extrabold text-ink">{item.giver_name}</span>
+      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[12px] font-bold text-slate-700">{RELATION_ONE[item.relation]}</span>
+    </>
+  );
+}
+
+/** Why the names could not be read; the feedback is still shown without them. */
+export function NamesProblem({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <p role="alert" className="m-0 bg-amber-50 px-5 py-2.5 text-[13px] font-semibold text-amber-900 sm:px-7">
+      {text}
+    </p>
+  );
+}
+
 /**
  * The feedback colleagues gave a person, laid out as a report about them: how much and how it averaged from each kind of colleague,
- * then every piece of feedback with its rating, the kind of colleague (never the name), the day and the comment. Used on the
+ * then every piece of feedback with its rating, who gave it, the day and the comment. Used on the
  * employee's own Feedback page and on an admin's Colleague reviews tab for the person whose page it is. `actions` are the buttons
  * for the report (Give feedback, who is C-level).
  */
@@ -74,6 +96,7 @@ export function FeedbackReport({ title, periodLabel, read, subject, actions }: {
             ))}
           </ul>
 
+          {read.items.length > 0 && <NamesProblem text={read.namesError} />}
           {read.items.length === 0 ? (
             <p className="m-0 px-5 py-8 text-center text-sm text-slate-600 sm:px-7">
               Nobody has given {who} feedback in {periodLabel} yet.
@@ -85,7 +108,7 @@ export function FeedbackReport({ title, periodLabel, read, subject, actions }: {
                   <RatingBadge rating={item.rating} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
-                      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[12px] font-extrabold text-slate-700">{RELATION_FROM[item.relation]}</span>
+                      <GiverLabel item={item} />
                       <span>{formatAdDate(item.given_on, system)}</span>
                     </div>
                     {item.comment ? <p className="m-0 mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink">{item.comment}</p> : <p className="m-0 mt-1.5 text-sm italic text-slate-500">No comment.</p>}
@@ -104,7 +127,7 @@ export function FeedbackReport({ title, periodLabel, read, subject, actions }: {
  * The customer forms typed in about the signed-in person, to read. There is nothing to edit here: the forms are typed in and
  * changed by the admin only.
  */
-export function CustomerFormsReport({ periodLabel, forms, loading, error }: { periodLabel: string; forms: MyCustomerForm[]; loading: boolean; error: string }) {
+export function CustomerFormsReport({ periodLabel, forms, loading, error, namesError }: { periodLabel: string; forms: MyCustomerForm[]; loading: boolean; error: string; namesError: string }) {
   const { system } = useCalendarSystem();
   const summary = summariseRatings(forms.map(f => f.rating));
   return (
@@ -129,21 +152,25 @@ export function CustomerFormsReport({ periodLabel, forms, loading, error }: { pe
           {forms.length === 0 ? (
             <p className="m-0 border-t border-slate-200 px-5 py-8 text-center text-sm text-slate-600 sm:px-7">No customer forms have been typed in for you in {periodLabel} yet.</p>
           ) : (
-            <ol aria-label={`Customer forms in ${periodLabel}`} className="m-0 list-none border-t border-slate-200 p-0">
-              {forms.map(f => (
-                <li key={f.id} className="flex gap-4 border-b border-slate-100 px-5 py-4 last:border-0 sm:px-7">
-                  <RatingBadge rating={f.rating} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
-                      <span className="font-bold text-slate-700">{formatAdDate(f.given_on, system)}</span>
-                      {f.reference && <span>{f.reference}</span>}
-                      {f.recommend != null && <span>Would recommend: {f.recommend} out of 10</span>}
+            <>
+              <NamesProblem text={namesError} />
+              <ol aria-label={`Customer forms in ${periodLabel}`} className="m-0 list-none border-t border-slate-200 p-0">
+                {forms.map(f => (
+                  <li key={f.id} className="flex gap-4 border-b border-slate-100 px-5 py-4 last:border-0 sm:px-7">
+                    <RatingBadge rating={f.rating} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
+                        {f.guest_name && <span className="text-[13.5px] font-extrabold text-ink">{f.guest_name}</span>}
+                        <span className="font-bold text-slate-700">{formatAdDate(f.given_on, system)}</span>
+                        {f.reference && <span>{f.reference}</span>}
+                        {f.recommend != null && <span>Would recommend: {f.recommend} out of 10</span>}
+                      </div>
+                      {f.comment ? <p className="m-0 mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink">{f.comment}</p> : <p className="m-0 mt-1.5 text-sm italic text-slate-500">No comment.</p>}
                     </div>
-                    {f.comment ? <p className="m-0 mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink">{f.comment}</p> : <p className="m-0 mt-1.5 text-sm italic text-slate-500">No comment.</p>}
-                  </div>
-                </li>
-              ))}
-            </ol>
+                  </li>
+                ))}
+              </ol>
+            </>
           )}
         </>
       )}
