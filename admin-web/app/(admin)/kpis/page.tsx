@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { usePageTitle } from '@/lib/pageTitle';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calendar';
@@ -24,7 +24,8 @@ import MonthStepper from '@/components/kpi/MonthStepper';
 // Every employee against every KPI for one month. Each KPI stands on its own: there is no total, no
 // ranking and no weighting, and people are listed by name. Attendance is read from the attendance
 // records; the other groups show a dash until their input exists (see KPI_GROUPS in lib/kpi.ts).
-// A name opens that person's own KPI page (/kpis/[employeeId]) for the same month.
+// A name opens that person's own KPI page (/kpis/[employeeId]) for the same month. The top bar's search box filters this list
+// (?search=…) instead of going to the Employees directory.
 export default function KpisPage() {
   // useSearchParams needs a Suspense boundary, like the other pages that read the address.
   return (
@@ -38,6 +39,8 @@ function Kpis() {
   usePageTitle('KPIs');
   const { system } = useCalendarSystem();
   const params = useSearchParams();
+  const router = useRouter();
+  const searchTerm = (params.get('search') ?? '').trim();
   // The month is an AD anchor, so switching AD/BS keeps the same point in time and re-reads it as
   // whichever calendar's month it falls in (the same approach as the Attendance Calendar). It starts on
   // the month a person's page came from (`?date=`), so "All employees' KPIs" returns to the same month.
@@ -70,7 +73,21 @@ function Kpis() {
   );
   // A department that is not in the new month's list (or after a reload) is the same as "all".
   const activeDepartment = departments.includes(department) ? department : '';
-  const shown = useMemo(() => (activeDepartment ? employees.filter(e => e.department === activeDepartment) : employees), [employees, activeDepartment]);
+  const shown = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    return employees.filter(
+      e =>
+        (!activeDepartment || e.department === activeDepartment) &&
+        (!term || [e.name, e.employee_code, e.department, e.designation, e.phone, e.email].some(v => !!v && v.toLowerCase().includes(term)))
+    );
+  }, [employees, activeDepartment, searchTerm]);
+
+  function clearSearch() {
+    const next = new URLSearchParams(params.toString());
+    next.delete('search');
+    const qs = next.toString();
+    router.replace(qs ? `/kpis?${qs}` : '/kpis');
+  }
   // A table that is missing or a refused read is said out loud, so a dash never hides a number that could not be read.
   const problems = problemsOf(services.error, rebooking.error, feedback.error, colleagues.error, ownKpis.error, own.error);
 
@@ -105,6 +122,19 @@ function Kpis() {
             </option>
           ))}
         </select>
+        {searchTerm && (
+          <button
+            type="button"
+            onClick={clearSearch}
+            aria-label={`Clear the search for ${searchTerm}`}
+            className="inline-flex min-h-[44px] max-w-full items-center gap-2 rounded-xl border border-teal-700 bg-teal-50 px-3.5 text-sm font-bold text-teal-800 hover:bg-teal-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <span className="truncate">“{searchTerm}”</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" className="h-4 w-4 shrink-0">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
+        )}
       </div>
 
 
@@ -116,7 +146,7 @@ function Kpis() {
 
       <LoadProblems problems={problems} />
 
-      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} colleagues={colleagues} own={own} loading={loading || !loaded || !ownKpis.loaded} notStarted={start > today} monthStart={start} />
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} colleagues={colleagues} own={own} loading={loading || !loaded || !ownKpis.loaded} notStarted={start > today} monthStart={start} emptyText={searchTerm ? `No employee matches “${searchTerm}”.` : undefined} />
     </div>
   );
 }

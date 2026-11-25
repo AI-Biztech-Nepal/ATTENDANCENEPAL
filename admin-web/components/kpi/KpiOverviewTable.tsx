@@ -40,12 +40,14 @@ type Props = {
   notStarted: boolean;
   /** The month's first day (AD), sent along so a person's page opens on the same month. */
   monthStart: string;
+  /** What the table says when nobody is listed (a search that matched no one says so). */
+  emptyText?: string;
 };
 
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place). Nothing is
  * added up, ranked or compared: a dash means there is nothing to show yet, or its numbers could not be read (the note
  * above the table says so in that case). */
-export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, colleagues, own, loading, notStarted, monthStart }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, colleagues, own, loading, notStarted, monthStart, emptyText = 'No employees to show.' }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -85,7 +87,7 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
             ) : employees.length === 0 ? (
               <tr>
                 <td colSpan={columnCount} className="px-5 py-10 text-center text-sm text-slate-600">
-                  No employees to show.
+                  {emptyText}
                 </td>
               </tr>
             ) : (
