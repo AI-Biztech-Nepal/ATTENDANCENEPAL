@@ -8,10 +8,13 @@ import DatePicker from '@/components/DatePicker';
 import AssignTaskDialog, { type AssignInitial } from '@/components/tasks/AssignTaskDialog';
 import TaskDetailPanel from '@/components/tasks/TaskDetailPanel';
 import TaskTimetable from '@/components/tasks/TaskTimetable';
+import TaskWeek from '@/components/tasks/TaskWeek';
 import { STATUS_LABEL, isOpen } from '@/components/tasks/taskStyles';
-import { formatAdDate } from '@/lib/calendar';
+import { formatAdDate, stepWeek, weekRange } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { nepalTodayIso, punchMinuteOfDay, resolveShift } from '@/lib/shift';
+import { fetchMyCompanyWeekOffConfig } from '@/lib/weekOff';
+import { dayNotes, weekTasksFor } from '@/lib/taskWeek';
 import {
   addDays,
   formatHourFull,
@@ -29,6 +32,10 @@ import {
 } from '@/lib/taskSchedule';
 import type { CompanyHoliday, Employee, LeaveRequest, Shift, Task, TaskStatus } from '@/lib/types';
 
+/** The timetable shows one day (employees by hour) or a whole week (employees by day). */
+type View = 'day' | 'week';
+const VIEW_KEY = 'tasks-timetable-view';
+
 /** What the key above the timetable can filter by: a task status, or people on leave. */
 type Filter = TaskStatus | 'leave';
 
@@ -39,7 +46,7 @@ const PRIMARY = 'rounded-[10px] bg-teal-700 text-sm font-extrabold text-white ho
 const SELECT = 'h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-ink';
 const ROUND_BTN = 'flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
 
-/** The Tasks page: a day timetable — employees down the side, the company's working hours across (from its shifts, a column for every
+/** The Tasks page: a day timetable (or, with the Week button, a week of them side by side) — employees down the side, the company's working hours across (from its shifts, a column for every
  * half hour), a block for every task at the time it was assigned for. A block opens the full detail (and the review); a free hour, or the Assign task
  * button, opens the assign dialog. */
 export default function TasksPage() {
@@ -60,6 +67,9 @@ export default function TasksPage() {
   const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
 
   const [date, setDate] = useState(todayIso);
+  const [view, setView] = useState<View>('day');
+  const [weekOffDay, setWeekOffDay] = useState<number | null>(null);
+  const [weekHolidays, setWeekHolidays] = useState<CompanyHoliday[]>([]);
   const [department, setDepartment] = useState('');
   const [nowMin, setNowMin] = useState<number | null>(null);
   const [showReviewList, setShowReviewList] = useState(false);
@@ -106,6 +116,45 @@ export default function TasksPage() {
     const id = setTimeout(() => setNotice(null), 8000);
     return () => clearTimeout(id);
   }, [notice]);
+
+  // The view last used comes back next time (read after mount, so the server and the browser agree on the first paint).
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(VIEW_KEY) === 'week') setView('week');
+    } catch {}
+  }, []);
+  function changeView(next: View) {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {}
+  }
+
+  // The week on screen: Sunday to Saturday around the day picked.
+  const week = useMemo(() => weekRange(date), [date]);
+  const viewDates = view === 'week' ? week.dates : [date];
+  // What marks a day as not an ordinary one (the weekly off day, holidays) is only read for the week view.
+  useEffect(() => {
+    fetchMyCompanyWeekOffConfig().then(c => setWeekOffDay(c.weeklyOffDay));
+  }, []);
+  const weekStart = week.start;
+  const weekEnd = week.end;
+  useEffect(() => {
+    if (view !== 'week') return;
+    let live = true;
+    supabase
+      .from('company_holidays')
+      .select('*')
+      .gte('holiday_date', weekStart)
+      .lte('holiday_date', weekEnd)
+      .then(({ data }) => {
+        if (live) setWeekHolidays((data as CompanyHoliday[] | null) ?? []);
+      });
+    return () => {
+      live = false;
+    };
+  }, [view, weekStart, weekEnd]);
+  const notes = useMemo(() => dayNotes(week.dates, weekOffDay, weekHolidays), [week, weekOffDay, weekHolidays]);
 
   // "Now" on the timetable moves once a minute. Read after mount so the server and browser never disagree.
   useEffect(() => {
@@ -173,19 +222,25 @@ export default function TasksPage() {
 
   const statuses = useMemo(() => STATUS_FILTERS.filter(s => filters.has(s)), [filters]);
   const showLeave = filters.has('leave');
-  // The numbers on the filter buttons: tasks per status on the day shown, and how many people are on leave that day.
+  // The numbers on the filter buttons: tasks per status on the day shown (the week, in the week view), and how many people are on leave
+  // that day (that week). On the day timetable someone on leave has no tasks drawn, so none are counted; the week draws them all.
   const dayCounts = useMemo(() => {
     const counts: Record<TaskStatus, number> = { pending: 0, in_progress: 0, submitted: 0, approved: 0, rejected: 0 };
     let leave = 0;
     for (const emp of rowEmployees) {
-      if (isOnLeave(leaves, emp.id, date)) {
-        leave += 1;
+      const away = viewDates.some(d => isOnLeave(leaves, emp.id, d));
+      if (away) leave += 1;
+      if (view === 'week') {
+        for (const list of weekTasksFor(tasks, emp.id, viewDates).values()) for (const t of list) counts[t.status] += 1;
         continue;
       }
+      if (away) continue;
       for (const p of placementsFor(tasks, emp.id, date, range)) counts[p.task.status] += 1;
     }
     return { counts, leave };
-  }, [rowEmployees, tasks, leaves, date, range]);
+    // viewDates is rebuilt every render: what it is made of (the view, the day) is what decides.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowEmployees, tasks, leaves, date, range, view, week]);
   // "All" counts every task on the day shown, whatever its status.
   const dayTotal = STATUS_FILTERS.reduce((sum, s) => sum + dayCounts.counts[s], 0);
 
@@ -238,9 +293,20 @@ export default function TasksPage() {
   }
   const clearFilters = useCallback(() => setFilters(new Set()), []);
 
-  function openAssign(employeeId: string, startHour: number | null) {
-    setAssign({ employeeId, date, startHour, scheduleTask: null });
+  function openAssign(employeeId: string, startHour: number | null, day: string = date) {
+    setAssign({ employeeId, date: day, startHour, scheduleTask: null });
   }
+
+  // From the week view to one day of it.
+  function openDay(day: string) {
+    setDate(day);
+    changeView('day');
+  }
+
+  // The arrows and the Today button move by the day on the day timetable and by the week on the week view.
+  const unit = view === 'week' ? 'week' : 'day';
+  const step = (direction: 1 | -1) => setDate(d => (view === 'week' ? stepWeek(d, direction) : addDays(d, direction)));
+  const atToday = view === 'week' ? week.dates.includes(todayIso) : date === todayIso;
 
   function pickTime(task: Task) {
     setSelectedId(null);
@@ -291,28 +357,50 @@ export default function TasksPage() {
         )}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
+            <div role="group" aria-label="Timetable view" className="flex rounded-full border border-slate-300 bg-white p-0.5">
+              {(['day', 'week'] as const).map(v => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => changeView(v)}
+                  className={`min-h-[44px] rounded-full px-4 text-[13px] font-extrabold ${view === v ? 'bg-teal-700 text-white' : 'text-slate-700 hover:bg-slate-50'}`}
+                >
+                  {v === 'day' ? 'Day' : 'Week'}
+                </button>
+              ))}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button type="button" aria-label="Previous day" onClick={() => setDate(d => addDays(d, -1))} className={ROUND_BTN}>
+              <button type="button" aria-label={`Previous ${unit}`} onClick={() => step(-1)} className={ROUND_BTN}>
                 <ChevronIcon className="h-[18px] w-[18px] rotate-180" />
               </button>
               <div className="w-[190px]">
-                <DatePicker value={date} onChange={v => v && setDate(v)} ariaLabel="Timetable day" className="h-11 rounded-xl border-slate-300 font-bold" />
+                <DatePicker value={date} onChange={v => v && setDate(v)} ariaLabel={view === 'week' ? 'Day in the week shown' : 'Timetable day'} className="h-11 rounded-xl border-slate-300 font-bold" />
               </div>
-              <button type="button" aria-label="Next day" onClick={() => setDate(d => addDays(d, 1))} className={ROUND_BTN}>
+              <button type="button" aria-label={`Next ${unit}`} onClick={() => step(1)} className={ROUND_BTN}>
                 <ChevronIcon className="h-[18px] w-[18px]" />
               </button>
               <button
                 type="button"
                 onClick={() => setDate(todayIso)}
-                disabled={date === todayIso}
+                disabled={atToday}
                 className="min-h-[44px] rounded-full border border-slate-300 bg-white px-[18px] text-[13px] font-bold text-ink hover:bg-slate-50 disabled:opacity-50"
               >
-                Today
+                {view === 'week' ? 'This week' : 'Today'}
               </button>
             </div>
-            <span className="text-sm font-semibold text-slate-600">
-              {weekdayName(date, 'long')}
-              {date === todayIso ? ' · Today' : ''}
+            <span data-view-label className="text-sm font-semibold text-slate-600">
+              {view === 'week' ? (
+                <>
+                  {formatAdDate(week.start, system)} – {formatAdDate(week.end, system)}
+                  {week.dates.includes(todayIso) ? ' · This week' : ''}
+                </>
+              ) : (
+                <>
+                  {weekdayName(date, 'long')}
+                  {date === todayIso ? ' · Today' : ''}
+                </>
+              )}
             </span>
             <select aria-label="Department" value={department} onChange={e => setDepartment(e.target.value)} className={SELECT}>
               <option value="">All departments</option>
@@ -394,24 +482,42 @@ export default function TasksPage() {
           </section>
         )}
 
-        <TaskTimetable
-          range={range}
-          capacity={capacity}
-          employees={rowEmployees}
-          tasks={tasks}
-          leaves={leaves}
-          date={date}
-          today={todayIso}
-          nowPct={nowPct}
-          nowLabel={nowLabel}
-          dayOver={dayOver}
-          runningTaskIds={runningTaskIds}
-          onOpenTask={t => setSelectedId(t.id)}
-          onAssign={openAssign}
-          statuses={statuses}
-          showLeave={showLeave}
-          onClearFilters={clearFilters}
-        />
+        {view === 'week' ? (
+          <TaskWeek
+            dates={week.dates}
+            today={todayIso}
+            employees={rowEmployees}
+            tasks={tasks}
+            leaves={leaves}
+            notes={notes}
+            statuses={statuses}
+            showLeave={showLeave}
+            runningTaskIds={runningTaskIds}
+            onOpenTask={t => setSelectedId(t.id)}
+            onAssign={(employeeId, day) => openAssign(employeeId, null, day)}
+            onOpenDay={openDay}
+            onClearFilters={clearFilters}
+          />
+        ) : (
+          <TaskTimetable
+            range={range}
+            capacity={capacity}
+            employees={rowEmployees}
+            tasks={tasks}
+            leaves={leaves}
+            date={date}
+            today={todayIso}
+            nowPct={nowPct}
+            nowLabel={nowLabel}
+            dayOver={dayOver}
+            runningTaskIds={runningTaskIds}
+            onOpenTask={t => setSelectedId(t.id)}
+            onAssign={openAssign}
+            statuses={statuses}
+            showLeave={showLeave}
+            onClearFilters={clearFilters}
+          />
+        )}
 
         {unscheduledShown.length > 0 && (
           <section id="not-scheduled" aria-labelledby="not-scheduled-title" className="rounded-xl border border-slate-200 bg-white px-6 pb-2 pt-5 shadow-sm">

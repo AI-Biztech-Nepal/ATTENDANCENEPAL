@@ -17,6 +17,7 @@ import {
 } from '@/lib/taskSchedule';
 import type { Employee, LeaveRequest, Task, TaskStatus } from '@/lib/types';
 import DayStrip from './DayStrip';
+import StatusMark from './StatusMark';
 import { BLOCK_TONE, STATUS_LABEL, blockStatusText, isOverdue, showsElapsed } from './taskStyles';
 
 const LEAVE_HATCH = 'repeating-linear-gradient(135deg,#e2e8f0 0,#e2e8f0 6px,#f1f5f9 6px,#f1f5f9 12px)';
@@ -362,19 +363,6 @@ function TimetableBlock({
       )}
     </button>
   );
-}
-
-/** The little mark before a status: a tick for a completed task (so it does not rely on green alone), otherwise a dot in the
- * status colour that pulses while the employee's timer is running. */
-function StatusMark({ status, running }: { status: TaskStatus; running: boolean }) {
-  if (status === 'approved') {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0" aria-hidden="true">
-        <path d="m5 12.5 4.5 4.5L19 7.5" />
-      </svg>
-    );
-  }
-  return <i className={`shrink-0 rounded-full ${BLOCK_TONE[status].dot} ${running ? 'h-2 w-2 motion-safe:animate-pulse' : 'h-1.5 w-1.5'}`} />;
 }
 
 function ChevronIcon({ className }: { className?: string }) {
