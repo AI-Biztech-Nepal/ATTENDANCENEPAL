@@ -146,6 +146,13 @@ export function GridIcon({ size = 20, color = '#94a3b8' }: IconProps) {
     </Svg>
   );
 }
+export function ChartIcon({ size = 20, color = '#94a3b8' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
+      <Path strokeLinecap="round" strokeLinejoin="round" d="M4 20V10M10 20V4M16 20v-8M22 20H2" />
+    </Svg>
+  );
+}
 export function ChevronRightIcon({ size = 18, color = '#64748b' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>

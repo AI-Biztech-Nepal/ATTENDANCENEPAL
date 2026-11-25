@@ -5,7 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { BottomTabBar, createBottomTabNavigator, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useFonts } from 'expo-font';
 import { MANROPE_FONTS, applyManropeGlobally } from './src/lib/fonts';
@@ -36,6 +36,10 @@ import MyTasksScreen from './src/screens/MyTasksScreen';
 import MyProfileScreen from './src/screens/MyProfileScreen';
 import ApprovalsScreen from './src/screens/ApprovalsScreen';
 import MoreScreen from './src/screens/MoreScreen';
+import EmployeeMoreScreen from './src/screens/EmployeeMoreScreen';
+import MyKpisScreen from './src/screens/MyKpisScreen';
+import KpisScreen from './src/screens/KpisScreen';
+import KpiPersonScreen from './src/screens/KpiPersonScreen';
 import AdminHeader from './src/navigation/AdminHeader';
 import EmployeeHeader from './src/navigation/EmployeeHeader';
 import UpdateBanner from './src/components/UpdateBanner';
@@ -47,6 +51,7 @@ import { colors } from './src/theme';
 import {
   CalendarIcon,
   CardIcon,
+  ChartIcon,
   CheckCircleIcon,
   GridIcon,
   HomeIcon,
@@ -56,14 +61,18 @@ import {
   UsersIcon,
 } from './src/components/icons';
 
-// Employee-facing flow mirrors admin-web's EmployeeShell: a 5-tab bottom bar
-// (Check In/Out, Calendar, Payroll, Tasks, Profile) with Leave reached as a
-// sub-page pushed from Check In/Out, not its own tab — same as the web.
+// Employee-facing flow mirrors admin-web's EmployeeShell: a 5-slot bottom bar
+// (Check In/Out, Calendar, My Tasks, KPIs, More) with Leave reached as a
+// sub-page pushed from Check In/Out, not its own tab — same as the web. More
+// holds Payroll and Profile: they are still tabs (so a notice can open Profile),
+// just not drawn in the bar, and More shows as the open tab while on one of them.
 export type EmployeeTabParamList = {
   CheckIn: undefined;
   Calendar: undefined;
   Payroll: undefined;
   Tasks: undefined;
+  KPIs: undefined;
+  More: undefined;
   // `tab` opens the Profile on that tab (the notification bell sends 'exit'); `at` makes a repeat open count as new.
   Profile: { tab?: 'overview' | 'records' | 'docs' | 'exit'; at?: number } | undefined;
 };
@@ -102,6 +111,19 @@ function tabBarOptions(insets: { bottom: number }) {
   };
 }
 
+// Payroll and Profile live behind More: they stay registered (the bell opens Profile) but get no slot in the bar.
+const EMPLOYEE_HIDDEN_TABS = ['Payroll', 'Profile'];
+
+// The default bar, minus the hidden tabs, with More lit while one of them is open.
+function EmployeeTabBar(props: BottomTabBarProps) {
+  const { state } = props;
+  const routes = state.routes.filter(r => !EMPLOYEE_HIDDEN_TABS.includes(r.name));
+  const current = state.routes[state.index];
+  const lit = EMPLOYEE_HIDDEN_TABS.includes(current.name) ? 'More' : current.name;
+  const index = Math.max(0, routes.findIndex(r => r.name === lit));
+  return <BottomTabBar {...props} state={{ ...state, routes, index }} />;
+}
+
 function EmployeeTabNavigator() {
   const insets = useSafeAreaInsets();
   return (
@@ -109,6 +131,7 @@ function EmployeeTabNavigator() {
       // 'history' so the header's back button (and Android's) returns to
       // the previously visited tab instead of always jumping to Check In.
       backBehavior="history"
+      tabBar={props => <EmployeeTabBar {...props} />}
       screenOptions={{
         header: props => <EmployeeHeader {...props} />,
         ...tabBarOptions(insets),
@@ -125,14 +148,34 @@ function EmployeeTabNavigator() {
         options={{ title: 'Calendar', tabBarIcon: ({ color, size }) => <CalendarIcon size={size} color={color} /> }}
       />
       <EmployeeTab.Screen
-        name="Payroll"
-        component={MyPayrollScreen}
-        options={{ title: 'Payroll', tabBarIcon: ({ color, size }) => <CardIcon size={size} color={color} /> }}
-      />
-      <EmployeeTab.Screen
         name="Tasks"
         component={MyTasksScreen}
         options={{ title: 'My Tasks', tabBarIcon: ({ color, size }) => <TaskIcon size={size} color={color} /> }}
+      />
+      <EmployeeTab.Screen
+        name="KPIs"
+        component={MyKpisScreen}
+        options={{ title: 'My KPIs', tabBarIcon: ({ color, size }) => <ChartIcon size={size} color={color} /> }}
+      />
+      <EmployeeTab.Screen
+        name="More"
+        component={EmployeeMoreScreen}
+        options={{ title: 'More', tabBarIcon: ({ color, size }) => <GridIcon size={size} color={color} /> }}
+        listeners={({ navigation }) => ({
+          // Tapping More while Payroll or Profile is open (More is lit) goes back to the list.
+          tabPress: e => {
+            const st = navigation.getState();
+            if (st.routes[st.index].name !== 'More') {
+              e.preventDefault();
+              navigation.navigate('More');
+            }
+          },
+        })}
+      />
+      <EmployeeTab.Screen
+        name="Payroll"
+        component={MyPayrollScreen}
+        options={{ title: 'Payroll', tabBarIcon: ({ color, size }) => <CardIcon size={size} color={color} /> }}
       />
       <EmployeeTab.Screen
         name="Profile"
@@ -197,6 +240,8 @@ function MoreStackScreen() {
       <MoreStack.Screen name="Corrections" component={CorrectionsScreen} options={{ title: 'Attendance Corrections' }} />
       <MoreStack.Screen name="Leave" component={LeaveApprovalScreen} options={{ title: 'Leave' }} />
       <MoreStack.Screen name="Tasks" component={TasksScreen} options={{ title: 'Tasks & Rewards' }} />
+      <MoreStack.Screen name="Kpis" component={KpisScreen} options={{ title: 'KPIs' }} />
+      <MoreStack.Screen name="KpiPerson" component={KpiPersonScreen} options={{ title: 'KPIs' }} />
       {isAdmin && (
         <>
           <MoreStack.Screen name="Shifts" component={ShiftsScreen} options={{ title: 'Shift Roster Management' }} />

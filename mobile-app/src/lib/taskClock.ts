@@ -87,3 +87,10 @@ export function timeLeft(minutes: number): string {
   const m = minutes % 60;
   return m === 0 ? `${h} h left` : `${h} h ${m} min left`;
 }
+
+/** A date key (YYYY-MM-DD) moved by whole days — pure calendar arithmetic, no time zone involved. */
+export function addDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}

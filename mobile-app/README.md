@@ -26,6 +26,20 @@ Requires a Supabase project with `../supabase/schema.sql` applied, plus:
 
 `App.tsx` routes between the employee flow and the admin flow based on `profiles.role`.
 
+## Shared logic (KPIs and feedback)
+
+The KPI and feedback screens (My KPIs and Feedback for employees; KPIs, a person's Overview, Customer feedback, Colleague reviews and Import for
+admin and HR) are the website's, ported to the phone. The numbers and rules live in plain TypeScript files that are **copies** of
+`admin-web/lib/*.ts` (`kpi`, `kpiLoad`, `kpiSettings`, `taskKpi`, `rebookingKpi`, `feedbackKpi`, `npsKpi`, `colleagueKpi`, `colleagueFeedback`,
+`customerFeedback`, `guestDetails`, `guestHistory`, `serviceImport`, `serviceKpi`, `reportKpi`, `compareKpi`, `ownKpi`, and the `use*` hooks).
+Each starts with a "Ported from admin-web/lib/…" line. Only the import paths differ (`./types` becomes `../types`, `./taskSchedule` becomes
+`./taskClock`). **When one of these changes on the website, make the same change here**, so a person sees the same number on both. The screens
+themselves are rewritten for a phone and live in `src/screens` (MyKpisScreen, KpisScreen, KpiPersonScreen, EmployeeMoreScreen) and
+`src/components/kpi`.
+
+The employee bottom bar keeps five slots like the website's phone bar: Check In/Out, Calendar, My Tasks, My KPIs and More; More holds Payroll and
+Profile. Feedback is a section of the My KPIs tab. Admin and HR reach KPIs from the More tab.
+
 ## Releasing a new build (EAS + Vercel, no GitHub involved)
 
 1. Bump `version` and `android.versionCode` in `app.json` — `versionCode` must be

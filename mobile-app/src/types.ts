@@ -283,3 +283,22 @@ export type AttendanceGpsRequest = {
   reviewed_at: string | null;
   created_at: string;
 };
+
+/** One customer feedback form, typed in from the paper the customer filled in. The rating and the recommend number can each be empty (a
+ * skipped question); a form with neither and no comment is never saved. Same as admin-web/lib/types.ts. */
+export type CustomerFeedback = {
+  id: string;
+  employee_id: string;
+  company_id?: string | null;
+  /** The date of the visit written on the form (not the day it was typed in). */
+  given_on: string;
+  reference: string | null;
+  /** Service rating, 1 to 5. */
+  rating: number | null;
+  /** Would recommend, 0 to 10. */
+  recommend: number | null;
+  comment: string | null;
+  /** Who the guest is, kept apart from the form where only admin and HR can read it. Added to the row after it is read. */
+  guest?: { guest_name: string | null; guest_phone: string | null; guest_email: string | null } | null;
+  created_at: string;
+};

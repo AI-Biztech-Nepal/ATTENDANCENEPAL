@@ -8,6 +8,7 @@ import {
   BranchIcon,
   CalendarIcon,
   CalendarViewIcon,
+  ChartIcon,
   ClockIcon,
   CorrectionIcon,
   DeviceIcon,
@@ -33,6 +34,7 @@ const SETUP_TILES: Tile[] = [
   { screen: 'Shifts', label: 'Shifts', icon: CalendarIcon, adminOnly: true },
   { screen: 'Branches', label: 'Branch/Depart', icon: BranchIcon, adminOnly: true },
   { screen: 'Tasks', label: 'Tasks', icon: TaskIcon },
+  { screen: 'Kpis', label: 'KPIs', icon: ChartIcon },
   { screen: 'Devices', label: 'Devices', icon: DeviceIcon, adminOnly: true },
   { screen: 'Resigned', label: 'Resigned', icon: ResignedIcon, adminOnly: true },
 ];
@@ -61,7 +63,7 @@ export default function MoreScreen({ navigation }: any) {
             const Icon = t.icon;
             const label = t.screen === 'Devices' && deviceCounts ? `${t.label} · ${deviceCounts.online}/${deviceCounts.total}` : t.label;
             return (
-              <TouchableOpacity key={t.screen} style={styles.tile} onPress={() => navigation.navigate(t.screen)}>
+              <TouchableOpacity key={t.screen} accessibilityRole="button" accessibilityLabel={label} style={styles.tile} onPress={() => navigation.navigate(t.screen)}>
                 <View style={styles.tileIcon}>
                   <Icon size={18} color={colors.accent} />
                 </View>
