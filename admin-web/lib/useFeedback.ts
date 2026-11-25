@@ -41,6 +41,17 @@ export function useFeedbackGiving() {
 }
 
 /** `namesError` says why the names could not be read; the feedback is still shown without them. */
+/**
+ * Removes a piece of colleague feedback for good (remove_colleague_feedback()): the giver takes their own back, or an admin / HR
+ * removes anyone's except feedback about themselves. Returns '' when it was removed, or what went wrong.
+ */
+export async function removeFeedback(id: string): Promise<string> {
+  const { error } = await supabase.rpc('remove_colleague_feedback', { p_id: id });
+  if (!error) return '';
+  const e = error as Failure;
+  return isMissingTable(e) ? `Removing feedback is not set up in the database yet (run ${MIGRATION.remove}).` : `Could not remove it: ${e?.message || 'the database did not say why'}.`;
+}
+
 export type FeedbackRead = { loading: boolean; items: FeedbackItem[]; error: string; namesError: string };
 
 type ItemRow = { id: string; relation: FeedbackRelation; rating: number; comment: string | null; given_on: string };

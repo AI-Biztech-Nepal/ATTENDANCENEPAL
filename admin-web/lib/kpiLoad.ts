@@ -52,4 +52,5 @@ export const MIGRATION = {
   mine: '20261123160000_employee_kpi_read.sql',
   guests: '20261124120000_customer_feedback_guest_details.sql',
   names: '20261125120000_feedback_names.sql',
+  remove: '20261125140000_remove_colleague_feedback.sql',
 } as const;

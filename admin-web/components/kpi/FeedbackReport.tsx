@@ -2,7 +2,7 @@
 
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatAdDate } from '@/lib/calendar';
-import { RELATION_FROM, RELATION_LABEL, RELATION_ONE, feedbackCount, ratingWord, summariseReport, type FeedbackItem } from '@/lib/colleagueFeedback';
+import { RELATION_FROM, RELATION_LABEL, RELATION_ONE, feedbackCount, giverWords, ratingWord, summariseReport, type FeedbackItem } from '@/lib/colleagueFeedback';
 import { averageText, formWord, summariseRatings } from '@/lib/feedbackKpi';
 import type { FeedbackRead, MyCustomerForm } from '@/lib/useFeedback';
 
@@ -46,17 +46,22 @@ export function NamesProblem({ text }: { text: string }) {
 
 /**
  * The feedback colleagues gave a person, laid out as a report about them: how much and how it averaged from each kind of colleague,
- * then every piece of feedback with its rating, who gave it, the day and the comment. Used on the
+ * then every piece of feedback with its rating, who gave it, the day and the comment. With `onRemove` (an admin's page) each piece
+ * has a Remove button. Used on the
  * employee's own Feedback page and on an admin's Colleague reviews tab for the person whose page it is. `actions` are the buttons
  * for the report (Give feedback, who is C-level).
  */
-export function FeedbackReport({ title, periodLabel, read, subject, actions }: {
+export function FeedbackReport({ title, periodLabel, read, subject, actions, onRemove, removing = null }: {
   title: string;
   periodLabel: string;
   read: FeedbackRead;
   /** Who the report is about, for the empty and the privacy sentences ("you", or a name). */
   subject: { you: boolean; name: string };
   actions?: React.ReactNode;
+  /** Remove a piece of feedback (asks first, on the page). Without it there is no Remove button. */
+  onRemove?: (item: FeedbackItem) => void;
+  /** The piece being removed right now, whose button waits. */
+  removing?: string | null;
 }) {
   const { system } = useCalendarSystem();
   const report = summariseReport(read.items);
@@ -113,6 +118,17 @@ export function FeedbackReport({ title, periodLabel, read, subject, actions }: {
                     </div>
                     {item.comment ? <p className="m-0 mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink">{item.comment}</p> : <p className="m-0 mt-1.5 text-sm italic text-slate-500">No comment.</p>}
                   </div>
+                  {onRemove && (
+                    <button
+                      type="button"
+                      onClick={() => onRemove(item)}
+                      disabled={removing !== null}
+                      aria-label={`Remove the feedback from ${giverWords(item)} on ${formatAdDate(item.given_on, system)}`}
+                      className="-my-1 min-h-[44px] shrink-0 self-start rounded-[10px] border border-critical/40 bg-white px-3.5 text-[13px] font-extrabold text-critical-text hover:bg-critical-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-critical disabled:opacity-50"
+                    >
+                      {removing === item.id ? 'Removing…' : 'Remove'}
+                    </button>
+                  )}
                 </li>
               ))}
             </ol>

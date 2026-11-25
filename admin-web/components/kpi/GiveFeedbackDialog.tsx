@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { isMissingTable } from '@/lib/kpiLoad';
+import { removeFeedback } from '@/lib/useFeedback';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { COMMENT_MAX, RATING_WORDS, firstName, validateGive, type Colleague, type GivenFeedback } from '@/lib/colleagueFeedback';
 import { Question, circleClasses } from '@/components/kpi/FormParts';
 
@@ -12,9 +14,9 @@ const FIELD = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3 
  * The colleague feedback form, built like the customer review form: who it is for, then numbered questions in boxes (1. a rating
  * from 1 to 5 with a word under each round number, 2. an optional comment). Anyone who works in the company can give it to anyone
  * else, from an employee's own page or from an admin's. Sending feedback to someone who already has some from you this month
- * replaces it, and the form says so. The person and management see who gave it.
+ * replaces it, and the form says so; it can also be taken back (deleted). The person and management see who gave it.
  */
-export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', onClose, onSent }: {
+export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', onClose, onSent, onRemoved }: {
   /** Everyone feedback can be given to (feedback_colleagues()). */
   colleagues: Colleague[];
   /** What the signed-in person already gave this month (feedback_i_gave()). */
@@ -24,6 +26,8 @@ export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', 
   onClose: () => void;
   /** The feedback was saved: with the name of the person it was for. */
   onSent: (name: string) => void;
+  /** This month's feedback to someone was taken back: with the name of the person it was for. */
+  onRemoved: (name: string) => void;
 }) {
   const start = colleagues.some(c => c.id === subjectId) ? subjectId : '';
   const before = useMemo(() => given.find(g => g.subject_id === start), [given, start]);
@@ -31,17 +35,22 @@ export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', 
   const [rating, setRating] = useState<number | null>(before?.rating ?? null);
   const [comment, setComment] = useState(before?.comment ?? '');
   const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState('');
+  const confirm = useConfirm();
+  // While "Take it back?" is being asked, Escape belongs to that question, not to this form.
+  const asking = useRef(false);
+  const busy = saving || removing;
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && !saving) closeRef.current();
+      if (e.key === 'Escape' && !busy && !asking.current) closeRef.current();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [saving]);
+  }, [busy]);
 
   const person = colleagues.find(c => c.id === who);
   const earlier = given.find(g => g.subject_id === who);
@@ -56,9 +65,30 @@ export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', 
     setError('');
   }
 
+  // Take back what you gave this person this month: it is deleted, and you may give them feedback again.
+  async function takeBack() {
+    if (!earlier || busy) return;
+    asking.current = true;
+    const sure = await confirm(`Take back the feedback you gave ${person?.name ?? 'them'} this month? It is deleted for good.`, {
+      title: 'Take back your feedback?',
+      confirmLabel: 'Take it back',
+      cancelLabel: 'Keep it',
+      tone: 'danger',
+    });
+    asking.current = false;
+    if (!sure) return;
+    setRemoving(true);
+    setError('');
+    const problem = await removeFeedback(earlier.id);
+    setRemoving(false);
+    if (problem) return setError(problem);
+    onRemoved(person?.name ?? '');
+    onClose();
+  }
+
   async function send(e: React.FormEvent) {
     e.preventDefault();
-    if (saving) return;
+    if (busy) return;
     const problem = validateGive(who, rating, comment);
     if (problem) return setError(problem);
     setSaving(true);
@@ -71,7 +101,7 @@ export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', 
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 sm:items-center" onClick={() => !saving && onClose()}>
+    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/30 p-4 sm:items-center" onClick={() => !busy && onClose()}>
       <form
         noValidate
         onSubmit={send}
@@ -99,7 +129,19 @@ export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', 
               </option>
             ))}
           </select>
-          {earlier && <p className="m-0 mt-1.5 text-xs font-semibold text-slate-600">You already gave {name} feedback this month. Sending again replaces it.</p>}
+          {earlier && (
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3">
+              <p className="m-0 text-xs font-semibold text-slate-600">You already gave {name} feedback this month. Sending again replaces it.</p>
+              <button
+                type="button"
+                onClick={takeBack}
+                disabled={busy}
+                className="min-h-[44px] px-1 text-[13px] font-extrabold text-critical-text hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-critical disabled:opacity-50"
+              >
+                {removing ? 'Taking it back…' : 'Take it back'}
+              </button>
+            </div>
+          )}
         </div>
 
         <Question n={1} id="give-feedback-q1" title={`Overall, how was working with ${name} this month?`} range="Rating, 1 to 5">
@@ -149,10 +191,10 @@ export default function GiveFeedbackDialog({ colleagues, given, subjectId = '', 
         <p className="m-0 mb-4 text-center text-[12.5px] text-slate-600">Thank you for taking the time to give honest feedback.</p>
 
         <div className="flex items-center justify-between gap-2.5">
-          <button type="button" onClick={onClose} disabled={saving} className="min-h-[44px] px-1 text-sm font-bold text-slate-600 hover:text-ink disabled:opacity-50">
+          <button type="button" onClick={onClose} disabled={busy} className="min-h-[44px] px-1 text-sm font-bold text-slate-600 hover:text-ink disabled:opacity-50">
             Cancel
           </button>
-          <button type="submit" disabled={saving} className="min-h-[44px] rounded-[10px] bg-accent px-6 text-sm font-extrabold text-white hover:bg-accent/90 disabled:opacity-60">
+          <button type="submit" disabled={busy} className="min-h-[44px] rounded-[10px] bg-accent px-6 text-sm font-extrabold text-white hover:bg-accent/90 disabled:opacity-60">
             {saving ? 'Sending…' : earlier ? 'Send again' : 'Send feedback'}
           </button>
         </div>

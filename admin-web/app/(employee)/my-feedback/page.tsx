@@ -81,6 +81,11 @@ export default function MyFeedbackPage() {
             giving.reload();
             setRefresh(k => k + 1);
           }}
+          onRemoved={who => {
+            setNote(`Your feedback${who ? ` for ${who}` : ''} was taken back.`);
+            giving.reload();
+            setRefresh(k => k + 1);
+          }}
         />
       )}
     </PageBody>

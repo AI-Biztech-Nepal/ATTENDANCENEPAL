@@ -21,6 +21,9 @@ export const RELATION_ONE: Record<FeedbackRelation, string> = {
   training: 'Training and compliance',
 };
 
+/** Who a piece of feedback is from, in a sentence ("the feedback from Ram Thapa", "from a peer" when the name is not on file). */
+export const giverWords = (item: { giver_name: string | null; relation: FeedbackRelation }) => item.giver_name ?? RELATION_FROM[item.relation].replace(/^From /, '');
+
 /** The same four kinds as a name for each KPI's row in the report. */
 export const RELATION_LABEL: Record<FeedbackRelation, string> = {
   peer: 'Peers',
