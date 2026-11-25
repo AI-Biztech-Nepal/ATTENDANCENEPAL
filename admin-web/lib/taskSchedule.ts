@@ -1,13 +1,70 @@
 import type { LeaveRequest, Task } from './types';
 
-/** The Tasks timetable's working day: one column per hour, 9 AM to 6 PM. */
-export const DAY_START_HOUR = 9;
-export const DAY_END_HOUR = 18;
-/** Start hours of the columns: 9, 10, … 17. */
-export const SLOT_HOURS = Array.from({ length: DAY_END_HOUR - DAY_START_HOUR }, (_, i) => DAY_START_HOUR + i);
-
 /** A stretch of the day, in hours since midnight (9 = 9:00, 13.5 = 1:30 PM). */
 export type Slot = { start: number; end: number };
+
+/** The hours the Tasks timetable shows, as whole hours since midnight: `start` is the hour of the first column, `end` the hour the last
+ * column ends at. It follows the company's own shifts (see workingDay); a task can be given any half hour inside it. */
+export type DayRange = { start: number; end: number };
+
+/** What the timetable shows when the company has no shifts of its own: 9 AM to 6 PM. */
+export const DEFAULT_DAY: DayRange = { start: 9, end: 18 };
+
+/** Tasks are given in half hours. */
+export const SLOT_STEP = 0.5;
+
+/** The grid has two columns for every hour. */
+export const columnsOf = (range: DayRange) => (range.end - range.start) * 2;
+
+/** The hour of each heading: for 9 to 18, 9, 10, … 17. */
+export const hoursOf = (range: DayRange) => Array.from({ length: range.end - range.start }, (_, i) => range.start + i);
+
+/** Every half hour a slot can start at: for 9 to 18, 9, 9.5, … 17.5. */
+export const slotStarts = (range: DayRange) => Array.from({ length: columnsOf(range) }, (_, i) => range.start + i * SLOT_STEP);
+
+/** How long a shift is, in hours; a shift that ends the next morning (22:00 to 06:00) runs through midnight. */
+export function shiftLength(shift: { start_time: string; end_time: string }): number {
+  const a = timeToHour(shift.start_time);
+  const b = timeToHour(shift.end_time);
+  if (a === null || b === null || a === b) return 0;
+  return b > a ? b - a : 24 - a + b;
+}
+
+/**
+ * The hours the timetable covers for a company: from the earliest shift start to the latest shift end, widened to whole hours. A
+ * shift that ends the next morning counts for both of its parts (its evening on the day it starts and its morning on the day it
+ * ends), which makes the day twenty-four hours long. The usual 9 to 6 is used when the company has no shift, and is added when
+ * someone has none of their own and so works the default one (`includeDefault`).
+ */
+export function workingDay(shifts: { start_time: string; end_time: string }[], includeDefault: boolean): DayRange {
+  const parts: Slot[] = [];
+  if (includeDefault || shifts.length === 0) parts.push({ start: DEFAULT_DAY.start, end: DEFAULT_DAY.end });
+  for (const sh of shifts) {
+    const a = timeToHour(sh.start_time);
+    const b = timeToHour(sh.end_time);
+    if (a === null || b === null || a === b) continue;
+    if (b > a) parts.push({ start: a, end: b });
+    else parts.push({ start: a, end: 24 }, { start: 0, end: b });
+  }
+  if (parts.length === 0) return { ...DEFAULT_DAY };
+  const start = Math.max(0, Math.floor(Math.min(...parts.map(p => p.start))));
+  const end = Math.min(24, Math.ceil(Math.max(...parts.map(p => p.end))));
+  return end > start ? { start, end } : { start, end: Math.min(24, start + 1) };
+}
+
+/** The range for one day: the company's hours, widened to take in every task slot on that day, so a task left outside them (after the
+ * shifts changed) is never hidden. */
+export function rangeWithTasks(range: DayRange, tasks: Pick<Task, 'due_date' | 'start_time' | 'end_time'>[], date: string): DayRange {
+  let { start, end } = range;
+  for (const t of tasks) {
+    if (t.due_date !== date) continue;
+    const slot = taskSlot(t);
+    if (!slot) continue;
+    start = Math.min(start, Math.max(0, Math.floor(slot.start)));
+    end = Math.max(end, Math.min(24, Math.ceil(slot.end)));
+  }
+  return { start, end };
+}
 
 /** "09:30:00" (a Postgres `time`) -> 9.5. null for a missing or garbled value. */
 export function timeToHour(time: string | null | undefined): number | null {
@@ -72,21 +129,22 @@ export function slotLength(slot: Slot): number {
   return slot.end - slot.start;
 }
 
-/** A task as it sits on the 9-column grid: `colStart` is 1-based, `span` the number of hours. */
+/** A task as it sits on the grid, which has two columns for every hour: `colStart` is 1-based, `span` the number of half hours. */
 export type Placement = { task: Task; slot: Slot; colStart: number; span: number };
 
-/** The employee's scheduled tasks on `date`, in time order, as grid placements. A slot that runs outside
- * 9-6 is clipped to the columns that exist; one entirely outside them is left off the grid. */
-export function placementsFor(tasks: Task[], employeeId: string, date: string): Placement[] {
+/** The employee's scheduled tasks on `date`, in time order, as grid placements. A slot that runs outside the day's range is clipped to
+ * the columns that exist; one entirely outside them is left off the grid. A time that is not on a half hour is drawn on the
+ * half hours around it. */
+export function placementsFor(tasks: Task[], employeeId: string, date: string, range: DayRange = DEFAULT_DAY): Placement[] {
   const out: Placement[] = [];
   for (const task of tasks) {
     if (task.assigned_to !== employeeId || task.due_date !== date) continue;
     const slot = taskSlot(task);
     if (!slot) continue;
-    const first = Math.max(Math.floor(slot.start), DAY_START_HOUR);
-    const last = Math.min(Math.ceil(slot.end), DAY_END_HOUR);
+    const first = Math.max(Math.floor(slot.start * 2) / 2, range.start);
+    const last = Math.min(Math.ceil(slot.end * 2) / 2, range.end);
     if (last <= first) continue;
-    out.push({ task, slot, colStart: first - DAY_START_HOUR + 1, span: last - first });
+    out.push({ task, slot, colStart: Math.round((first - range.start) * 2) + 1, span: Math.round((last - first) * 2) });
   }
   return out.sort((a, b) => a.slot.start - b.slot.start);
 }
@@ -115,11 +173,11 @@ export function isOnLeave(
   return leaves.some(l => l.status === 'approved' && l.employee_id === employeeId && l.start_date <= date && date <= l.end_date);
 }
 
-/** Where "now" sits across the 9-6 columns, as a percentage, or null outside working hours. */
-export function nowPercent(minuteOfDay: number): number | null {
+/** Where "now" sits across the day's columns, as a percentage, or null outside them. */
+export function nowPercent(minuteOfDay: number, range: DayRange = DEFAULT_DAY): number | null {
   const hour = minuteOfDay / 60;
-  if (hour < DAY_START_HOUR || hour > DAY_END_HOUR) return null;
-  return ((hour - DAY_START_HOUR) / (DAY_END_HOUR - DAY_START_HOUR)) * 100;
+  if (hour < range.start || hour > range.end) return null;
+  return ((hour - range.start) / (range.end - range.start)) * 100;
 }
 
 function clock(hour: number): string {
@@ -133,14 +191,19 @@ export function formatHour(hour: number): string {
   return clock(hour);
 }
 
-/** "9:00 AM" / "2:00 PM". */
+/** "9:00 AM" / "2:00 PM" / "12:00 AM" for midnight (hour 24 is the end of the day). */
 export function formatHourFull(hour: number): string {
-  return `${clock(hour)} ${hour >= 12 ? 'PM' : 'AM'}`;
+  return `${clock(hour)} ${hour % 24 >= 12 ? 'PM' : 'AM'}`;
 }
 
-/** "9:00–12:00", "2:00–5:00 PM": AM/PM is added only once the slot reaches the afternoon. */
+/** "9 AM" / "2 PM": a whole hour, for the ends of a strip. */
+export function formatHourShort(hour: number): string {
+  return `${Math.floor(hour) % 12 || 12} ${hour % 24 >= 12 ? 'PM' : 'AM'}`;
+}
+
+/** "9:00–12:00", "2:00–5:00 PM", "9:30–10:00": AM/PM is added only once the slot reaches the afternoon (AM when it runs to midnight). */
 export function formatSlot(slot: Slot): string {
-  return `${clock(slot.start)}–${clock(slot.end)}${slot.end > 12 ? ' PM' : ''}`;
+  return `${clock(slot.start)}–${clock(slot.end)}${slot.end >= 24 ? ' AM' : slot.end > 12 ? ' PM' : ''}`;
 }
 
 /** A date key (YYYY-MM-DD) moved by whole days — pure calendar arithmetic, no time zone involved. */

@@ -45,7 +45,7 @@ export function isOverdue(task: Pick<Task, 'status' | 'due_date'>, today: string
   return isOpen(task.status) && !!task.due_date && task.due_date < today;
 }
 
-/** The status line inside a timetable block. It has to fit, so a narrow block gets the short form. */
+/** The status line inside a timetable block. It has to fit, so a narrow block gets the short form. `span` is the block's width in hours. */
 export function blockStatusText(task: Task, today: string, span: number): string {
   if (isOverdue(task, today)) return span >= 3 ? `${STATUS_LABEL[task.status]} · overdue` : 'Overdue';
   if (task.status === 'submitted') return span >= 3 ? 'Submitted · needs review' : 'Submitted';

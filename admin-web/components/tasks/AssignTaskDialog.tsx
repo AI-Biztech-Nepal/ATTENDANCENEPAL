@@ -6,8 +6,7 @@ import DatePicker from '@/components/DatePicker';
 import { formatAdDate, otherCalendarHint } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import {
-  DAY_END_HOUR,
-  SLOT_HOURS,
+  SLOT_STEP,
   addDays,
   findClash,
   formatDuration,
@@ -16,9 +15,12 @@ import {
   hourToTime,
   isOnLeave,
   placementsFor,
+  rangeWithTasks,
   relativeDayLabel,
+  slotStarts,
   taskSlot,
   weekdayName,
+  type DayRange,
   type Slot,
 } from '@/lib/taskSchedule';
 import type { CompanyHoliday, Employee, LeaveRequest, Task } from '@/lib/types';
@@ -28,13 +30,15 @@ export type AssignInitial = {
   employeeId: string;
   /** The day the timetable is showing, YYYY-MM-DD. */
   date: string;
-  /** The hour that was clicked, or null to start at the employee's first free hour. */
+  /** The time that was clicked, in hours (9.5 = 9:30), or null to start at the employee's first free time. */
   startHour: number | null;
   /** Set when the task already exists and only needs a time ("Pick a time"): title and employee are then fixed. */
   scheduleTask: Task | null;
 };
 
 type Props = {
+  /** The company's working day: the hours a task can be given (widened for a day that already has a task outside them). */
+  range: DayRange;
   /** Active employees, in the order they should be listed. */
   employees: Employee[];
   tasks: Task[];
@@ -61,18 +65,23 @@ const LABEL = 'mb-1.5 block text-xs font-bold text-slate-700';
 const FIELD = 'h-11 w-full rounded-[10px] border border-slate-300 bg-white px-3 text-sm font-semibold text-ink';
 const HINT = 'mt-1.5 text-xs text-slate-600';
 
-function firstFreeStart(tasks: Task[], employeeId: string, date: string, ignoreId?: string): number {
-  for (const h of SLOT_HOURS) {
-    if (!findClash(tasks, employeeId, date, { start: h, end: h + 1 }, ignoreId)) return h;
+/** The first time on the day an hour is free for the employee, else the first half hour that is, else the start of the day. */
+function firstFreeStart(tasks: Task[], employeeId: string, date: string, range: DayRange, ignoreId?: string): number {
+  const starts = slotStarts(range);
+  for (const length of [1, SLOT_STEP]) {
+    for (const h of starts) {
+      if (h + length > range.end) continue;
+      if (!findClash(tasks, employeeId, date, { start: h, end: h + length }, ignoreId)) return h;
+    }
   }
-  return SLOT_HOURS[0];
+  return starts[0];
 }
 
-/** Assign a task to an employee for a day and hours of the working day. Opens from the Assign task button, from a
- * click on a free hour (employee, day and start hour already filled in), or from "Pick a time" on a task that has
+/** Assign a task to an employee for a day and time of the working day, in half hours. Opens from the Assign task button, from a
+ * click on a free time (employee, day and start time already filled in), or from "Pick a time" on a task that has
  * none yet. It checks the slot as you type — no overlap with the employee's other tasks, nobody on leave — and the
  * database enforces the same, so a stale screen can't double-book anyone. */
-export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles, today, holidays, initial, onClose, onSaved }: Props) {
+export default function AssignTaskDialog({ range: companyRange, employees, tasks, leaves, knownTitles, today, holidays, initial, onClose, onSaved }: Props) {
   const { system } = useCalendarSystem();
   const scheduleTask = initial.scheduleTask;
   const [employeeId, setEmployeeId] = useState(initial.employeeId);
@@ -80,18 +89,18 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(initial.date);
   const [start, setStart] = useState(() =>
-    initial.startHour ?? (initial.employeeId ? firstFreeStart(tasks, initial.employeeId, initial.date, scheduleTask?.id) : SLOT_HOURS[0])
+    initial.startHour ?? (initial.employeeId ? firstFreeStart(tasks, initial.employeeId, initial.date, rangeWithTasks(companyRange, tasks, initial.date), scheduleTask?.id) : companyRange.start)
   );
-  const [end, setEnd] = useState(() => Math.min(DAY_END_HOUR, (initial.startHour ?? SLOT_HOURS[0]) + 1));
+  const [end, setEnd] = useState(() => Math.min(companyRange.end, (initial.startHour ?? companyRange.start) + 1));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const titleBoxRef = useRef<HTMLDivElement>(null);
   const firstFieldRef = useRef<HTMLSelectElement>(null);
 
-  // A slot opened with no start hour starts at the first free one; keep the end an hour after it.
+  // A slot opened with no start time starts at the first free one; keep the end an hour after it.
   useEffect(() => {
-    if (initial.startHour === null) setEnd(Math.min(DAY_END_HOUR, start + 1));
+    if (initial.startHour === null) setEnd(Math.min(companyRange.end, start + 1));
     // Only on first open: after that the manager's own choices win.
   }, []);
 
@@ -105,6 +114,9 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
   }, [onClose]);
 
   const employee = employees.find(e => e.id === employeeId);
+  // The company's day, widened for the chosen day if a task already sits outside it.
+  const range = useMemo(() => rangeWithTasks(companyRange, tasks, date), [companyRange, tasks, date]);
+  const startOptions = useMemo(() => slotStarts(range), [range]);
   const slot: Slot = { start, end };
   const onLeave = !!employeeId && !!date && isOnLeave(leaves, employeeId, date);
   const clash = employeeId && date ? findClash(tasks, employeeId, date, slot, scheduleTask?.id) : null;
@@ -112,12 +124,12 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
   const problem = onLeave
     ? `${employee?.name ?? 'This employee'} is on leave that day.`
     : clash && clashSlot
-      ? `Overlaps "${clash.title}" (${formatSlot(clashSlot)}). Pick other hours.`
+      ? `Overlaps "${clash.title}" (${formatSlot(clashSlot)}). Pick another time.`
       : null;
 
   const dayPlacements = useMemo(
-    () => (employeeId && date ? placementsFor(tasks, employeeId, date).filter(p => p.task.id !== scheduleTask?.id) : []),
-    [tasks, employeeId, date, scheduleTask]
+    () => (employeeId && date ? placementsFor(tasks, employeeId, date, range).filter(p => p.task.id !== scheduleTask?.id) : []),
+    [tasks, employeeId, date, scheduleTask, range]
   );
 
   const suggestions = useMemo(() => {
@@ -138,7 +150,7 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
 
   function changeStart(h: number) {
     setStart(h);
-    if (end <= h) setEnd(Math.min(DAY_END_HOUR, h + 1));
+    if (end <= h) setEnd(Math.min(range.end, h + 1));
   }
 
   async function submit(e: React.FormEvent) {
@@ -187,7 +199,7 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
           {scheduleTask ? 'Pick a time' : 'Assign task'}
         </h2>
         <p className="mb-5 mt-1 text-[13px] leading-relaxed text-slate-600">
-          {scheduleTask ? 'Choose the day and hours for this task.' : 'Pick who, what, and which hours of the working day (9 AM – 6 PM).'}
+          {scheduleTask ? 'Choose the day and time for this task.' : `Pick who, what, and when in the working day (${formatHourFull(range.start)} – ${formatHourFull(range.end)}).`}
         </p>
 
         <div className="mb-4">
@@ -305,7 +317,7 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
           <div>
             <label htmlFor="assign-from" className={LABEL}>From</label>
             <select id="assign-from" value={start} onChange={e => changeStart(Number(e.target.value))} className={FIELD}>
-              {SLOT_HOURS.map(h => (
+              {startOptions.map(h => (
                 <option key={h} value={h}>{formatHourFull(h)}</option>
               ))}
             </select>
@@ -313,8 +325,8 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
           <div>
             <label htmlFor="assign-to" className={LABEL}>To</label>
             <select id="assign-to" value={end} onChange={e => setEnd(Number(e.target.value))} className={FIELD}>
-              {SLOT_HOURS.filter(h => h + 1 > start).map(h => (
-                <option key={h + 1} value={h + 1}>{formatHourFull(h + 1)}</option>
+              {startOptions.filter(h => h + SLOT_STEP > start).map(h => (
+                <option key={h + SLOT_STEP} value={h + SLOT_STEP}>{formatHourFull(h + SLOT_STEP)}</option>
               ))}
             </select>
           </div>
@@ -330,6 +342,7 @@ export default function AssignTaskDialog({ employees, tasks, leaves, knownTitles
               </div>
             </div>
             <DayStrip
+              range={range}
               placements={dayPlacements}
               extra={slot}
               extraClashes={!!problem}

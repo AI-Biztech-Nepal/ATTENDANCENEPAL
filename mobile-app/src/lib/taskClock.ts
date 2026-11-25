@@ -60,7 +60,8 @@ function clock(hour: number): string {
 
 /** "2:00–3:00 PM", "9:00–12:00". */
 export function formatSlot(slot: Slot): string {
-  return `${clock(slot.start)}–${clock(slot.end)}${slot.end > 12 ? ' PM' : ''}`;
+  // AM/PM only once the slot reaches the afternoon (AM when it runs to midnight): the same as the web app's formatSlot.
+  return `${clock(slot.start)}–${clock(slot.end)}${slot.end >= 24 ? ' AM' : slot.end > 12 ? ' PM' : ''}`;
 }
 
 /** "3 h", "1.5 h". */

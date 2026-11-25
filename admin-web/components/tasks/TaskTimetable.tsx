@@ -3,24 +3,36 @@
 import type { MouseEvent } from 'react';
 import Avatar from '@/components/Avatar';
 import {
-  DAY_END_HOUR,
-  DAY_START_HOUR,
-  SLOT_HOURS,
   bookedHours,
+  columnsOf,
   formatDuration,
+  formatHourFull,
   formatSlot,
+  hoursOf,
   isOnLeave,
   placementsFor,
   slotLength,
+  type DayRange,
   type Placement,
 } from '@/lib/taskSchedule';
 import type { Employee, LeaveRequest, Task, TaskStatus } from '@/lib/types';
 import DayStrip from './DayStrip';
 import { BLOCK_TONE, STATUS_LABEL, blockStatusText, isOverdue, showsElapsed } from './taskStyles';
 
-const GRID_LINES = 'repeating-linear-gradient(to right,#e2e8f0 0,#e2e8f0 1px,transparent 1px,transparent 11.1111%)';
 const LEAVE_HATCH = 'repeating-linear-gradient(135deg,#e2e8f0 0,#e2e8f0 6px,#f1f5f9 6px,#f1f5f9 12px)';
-const DAY_HOURS = DAY_END_HOUR - DAY_START_HOUR;
+/** The width one hour gets on a wide screen: a longer day makes the grid wider (and scroll) instead of squeezing the hours. */
+const HOUR_PX = 88;
+const NAME_PX = 256;
+
+/** A line at every hour and a fainter one at every half hour, across `hours` hours. */
+function gridLines(hours: number): string {
+  const w = 100 / hours;
+  const mid = w / 2;
+  return [
+    `repeating-linear-gradient(to right,#e2e8f0 0,#e2e8f0 1px,transparent 1px,transparent ${w}%)`,
+    `repeating-linear-gradient(to right,transparent 0,transparent calc(${mid}% - 0.5px),#f1f5f9 calc(${mid}% - 0.5px),#f1f5f9 calc(${mid}% + 0.5px),transparent calc(${mid}% + 0.5px),transparent ${w}%)`,
+  ].join(',');
+}
 
 /** "9–10", "12–1": the hour a column stands for. */
 function hourHeading(h: number) {
@@ -28,21 +40,23 @@ function hourHeading(h: number) {
 }
 
 /** How much of a block the "Now" line has already passed, from 0 (not reached) to 1 (all of it behind the line), measured across the
- * block as it is drawn, so the green fill ends exactly at the line. `dayOver` is true after 6 PM, when the whole day is behind it. */
-function elapsedShare(p: Placement, nowPct: number | null, dayOver: boolean): number {
+ * block as it is drawn, so the green fill ends exactly at the line. `dayOver` is true once the day's last hour is over, when the whole
+ * day is behind it. `cols` is how many columns the grid has. */
+function elapsedShare(p: Placement, nowPct: number | null, dayOver: boolean, cols: number): number {
   if (dayOver) return 1;
   if (nowPct === null) return 0;
-  const left = ((p.colStart - 1) / DAY_HOURS) * 100;
-  const width = (p.span / DAY_HOURS) * 100;
+  const left = ((p.colStart - 1) / cols) * 100;
+  const width = (p.span / cols) * 100;
   return Math.min(1, Math.max(0, (nowPct - left) / width));
 }
 
-/** Which hour column a click landed in, from where it fell across the track. */
-function hourFromClick(e: MouseEvent<HTMLElement>) {
+/** Which half hour a click landed in, from where it fell across the track: the time that half hour starts at. */
+function slotFromClick(e: MouseEvent<HTMLElement>, range: DayRange) {
+  const cols = columnsOf(range);
   const rect = e.currentTarget.getBoundingClientRect();
   const frac = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
-  const idx = Math.min(DAY_HOURS - 1, Math.max(0, Math.floor(frac * DAY_HOURS)));
-  return DAY_START_HOUR + idx;
+  const idx = Math.min(cols - 1, Math.max(0, Math.floor(frac * cols)));
+  return range.start + idx / 2;
 }
 
 /** `placements` is everything the employee has that day (it feeds "6 h of 9 h booked"); `visible` is what the
@@ -50,21 +64,25 @@ function hourFromClick(e: MouseEvent<HTMLElement>) {
 type Row = { emp: Employee; placements: Placement[]; visible: Placement[]; booked: number; onLeave: boolean };
 
 type Props = {
+  /** The hours the grid covers: the company's own working day (its shifts). */
+  range: DayRange;
+  /** How many hours each person's own shift is, by employee id (for "6 h of 8 h booked"). */
+  capacity: Map<string, number>;
   employees: Employee[];
   tasks: Task[];
   leaves: LeaveRequest[];
   /** The day shown, YYYY-MM-DD. */
   date: string;
   today: string;
-  /** Where "now" falls across the 9-6 columns (0-100), or null when it is not today / outside working hours. */
+  /** Where "now" falls across the day's columns (0-100), or null when it is not today / outside them. */
   nowPct: number | null;
   nowLabel: string;
-  /** Today, and the working day (9-6) is over: everything is behind the "Now" line. */
+  /** Today, and the working day is over: everything is behind the "Now" line. */
   dayOver: boolean;
   /** Tasks whose timer is running right now. */
   runningTaskIds: Set<string>;
   onOpenTask: (task: Task) => void;
-  /** Open the Assign dialog for this employee, at this start hour (null = pick the first free hour). */
+  /** Open the Assign dialog for this employee, at this start time in hours (9.5 = 9:30; null = pick the first free time). */
   onAssign: (employeeId: string, startHour: number | null) => void;
   /** Statuses picked in the filter. Empty = no status filter (everything shows). */
   statuses: TaskStatus[];
@@ -73,9 +91,11 @@ type Props = {
   onClearFilters: () => void;
 };
 
-/** The Tasks page's main view: employees down the side, the working hours 9 AM to 6 PM across, and a block for
- * every task that fills the hours it was assigned for. Below `md` the same day reads as one card per employee. */
+/** The Tasks page's main view: employees down the side, the company's working hours across (a column for every half hour), and a
+ * block for every task that fills the time it was assigned for. Below `md` the same day reads as one card per employee. */
 export default function TaskTimetable({
+  range,
+  capacity,
   employees,
   tasks,
   leaves,
@@ -92,8 +112,12 @@ export default function TaskTimetable({
   onClearFilters,
 }: Props) {
   const filtering = statuses.length > 0 || showLeave;
+  const cols = columnsOf(range);
+  const hours = hoursOf(range);
+  const dayLabel = `${formatHourFull(range.start)} to ${formatHourFull(range.end)}`;
+  const capacityOf = (id: string) => formatDuration(capacity.get(id) ?? range.end - range.start);
   const allRows: Row[] = employees.map(emp => {
-    const placements = placementsFor(tasks, emp.id, date);
+    const placements = placementsFor(tasks, emp.id, date, range);
     const visible = statuses.length > 0 ? placements.filter(p => statuses.includes(p.task.status)) : placements;
     return { emp, placements, visible, booked: bookedHours(placements), onLeave: isOnLeave(leaves, emp.id, date) };
   });
@@ -129,14 +153,14 @@ export default function TaskTimetable({
   return (
     <>
       {/* Desktop and tablet: the grid. */}
-      <section aria-label="Day timetable, 9 AM to 6 PM" className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
+      <section aria-label={`Day timetable, ${dayLabel}`} className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
         <div className="overflow-x-auto">
-          <div className="relative min-w-[1180px]">
+          <div className="relative" style={{ minWidth: NAME_PX + hours.length * HOUR_PX }}>
             <div className="grid grid-cols-[256px_minmax(0,1fr)] border-b border-slate-200 bg-slate-50">
               {/* Same top padding as the hour headings (room for the "Now" tag above them), and centred like them. */}
               <div className="flex items-center px-5 pb-2.5 pt-[26px] text-xs font-extrabold uppercase tracking-[0.06em] text-slate-600">Employee</div>
-              <div className="grid grid-cols-9">
-                {SLOT_HOURS.map(h => (
+              <div className="grid" style={{ gridTemplateColumns: `repeat(${hours.length}, minmax(0, 1fr))` }}>
+                {hours.map(h => (
                   <div key={h} className="border-l border-slate-200 px-1.5 pb-2.5 pt-[26px] text-center">
                     <div className="text-[13px] font-extrabold text-ink">{hourHeading(h)}</div>
                     <div className="text-[11px] text-slate-600">{h < 12 ? 'AM' : 'PM'}</div>
@@ -152,7 +176,7 @@ export default function TaskTimetable({
                   <div className="min-w-0 flex-1">
                     <div className={`truncate text-sm font-bold ${onLeave ? 'text-slate-600' : 'text-ink'}`}>{emp.name}</div>
                     <div className="text-xs leading-snug text-slate-600">
-                      {emp.department ?? 'No department'} · {onLeave ? 'on leave' : `${formatDuration(booked)} of ${DAY_HOURS} h booked`}
+                      {emp.department ?? 'No department'} · {onLeave ? 'on leave' : `${formatDuration(booked)} of ${capacityOf(emp.id)} booked`}
                     </div>
                   </div>
                 </div>
@@ -165,9 +189,9 @@ export default function TaskTimetable({
                   </div>
                 ) : (
                   <div
-                    onClick={e => onAssign(emp.id, hourFromClick(e))}
-                    className="relative grid cursor-cell grid-cols-9 items-stretch py-2"
-                    style={{ backgroundImage: GRID_LINES }}
+                    onClick={e => onAssign(emp.id, slotFromClick(e, range))}
+                    className="relative grid cursor-cell items-stretch py-2"
+                    style={{ backgroundImage: gridLines(hours.length), gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
                   >
                     {placements.length === 0 && (
                       <div className="pointer-events-none absolute inset-x-1.5 inset-y-2 flex items-center justify-center rounded-lg border-[1.5px] border-dashed border-slate-400 text-[13px] font-bold text-slate-600">
@@ -181,7 +205,7 @@ export default function TaskTimetable({
                         employee={emp}
                         today={today}
                         running={runningTaskIds.has(p.task.id)}
-                        elapsed={showsElapsed(p.task.status) ? elapsedShare(p, nowPct, dayOver) : 0}
+                        elapsed={showsElapsed(p.task.status) ? elapsedShare(p, nowPct, dayOver, cols) : 0}
                         onOpen={() => onOpenTask(p.task)}
                       />
                     ))}
@@ -217,7 +241,7 @@ export default function TaskTimetable({
                   <div className="truncate text-xs text-slate-600">{emp.department ?? 'No department'}</div>
                 </div>
               </div>
-              {!onLeave && <div className="whitespace-nowrap text-[12.5px] font-bold text-slate-600">{booked} of {DAY_HOURS} h</div>}
+              {!onLeave && <div className="whitespace-nowrap text-[12.5px] font-bold text-slate-600">{formatDuration(booked)} of {capacityOf(emp.id)}</div>}
             </div>
 
             {onLeave ? (
@@ -230,7 +254,7 @@ export default function TaskTimetable({
               <>
                 {visible.length > 0 && (
                   <div className="mt-3.5">
-                    <DayStrip placements={visible} label={`${emp.name}'s day, 9 AM to 6 PM: ${booked} of ${DAY_HOURS} hours booked`} />
+                    <DayStrip range={range} placements={visible} label={`${emp.name}'s day, ${dayLabel}: ${formatDuration(booked)} of ${capacityOf(emp.id)} booked`} />
                   </div>
                 )}
                 {visible.length > 0 && (
@@ -298,7 +322,10 @@ function TimetableBlock({
   const { task, slot, colStart, span } = placement;
   const tone = BLOCK_TONE[task.status];
   const overdue = isOverdue(task, today);
-  const statusText = blockStatusText(task, today, span);
+  // The block's width is in half hours: a half hour is too narrow for words (the title is its tooltip), an hour has room for the
+  // title and the status, longer ones for the time as well.
+  const size: 'half' | 'hour' | 'long' = span <= 1 ? 'half' : span === 2 ? 'hour' : 'long';
+  const statusText = blockStatusText(task, today, span / 2);
   return (
     <button
       type="button"
@@ -309,12 +336,14 @@ function TimetableBlock({
       aria-label={`${task.title}, ${employee.name}, ${formatSlot(slot)}, ${STATUS_LABEL[task.status]}${overdue ? ', overdue' : ''}${running ? ', timer on' : ''}. Open details`}
       title={`${task.title} · ${formatSlot(slot)}`}
       style={{ gridColumn: `${colStart} / span ${span}`, gridRow: 1 }}
-      className={`relative mx-[3px] flex min-w-0 cursor-pointer flex-col justify-center gap-[3px] overflow-hidden rounded-lg border px-3 py-2 text-left hover:brightness-95 ${tone.box} ${span === 1 ? 'px-2.5' : ''}`}
+      className={`relative mx-[3px] flex min-w-0 cursor-pointer flex-col justify-center gap-[3px] overflow-hidden rounded-lg border py-2 text-left hover:brightness-95 ${tone.box} ${size === 'half' ? 'items-center px-1' : size === 'hour' ? 'px-2.5' : 'px-3'}`}
     >
       {elapsed > 0 && (
         <span aria-hidden="true" data-elapsed={Math.round(elapsed * 100)} className="pointer-events-none absolute inset-y-0 left-0 bg-emerald-200" style={{ width: `${elapsed * 100}%` }} />
       )}
-      {span === 1 ? (
+      {size === 'half' ? (
+        <StatusMark status={task.status} running={running} />
+      ) : size === 'hour' ? (
         <span className="relative line-clamp-2 text-[12.5px] font-extrabold leading-tight">{task.title}</span>
       ) : (
         <>
@@ -325,10 +354,12 @@ function TimetableBlock({
           </span>
         </>
       )}
-      <span className={`relative flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.06em] ${overdue ? 'text-rose-700' : tone.label}`}>
-        <StatusMark status={task.status} running={running} />
-        <span className="truncate">{statusText}</span>
-      </span>
+      {size !== 'half' && (
+        <span className={`relative flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.06em] ${overdue ? 'text-rose-700' : tone.label}`}>
+          <StatusMark status={task.status} running={running} />
+          <span className="truncate">{statusText}</span>
+        </span>
+      )}
     </button>
   );
 }

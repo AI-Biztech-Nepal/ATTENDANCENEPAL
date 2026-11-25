@@ -11,21 +11,23 @@ import TaskTimetable from '@/components/tasks/TaskTimetable';
 import { STATUS_LABEL, isOpen } from '@/components/tasks/taskStyles';
 import { formatAdDate } from '@/lib/calendar';
 import { useCalendarSystem } from '@/lib/calendarSystem';
-import { nepalTodayIso, punchMinuteOfDay } from '@/lib/shift';
+import { nepalTodayIso, punchMinuteOfDay, resolveShift } from '@/lib/shift';
 import {
-  DAY_END_HOUR,
   addDays,
   formatHourFull,
   formatSlot,
   isOnLeave,
   nowPercent,
   placementsFor,
+  rangeWithTasks,
+  shiftLength,
   slotEndMs,
   taskSlot,
   weekdayName,
   withTimeStatus,
+  workingDay,
 } from '@/lib/taskSchedule';
-import type { CompanyHoliday, Employee, LeaveRequest, Task, TaskStatus } from '@/lib/types';
+import type { CompanyHoliday, Employee, LeaveRequest, Shift, Task, TaskStatus } from '@/lib/types';
 
 /** What the key above the timetable can filter by: a task status, or people on leave. */
 type Filter = TaskStatus | 'leave';
@@ -37,8 +39,8 @@ const PRIMARY = 'rounded-[10px] bg-teal-700 text-sm font-extrabold text-white ho
 const SELECT = 'h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-ink';
 const ROUND_BTN = 'flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
 
-/** The Tasks page: a day timetable — employees down the side, the working hours 9 to 6 across, a block for every task
- * at the hours it was assigned for. A block opens the full detail (and the review); a free hour, or the Assign task
+/** The Tasks page: a day timetable — employees down the side, the company's working hours across (from its shifts, a column for every
+ * half hour), a block for every task at the time it was assigned for. A block opens the full detail (and the review); a free hour, or the Assign task
  * button, opens the assign dialog. */
 export default function TasksPage() {
   usePageTitle('Tasks');
@@ -51,6 +53,8 @@ export default function TasksPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
+  // The company's shifts: they decide which hours the timetable covers.
+  const [shifts, setShifts] = useState<Shift[]>([]);
   // One line saying what the last Assign / Pick a time did, shown above the timetable for a few seconds.
   const [notice, setNotice] = useState<string | null>(null);
   const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
@@ -81,6 +85,7 @@ export default function TasksPage() {
       .eq('status', 'approved')
       .gte('end_date', addDays(todayIso, -60))
       .then(({ data }) => setLeaves((data as LeaveRequest[] | null) ?? []));
+    supabase.from('shifts').select('*').then(({ data }) => setShifts((data as Shift[] | null) ?? []));
     // Company holidays from today on, so the Assign form can point one out when a future day is picked.
     supabase
       .from('company_holidays')
@@ -115,6 +120,7 @@ export default function TasksPage() {
 
   const tasks = useMemo(() => rawTasks.map(t => withTimeStatus(t, clock)), [rawTasks, clock]);
 
+
   // A task whose time is over is completed. The screen already shows it so (withTimeStatus); this also saves it, once, for the people and
   // screens that read the stored status (an employee cannot change a task, and the phone app reads it), and stops a timer still running
   // on it at the moment its time ended. If saving fails it is tried again a minute later. Since 20261125180000_complete_finished_tasks.sql
@@ -138,6 +144,22 @@ export default function TasksPage() {
   }, [rawTasks, clock, reload]);
 
   const employeeById = useMemo(() => new Map(employees.map(e => [e.id, e])), [employees]);
+
+  // The hours the timetable covers follow the company's own shifts (the earliest start to the latest end), with the usual 9 to 6 only
+  // when there are no shifts, or when someone has none of their own and works that default one. A shift made for someone who has left
+  // does not count.
+  const dayShifts = useMemo(() => {
+    const active = new Set(employees.filter(e => e.status === 'active').map(e => e.id));
+    return shifts.filter(s => !s.employee_id || active.has(s.employee_id));
+  }, [shifts, employees]);
+  const companyDay = useMemo(() => {
+    const usesDefault = employees.some(e => e.status === 'active' && resolveShift(e, shifts).id === 'default');
+    return workingDay(dayShifts, usesDefault);
+  }, [dayShifts, employees, shifts]);
+  // How long each person's own shift is (their own, else their department's, else the default), for "6 h of 8 h booked".
+  const capacity = useMemo(() => new Map(employees.map(e => [e.id, shiftLength(resolveShift(e, shifts))] as const).filter(([, h]) => h > 0)), [employees, shifts]);
+  // The hours shown for the day on screen: the company's, widened if a task already sits outside them that day.
+  const range = useMemo(() => rangeWithTasks(companyDay, tasks, date), [companyDay, tasks, date]);
   const employeeName = (id: string) => employeeById.get(id)?.name ?? 'Unknown';
   const activeEmployees = useMemo(() => employees.filter(e => e.status === 'active'), [employees]);
   const departments = useMemo(
@@ -160,10 +182,10 @@ export default function TasksPage() {
         leave += 1;
         continue;
       }
-      for (const p of placementsFor(tasks, emp.id, date)) counts[p.task.status] += 1;
+      for (const p of placementsFor(tasks, emp.id, date, range)) counts[p.task.status] += 1;
     }
     return { counts, leave };
-  }, [rowEmployees, tasks, leaves, date]);
+  }, [rowEmployees, tasks, leaves, date, range]);
   // "All" counts every task on the day shown, whatever its status.
   const dayTotal = STATUS_FILTERS.reduce((sum, s) => sum + dayCounts.counts[s], 0);
 
@@ -200,10 +222,10 @@ export default function TasksPage() {
     return out;
   }, [tasks]);
 
-  const nowPct = date === todayIso && nowMin !== null ? nowPercent(nowMin) : null;
+  const nowPct = date === todayIso && nowMin !== null ? nowPercent(nowMin, range) : null;
   const nowLabel = nowMin !== null ? formatHourFull(nowMin / 60) : '';
-  // After 6 PM the whole working day is behind the "Now" line (there is no line then), so the open tasks are filled all the way.
-  const dayOver = date === todayIso && nowMin !== null && nowMin / 60 > DAY_END_HOUR;
+  // After the day's last hour the whole working day is behind the "Now" line (there is no line then), so the open tasks are filled all the way.
+  const dayOver = date === todayIso && nowMin !== null && nowMin / 60 > range.end;
 
 
   function toggleFilter(f: Filter) {
@@ -373,6 +395,8 @@ export default function TasksPage() {
         )}
 
         <TaskTimetable
+          range={range}
+          capacity={capacity}
           employees={rowEmployees}
           tasks={tasks}
           leaves={leaves}
@@ -438,6 +462,7 @@ export default function TasksPage() {
 
       {assign && (
         <AssignTaskDialog
+          range={companyDay}
           employees={activeEmployees}
           tasks={tasks}
           leaves={leaves}
