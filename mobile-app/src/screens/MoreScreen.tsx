@@ -8,7 +8,7 @@ import {
   BranchIcon,
   CalendarIcon,
   CalendarViewIcon,
-  ChartIcon,
+  CardIcon,
   ClockIcon,
   CorrectionIcon,
   DeviceIcon,
@@ -34,7 +34,7 @@ const SETUP_TILES: Tile[] = [
   { screen: 'Shifts', label: 'Shifts', icon: CalendarIcon, adminOnly: true },
   { screen: 'Branches', label: 'Branch/Depart', icon: BranchIcon, adminOnly: true },
   { screen: 'Tasks', label: 'Tasks', icon: TaskIcon },
-  { screen: 'Kpis', label: 'KPIs', icon: ChartIcon },
+  { screen: 'Payroll', label: 'Payroll', icon: CardIcon },
   { screen: 'Devices', label: 'Devices', icon: DeviceIcon, adminOnly: true },
   { screen: 'Resigned', label: 'Resigned', icon: ResignedIcon, adminOnly: true },
 ];

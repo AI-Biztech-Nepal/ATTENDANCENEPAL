@@ -187,7 +187,7 @@ function EmployeeTabNavigator() {
 }
 
 // Owner/HR flow (mobile only — admin-web keeps its sidebar): a 5-tab bottom
-// bar like the employee app — Home, Approvals, Employees, Payroll, More —
+// bar like the employee app — Home, Approvals, Employees, KPIs, More —
 // where More holds everything the old side menu had beyond those. Each tab
 // is its own stack so sub-pages (Employee Details, Shifts, …) push under the
 // shared AdminHeader and get its back button.
@@ -195,7 +195,7 @@ const AdminTab = createBottomTabNavigator();
 const HomeStack = createNativeStackNavigator();
 const ApprovalsStack = createNativeStackNavigator();
 const EmployeesAdminStack = createNativeStackNavigator();
-const PayrollAdminStack = createNativeStackNavigator();
+const KpisAdminStack = createNativeStackNavigator();
 const MoreStack = createNativeStackNavigator();
 const adminStackOptions = { header: (props: any) => <AdminHeader {...props} /> };
 
@@ -221,12 +221,12 @@ function EmployeesStackScreen() {
     </EmployeesAdminStack.Navigator>
   );
 }
-function PayrollStackScreen() {
+function KpisStackScreen() {
   return (
-    <PayrollAdminStack.Navigator screenOptions={adminStackOptions}>
-      <PayrollAdminStack.Screen name="Payroll" component={PayrollScreen} options={{ title: 'Payroll' }} />
-      <PayrollAdminStack.Screen name="PayrollDetail" component={AdminPayrollDetailScreen} options={{ title: 'Payroll Detail' }} />
-    </PayrollAdminStack.Navigator>
+    <KpisAdminStack.Navigator screenOptions={adminStackOptions}>
+      <KpisAdminStack.Screen name="Kpis" component={KpisScreen} options={{ title: 'KPIs' }} />
+      <KpisAdminStack.Screen name="KpiPerson" component={KpiPersonScreen} options={{ title: 'KPIs' }} />
+    </KpisAdminStack.Navigator>
   );
 }
 function MoreStackScreen() {
@@ -240,8 +240,8 @@ function MoreStackScreen() {
       <MoreStack.Screen name="Corrections" component={CorrectionsScreen} options={{ title: 'Attendance Corrections' }} />
       <MoreStack.Screen name="Leave" component={LeaveApprovalScreen} options={{ title: 'Leave' }} />
       <MoreStack.Screen name="Tasks" component={TasksScreen} options={{ title: 'Tasks & Rewards' }} />
-      <MoreStack.Screen name="Kpis" component={KpisScreen} options={{ title: 'KPIs' }} />
-      <MoreStack.Screen name="KpiPerson" component={KpiPersonScreen} options={{ title: 'KPIs' }} />
+      <MoreStack.Screen name="Payroll" component={PayrollScreen} options={{ title: 'Payroll' }} />
+      <MoreStack.Screen name="PayrollDetail" component={AdminPayrollDetailScreen} options={{ title: 'Payroll Detail' }} />
       {isAdmin && (
         <>
           <MoreStack.Screen name="Shifts" component={ShiftsScreen} options={{ title: 'Shift Roster Management' }} />
@@ -281,9 +281,9 @@ function AdminTabNavigator() {
         options={{ title: 'Employees', tabBarIcon: ({ color, size }) => <UsersIcon size={size} color={color} /> }}
       />
       <AdminTab.Screen
-        name="PayrollTab"
-        component={PayrollStackScreen}
-        options={{ title: 'Payroll', tabBarIcon: ({ color, size }) => <CardIcon size={size} color={color} /> }}
+        name="KpisTab"
+        component={KpisStackScreen}
+        options={{ title: 'KPIs', tabBarIcon: ({ color, size }) => <ChartIcon size={size} color={color} /> }}
       />
       <AdminTab.Screen
         name="MoreTab"

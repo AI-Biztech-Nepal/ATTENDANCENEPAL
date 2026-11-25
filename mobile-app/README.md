@@ -38,7 +38,7 @@ themselves are rewritten for a phone and live in `src/screens` (MyKpisScreen, Kp
 `src/components/kpi`.
 
 The employee bottom bar keeps five slots like the website's phone bar: Check In/Out, Calendar, My Tasks, My KPIs and More; More holds Payroll and
-Profile. Feedback is a section of the My KPIs tab. Admin and HR reach KPIs from the More tab.
+Profile. Feedback is a section of the My KPIs tab. Admin and HR have KPIs as a bottom tab (Home, Approvals, Employees, KPIs, More); Payroll is under More.
 
 ## Releasing a new build (EAS + Vercel, no GitHub involved)
 
