@@ -9,7 +9,7 @@ import { isKpiOn, kpiLabel, type KpiId } from '@/lib/kpiSettings';
 import { useEmployeeKpi } from '@/lib/useEmployeeKpi';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useMonthInUrl } from '@/lib/useMonthInUrl';
-import { usePersonServices } from '@/lib/useServiceKpi';
+import { usePersonTasks } from '@/lib/useTaskKpi';
 import { usePersonRebooking } from '@/lib/useRebookingKpi';
 import { usePersonFeedback } from '@/lib/useFeedbackKpi';
 import { usePersonColleagues } from '@/lib/useColleagueKpi';
@@ -67,7 +67,7 @@ function EmployeeKpiBody({ report, onClose }: { report: ReportKind | null; onClo
 
   useMonthInUrl(start);
   const { loading, error, notFound, employee, current, previous: previousKpi, today } = useEmployeeKpi(employeeId, { start, end }, previous);
-  const serviceData = usePersonServices(employeeId, { start, end }, previous, start <= today);
+  const serviceData = usePersonTasks(employeeId, { start, end }, previous, start <= today);
   // A month that has not begun still gets its weeks on the chart, empty: pass a day after its end so none is left out.
   const bars = useMemo(() => weekBars(serviceData.dates, start, end, start > today ? addDays(end, 1) : today, system), [serviceData.dates, start, end, today, system]);
   // "November" / "Mangsir": the month's name without its year.
@@ -165,10 +165,6 @@ function EmployeeKpiBody({ report, onClose }: { report: ReportKind | null; onClo
             eyebrow={services.title}
             name={kpiLabel('utilisation', settings)}
             data={serviceData}
-            presentDays={current?.tracked ? current.presentDays : null}
-            previousPresentDays={previousKpi?.tracked ? previousKpi.presentDays : null}
-            attendanceLoading={loading || !loaded}
-            hoursPerDay={settings.hoursPerDay}
             monthName={monthName}
             previousName={previousName}
             notStarted={start > today}
@@ -216,7 +212,7 @@ function EmployeeKpiBody({ report, onClose }: { report: ReportKind | null; onClo
         <KpiReportDialog
           kind={report}
           onClose={onClose}
-          ctx={{ employeeId, start, end, monthLabel: label, personName: employee.name, mine: false, hoursPerDay: settings.hoursPerDay, today, attendance: current }}
+          ctx={{ employeeId, start, end, monthLabel: label, personName: employee.name, mine: false, today, attendance: current }}
         />
       )}
     </div>

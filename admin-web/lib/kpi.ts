@@ -51,7 +51,7 @@ export const KPI_GROUPS: KpiGroup[] = [
   {
     id: 'services',
     title: 'Services',
-    source: 'From the booking import',
+    source: 'From the Tasks page and the booking import',
     columns: [
       { id: 'services', label: 'Services performed', width: 100, connected: true },
       { id: 'rebooking', label: 'Rebooking rate', width: 100, connected: true },
@@ -59,7 +59,7 @@ export const KPI_GROUPS: KpiGroup[] = [
     ],
     connected: false,
     emptyNote: 'No import yet',
-    waiting: 'Services performed, rebooking and hour utilisation fill in once your booking data is imported.',
+    waiting: 'Services performed and hour utilisation fill in from the Tasks page; rebooking once your booking data is imported.',
   },
   {
     id: 'customers',

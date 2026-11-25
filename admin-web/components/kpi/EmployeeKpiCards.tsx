@@ -6,9 +6,9 @@ import { compare, compareServices, lowerFirst, type Change } from '@/lib/compare
 import { isKpiOn, type KpiId, type KpiSettings } from '@/lib/kpiSettings';
 import { numberText } from '@/lib/ownKpi';
 import { serviceWord, type WeekBar } from '@/lib/serviceKpi';
-import type { PersonServices } from '@/lib/useServiceKpi';
+import type { PersonTasks } from '@/lib/useTaskKpi';
+import { utilisationPct } from '@/lib/taskKpi';
 import { rebookingPct } from '@/lib/rebookingKpi';
-import { hoursText, restOfDay, utilisation } from '@/lib/utilisationKpi';
 import { averageText, feedbackState, formWord } from '@/lib/feedbackKpi';
 import { npsState, scoreText, scoreWords, sharePct } from '@/lib/npsKpi';
 import { RELATION_OF_KPI, reviewWord, roleState } from '@/lib/colleagueKpi';
@@ -310,12 +310,12 @@ export function AttendanceCard({ eyebrow, name, current, previous, previousName,
   );
 }
 
-/** Services performed: the month's total, and bars of how many in each week. The week that is still going is a pale
- * bar. Under it, the whole of last month. Empty states say what is missing instead of showing a misleading 0. */
+/** Services performed: the tasks completed in the month (one task is one service), and bars of how many in each week. The
+ * week that is still going is a pale bar. Under it, the whole of last month. With no task in the month it shows a dash. */
 export function ServicesCard({ eyebrow, name, data, bars, monthName, previousName, thisMonthSoFar, notStarted, className = '' }: {
   eyebrow: string;
   name: string;
-  data: PersonServices;
+  data: PersonTasks;
   bars: WeekBar[];
   /** The month on screen without its year ("November", "Mangsir"). */
   monthName: string;
@@ -328,18 +328,18 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
   const mode = useCardMode();
   const total = data.dates.length;
   const partial = bars.some(b => b.partial);
-  const hint = mode.mine || notStarted ? undefined : 'No services imported for this month. Import your booking file in the Import section to fill this in.';
+  const hint = mode.mine || notStarted ? undefined : 'No tasks this month. Give tasks on the Tasks page to fill this in.';
   let body: React.ReactNode;
   if (!data.loading && !data.error && (notStarted || !data.monthHasData)) {
     // Nothing to show yet: the chart is drawn all the same, 0 and an empty bar for each week.
     body = (
       <div title={hint}>
         <div className="-mt-1 mb-1 flex items-baseline gap-3">
-          {/* A dash, not a 0: with no booking file for the month nobody can say that nothing was done. */}
+          {/* A dash, not a 0: with no task in the month there is nothing to count. */}
           <div className="text-[34px] font-extrabold leading-[1.1] tabular-nums text-slate-300">–</div>
           <div className="text-[12.5px] text-slate-600">services in {monthName}</div>
         </div>
-        <Bars bars={bars} aria={notStarted ? `Services performed each week in ${monthName}: this month has not started` : `Services performed each week in ${monthName}: no services imported for this month`} />
+        <Bars bars={bars} aria={notStarted ? `Services performed each week in ${monthName}: this month has not started` : `Services performed each week in ${monthName}: no tasks this month`} />
       </div>
     );
   } else if (data.loading) body = <Message title="Loading…" />;
@@ -438,69 +438,56 @@ export function RebookingCard({ eyebrow, name, data, monthName, previousName, no
   );
 }
 
-/** Hour utilisation per day: a ring of how much of the working day this person spends with customers, averaged over the
- * days they worked, with the hours beside it. Under it, last month. The empty states say what is missing. */
-export function UtilisationCard({ eyebrow, name, data, presentDays, previousPresentDays, attendanceLoading, hoursPerDay, monthName, previousName, notStarted, className = '' }: {
+/** Hour utilisation per day: a ring of the share of this person's tasks that are done, out of the tasks that should be done by
+ * now (one task is one service, however long it takes), with the two numbers beside it. Under it, last month. */
+export function UtilisationCard({ eyebrow, name, data, monthName, previousName, notStarted, className = '' }: {
   eyebrow: string;
   name: string;
-  data: PersonServices;
-  /** Days at work this month and last, from attendance (null for someone excused from attendance). */
-  presentDays: number | null;
-  previousPresentDays: number | null;
-  attendanceLoading: boolean;
-  /** The working day in hours (Settings). */
-  hoursPerDay: number;
+  data: PersonTasks;
   monthName: string;
   previousName: string;
   notStarted: boolean;
   className?: string;
 }) {
   const mode = useCardMode();
-  const { words } = useKpiSettings();
-  const cur = utilisation(data.time, presentDays, hoursPerDay);
-  const prev = utilisation(data.previousTime, previousPresentDays, hoursPerDay);
-  const hint =
-    mode.mine || notStarted
-      ? undefined
-      : data.timeReason === 'none'
-        ? 'No services imported for this month. Import your booking file in the Import section to fill this in.'
-        : data.timeReason === 'notime'
-          ? 'No time in the file. Choose a "Time with the customer" column when you import, so the hours can be worked out.'
-          : `No services with a time in ${monthName}`;
+  const cur = data.current;
+  const pct = utilisationPct(cur);
+  const prevPct = utilisationPct(data.previous);
+  const hint = mode.mine || notStarted ? undefined : data.monthHasData ? `No tasks due yet in ${monthName}` : 'No tasks this month. Give tasks on the Tasks page to fill this in.';
   let body: React.ReactNode;
-  if (!data.loading && !attendanceLoading && !data.error && (notStarted || !!data.timeReason || !cur)) {
+  if (!data.loading && !data.error && (notStarted || pct == null || !cur)) {
     body = (
       <EmptyRingBody
         hint={hint}
-        aria={notStarted ? 'This month has not started: nothing to show yet' : `0 percent: no time with a ${words.one} in ${monthName}`}
-        small={`of ${hoursText(hoursPerDay)} h`}
+        aria={notStarted ? 'This month has not started: nothing to show yet' : `0 percent: no tasks due in ${monthName}`}
+        small="of tasks"
         rows={[
-          { color: KPI_COLORS.accent, label: `With a ${words.one}` },
-          { color: KPI_COLORS.track, label: 'Rest of the day', bordered: true },
+          { color: KPI_COLORS.accent, label: 'Done' },
+          { color: KPI_COLORS.track, label: 'Not done', bordered: true },
         ]}
       />
     );
-  } else if (data.loading || attendanceLoading) body = <Message title="Loading…" />;
+  } else if (data.loading) body = <Message title="Loading…" />;
   else if (data.error) body = <Message title={UNREAD.title} text={UNREAD.text} />;
-  else if (cur) {
+  else if (cur && pct != null) {
     body = (
       <>
         <div className="flex justify-center">
-          <Ring pct={cur.pct} size={156} stroke={16} aria={`${cur.pct} percent: ${hoursText(cur.avgHours)} hours of a ${hoursText(cur.hoursPerDay)}-hour day with a ${words.one}`} big={`${cur.pct}%`} small={`${hoursText(cur.avgHours)} of ${hoursText(cur.hoursPerDay)} h`} />
+          <Ring pct={pct} size={156} stroke={16} aria={`${pct} percent: ${cur.done} of ${cur.assigned} tasks done`} big={`${pct}%`} small={`${cur.done} of ${cur.assigned} tasks`} />
         </div>
         <div className="mt-3.5 flex flex-col gap-2">
-          <LegendRow color={KPI_COLORS.accent} label={`With a ${words.one}`} value={`${hoursText(cur.avgHours)} h a day`} />
-          <LegendRow color={KPI_COLORS.track} bordered label="Rest of the day" value={`${hoursText(restOfDay(cur))} h`} />
+          <LegendRow color={KPI_COLORS.accent} label="Done" value={String(cur.done)} />
+          <LegendRow color={KPI_COLORS.track} bordered label="Not done" value={String(cur.assigned - cur.done)} />
         </div>
       </>
     );
   }
   const footer =
-    !notStarted && !data.loading && !attendanceLoading && !data.error && !data.timeReason && cur && prev ? (
-      <Compare change={compare(cur.pct, prev.pct, { name: previousName, unit: 'points', shown: `${prev.pct}%` })} />
+    !notStarted && !data.loading && !data.error && pct != null && prevPct != null ? (
+      <Compare change={compare(pct, prevPct, { name: previousName, unit: 'points', shown: `${prevPct}%` })} />
     ) : null;
   return (
-    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} report="utilisation" reportable={!data.loading && !attendanceLoading && !data.error && !notStarted && !!cur}>
+    <Card eyebrow={eyebrow} name={name} className={className} footer={footer} report="utilisation" reportable={!data.loading && !data.error && !notStarted && pct != null}>
       {body}
     </Card>
   );

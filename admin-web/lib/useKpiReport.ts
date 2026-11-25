@@ -4,48 +4,13 @@ import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { MIGRATION, fetchAllChecked, loadProblem } from './kpiLoad';
 import { NO_END } from './rebookingKpi';
-import { rebookingGuests, type GuestLine, type ReportVisit, type ServiceRow } from './reportKpi';
+import { rebookingGuests, type GuestLine, type ReportVisit } from './reportKpi';
 
 // What a report reads when its card is opened (components/kpi/KpiReports.tsx). Each hook reads nothing until `enabled`, and says
 // "loading" until its rows for exactly the person and days asked for have arrived. An employee reads only their own rows (the
 // services), or goes through the functions that hand over just what is needed and never who (the guests' later visits).
 
 type Failure = { code?: string; message?: string } | null;
-
-/** One person's services between two days, with what was done and how long it took. */
-export function useReportServices(employeeId: string, start: string, end: string, enabled: boolean): { loading: boolean; rows: ServiceRow[]; error: string } {
-  const key = `${employeeId}|${start}|${end}`;
-  const [done, setDone] = useState<{ key: string; rows: ServiceRow[]; error: string } | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let live = true;
-    fetchAllChecked<ServiceRow>(
-      (a, b) =>
-        supabase
-          .from('service_records')
-          .select('performed_on, service, minutes')
-          .eq('employee_id', employeeId)
-          .gte('performed_on', start)
-          .lte('performed_on', end)
-          .order('performed_on', { ascending: true })
-          .order('id', { ascending: true })
-          .range(a, b),
-      'the services data',
-      MIGRATION.services
-    ).then(({ rows, error }) => {
-      if (live) setDone({ key, rows, error });
-    });
-    return () => {
-      live = false;
-    };
-    // `key` carries every value used here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, enabled]);
-
-  if (!enabled) return { loading: false, rows: [], error: '' };
-  return done && done.key === key ? { loading: false, rows: done.rows, error: done.error } : { loading: true, rows: [], error: '' };
-}
 
 const KEYS_PER_REQUEST = 100;
 

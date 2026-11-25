@@ -6,12 +6,12 @@ import { attendanceRates, type AttendanceKpi, type KpiGroup } from '@/lib/kpi';
 import { serviceWord } from '@/lib/serviceKpi';
 import { rebookingPct, type Rebooking } from '@/lib/rebookingKpi';
 import type { RebookingReason } from '@/lib/useRebookingKpi';
-import type { ServiceMonth } from '@/lib/useServiceKpi';
+import type { TaskMonth } from '@/lib/useTaskKpi';
+import { utilisationPct, type TaskCount } from '@/lib/taskKpi';
 import { averageText, feedbackState, formWord, type FeedbackSummary } from '@/lib/feedbackKpi';
 import { npsState, scoreText, type NpsSummary } from '@/lib/npsKpi';
 import type { FeedbackMonth } from '@/lib/useFeedbackKpi';
 import { RELATION_OF_KPI, reviewWord, roleState, type Roles } from '@/lib/colleagueKpi';
-import { hoursText, utilisation } from '@/lib/utilisationKpi';
 import { isOwnColumn, numberText, ownIdOf } from '@/lib/ownKpi';
 import type { OwnMonth } from '@/lib/useOwnKpiValues';
 import type { Employee } from '@/lib/types';
@@ -21,11 +21,9 @@ type Props = {
   groups: KpiGroup[];
   employees: Employee[];
   attendance: Map<string, AttendanceKpi>;
-  /** Services performed in the month, per person (`counts` is null when no booking file covers the month), and the time
-   * each spent with customers. */
-  services: ServiceMonth;
-  /** The working day, in hours (Settings), that time with customers is measured against. */
-  hoursPerDay: number;
+  /** Each person's tasks in the month (a task is a service): done, and due so far. `byEmployee` is null when nobody has a task
+   * in the month. */
+  tasks: TaskMonth;
   /** Rebooking per person: of the customers served, how many came back on a later day (no time limit). */
   rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string };
   /** Customer feedback and NPS per person from the forms typed in. */
@@ -46,7 +44,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place). Nothing is
  * added up, ranked or compared: a dash means there is nothing to show yet, or its numbers could not be read (the note
  * above the table says so in that case). */
-export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, feedback, colleagues, own, loading, notStarted, monthStart, emptyText = 'No employees to show.' }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, tasks, rebooking, feedback, colleagues, own, loading, notStarted, monthStart, emptyText = 'No employees to show.' }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -110,9 +108,9 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                         c.id === 'attendance' ? (
                           <AttendanceCell key={c.id} kpi={kpi} notStarted={notStarted} />
                         ) : c.id === 'services' ? (
-                          <ServicesCell key={c.id} group={g} first={i === 0} loading={services.loading} counts={services.counts} unread={!!services.error} employeeId={emp.id} notStarted={notStarted} />
+                          <ServicesCell key={c.id} group={g} first={i === 0} loading={tasks.loading} byEmployee={tasks.byEmployee} unread={!!tasks.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'utilisation' ? (
-                          <UtilisationCell key={c.id} group={g} first={i === 0} services={services} kpi={kpi} hoursPerDay={hoursPerDay} employeeId={emp.id} notStarted={notStarted} />
+                          <UtilisationCell key={c.id} group={g} first={i === 0} loading={tasks.loading} byEmployee={tasks.byEmployee} unread={!!tasks.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'feedback' ? (
                           <FeedbackCell key={c.id} group={g} first={i === 0} loading={feedback.loading} byEmployee={feedback.byEmployee} unread={!!feedback.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'peers' || c.id === 'manager' || c.id === 'clevel' || c.id === 'training' ? (
@@ -176,23 +174,23 @@ function AttendanceCell({ kpi, notStarted }: { kpi: AttendanceKpi | undefined; n
   );
 }
 
-/** How many services this person performed in the month. A dash when no booking file covers the month (that is not
- * the same as 0: someone with nothing in a month the others have services in did perform none). */
-function ServicesCell({ group, first, loading, counts, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; counts: Map<string, number> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
+/** How many services this person performed in the month: their tasks completed (one task is one service). A dash when nobody
+ * has a task in the month (that is not the same as 0: someone with none done in a month the others have tasks in did none). */
+function ServicesCell({ group, first, loading, byEmployee, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, TaskCount> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
-  if (loading || unread || !counts) {
+  if (loading || unread || !byEmployee) {
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
           <span aria-hidden="true">–</span>
-          <span className="sr-only">{loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : group.emptyNote}</span>
+          <span className="sr-only">{loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : 'No tasks yet'}</span>
         </div>
       </td>
     );
   }
-  const n = counts.get(employeeId) ?? 0;
+  const n = byEmployee.get(employeeId)?.done ?? 0;
   return (
-    <td className={cell} title={`${n} ${serviceWord(n)}`}>
+    <td className={cell} title={`${n} ${serviceWord(n)} (tasks done)`}>
       <div className="text-sm font-extrabold tabular-nums text-ink">{n}</div>
     </td>
   );
@@ -225,13 +223,14 @@ function RebookingCell({ group, first, loading, byEmployee, reason, unread, empl
   );
 }
 
-/** The share of the working day this person spent with customers, averaged over the days they worked, with the hours a day
- * under it. A dash says why there is nothing to show (not imported, no time in the file, no timed services). */
-function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId, notStarted }: { group: KpiGroup; first: boolean; services: ServiceMonth; kpi: AttendanceKpi | undefined; hoursPerDay: number; employeeId: string; notStarted: boolean }) {
+/** The share of this person's tasks that are done, out of the tasks that should be done by now, with the two numbers under it.
+ * A dash says why there is nothing to show (no tasks, none due yet). */
+function UtilisationCell({ group, first, loading, byEmployee, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, TaskCount> | null; unread: boolean; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
-  const u = services.time ? utilisation(services.time.get(employeeId), kpi?.tracked ? kpi.presentDays : null, hoursPerDay) : null;
-  if (services.loading || notStarted || services.error || services.reason || !u) {
-    const why = services.loading ? 'Loading' : notStarted ? 'Month has not started' : services.error ? UNREAD : services.reason === 'notime' ? 'No time in the file' : services.reason === 'none' ? group.emptyNote : 'No services with a time';
+  const c = byEmployee?.get(employeeId);
+  const pct = utilisationPct(c);
+  if (loading || notStarted || unread || !c || pct == null) {
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : !byEmployee || !c ? 'No tasks yet' : 'No tasks due yet';
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
@@ -242,9 +241,11 @@ function UtilisationCell({ group, first, services, kpi, hoursPerDay, employeeId,
     );
   }
   return (
-    <td className={cell} title={`${hoursText(u.avgHours)} hours a day with a customer, out of ${hoursText(u.hoursPerDay)}, over ${u.days} days worked`}>
-      <div className="text-sm font-extrabold tabular-nums text-ink">{u.pct}%</div>
-      <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">{hoursText(u.avgHours)} h a day</div>
+    <td className={cell} title={`${c.done} of ${c.assigned} tasks done`}>
+      <div className="text-sm font-extrabold tabular-nums text-ink">{pct}%</div>
+      <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
+        {c.done} of {c.assigned}
+      </div>
     </td>
   );
 }

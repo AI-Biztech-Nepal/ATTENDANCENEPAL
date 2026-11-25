@@ -9,12 +9,14 @@ import { attendanceRates, type AttendanceDayStatus, type AttendanceKpi } from '@
 import { kpiLabel } from '@/lib/kpiSettings';
 import { useKpiSettings } from '@/lib/useKpiSettings';
 import { daysBetween } from '@/lib/rebookingKpi';
-import { servicesByDay, servicesByType, utilisationByDay, type ReportKind } from '@/lib/reportKpi';
-import { useReportRebooking, useReportServices } from '@/lib/useKpiReport';
+import type { ReportKind } from '@/lib/reportKpi';
+import { useReportRebooking } from '@/lib/useKpiReport';
+import { useReportTasks } from '@/lib/useTaskKpi';
+import { countTasks, doneByTitle, tasksByDay, utilisationPct } from '@/lib/taskKpi';
+import { nepalTodayIso } from '@/lib/shift';
 import { useFeedbackAbout, useMyCustomerForms, useMyFeedback, type FeedbackRead, type MyCustomerForm } from '@/lib/useFeedback';
 import { averageText, formWord, summariseRatings } from '@/lib/feedbackKpi';
 import { scoreText, summariseNps } from '@/lib/npsKpi';
-import { hoursText, monthTime, utilisation } from '@/lib/utilisationKpi';
 import { RELATION_LABEL, feedbackCount, ratingWord, summariseReport } from '@/lib/colleagueFeedback';
 import { GiverLabel } from './FeedbackReport';
 import { GuestHistoryBody, GuestName, GuestOpenContext } from './GuestHistory';
@@ -30,7 +32,6 @@ export type ReportContext = {
   /** Whose KPIs: a name on an admin's page, "you" on the employee's own. */
   personName: string;
   mine: boolean;
-  hoursPerDay: number;
   today: string;
   attendance: AttendanceKpi | null;
 };
@@ -165,46 +166,44 @@ function AttendanceReport({ ctx }: { ctx: ReportContext }) {
 }
 
 // ---------------------------------------------------------------------------
-// Services performed: by service and by day
+// Services performed: the tasks done, by task and by day
 // ---------------------------------------------------------------------------
 
 function ServicesReport({ ctx }: { ctx: ReportContext }) {
   const day = useDayLabel();
-  const { rows, loading, error } = useReportServices(ctx.employeeId, ctx.start, ctx.end, true);
-  const types = servicesByType(rows);
-  const days = servicesByDay(rows);
-  const minutes = rows.reduce((n, r) => n + (r.minutes && r.minutes > 0 ? r.minutes : 0), 0);
-  const topCount = types[0]?.count ?? 1;
+  const { tasks, loading, error } = useReportTasks(ctx.employeeId, ctx.start, ctx.end, true);
+  const now = Date.now();
+  const titles = doneByTitle(tasks, ctx.start, ctx.end, now);
+  const doneDays = tasksByDay(tasks, ctx.start, ctx.end, now, nepalTodayIso()).filter(d => d.done > 0);
+  const total = titles.reduce((n, t) => n + t.count, 0);
+  const topCount = titles[0]?.count ?? 1;
   return (
     <Gate loading={loading} error={error}>
-      {rows.length === 0 ? (
-        <Empty>No services {ctx.mine ? 'for you ' : ''}in {ctx.monthLabel}.</Empty>
+      {total === 0 ? (
+        <Empty>No tasks done {ctx.mine ? 'by you ' : ''}in {ctx.monthLabel}.</Empty>
       ) : (
         <>
           <Tiles
             items={[
-              { label: 'Services', value: String(rows.length), note: `on ${days.length} ${days.length === 1 ? 'day' : 'days'}` },
-              { label: 'Time with guests', value: minutes > 0 ? `${hoursText(Math.round(minutes / 6) / 10)} h` : '–' },
-              { label: 'Kinds of service', value: String(types.length) },
+              { label: 'Services (tasks done)', value: String(total), note: `on ${doneDays.length} ${doneDays.length === 1 ? 'day' : 'days'}` },
+              { label: 'Kinds of task', value: String(titles.length) },
             ]}
           />
-          <Heading>By service</Heading>
+          <Heading>By task</Heading>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left text-[13px]">
               <thead>
                 <tr className="border-b border-slate-200">
-                  <th scope="col" className={TH}>Service</th>
+                  <th scope="col" className={TH}>Task</th>
                   <th scope="col" className={`${TH} text-center`}>Done</th>
-                  <th scope="col" className={`${TH} text-center`}>Time</th>
-                  <th scope="col" className={`${TH} w-[26%]`}><span className="sr-only">Share</span></th>
+                  <th scope="col" className={`${TH} w-[30%]`}><span className="sr-only">Share</span></th>
                 </tr>
               </thead>
               <tbody>
-                {types.map(t => (
-                  <tr key={t.service} className="border-b border-slate-100">
-                    <th scope="row" className={`${TD} font-semibold text-ink`}>{t.service}</th>
+                {titles.map(t => (
+                  <tr key={t.title} className="border-b border-slate-100">
+                    <th scope="row" className={`${TD} font-semibold text-ink`}>{t.title}</th>
                     <td className={`${TD} text-center font-bold tabular-nums text-ink`}>{t.count}</td>
-                    <td className={`${TD} text-center tabular-nums text-slate-700`}>{t.minutes > 0 ? `${hoursText(Math.round(t.minutes / 6) / 10)} h` : '–'}</td>
                     <td className={TD}><Bar pct={(t.count / topCount) * 100} /></td>
                   </tr>
                 ))}
@@ -217,16 +216,14 @@ function ServicesReport({ ctx }: { ctx: ReportContext }) {
               <thead>
                 <tr className="border-b border-slate-200">
                   <th scope="col" className={TH}>Day</th>
-                  <th scope="col" className={`${TH} text-center`}>Services</th>
-                  <th scope="col" className={`${TH} text-center`}>Time with guests</th>
+                  <th scope="col" className={`${TH} text-center`}>Tasks done</th>
                 </tr>
               </thead>
               <tbody>
-                {days.map(d => (
+                {doneDays.map(d => (
                   <tr key={d.date} className="border-b border-slate-100">
                     <th scope="row" className={`${TD} whitespace-nowrap font-semibold text-ink`}>{day(d.date)}</th>
-                    <td className={`${TD} text-center font-bold tabular-nums text-ink`}>{d.count}</td>
-                    <td className={`${TD} text-center tabular-nums text-slate-700`}>{d.minutes > 0 ? `${hoursText(Math.round(d.minutes / 6) / 10)} h` : '–'}</td>
+                    <td className={`${TD} text-center font-bold tabular-nums text-ink`}>{d.done}</td>
                   </tr>
                 ))}
               </tbody>
@@ -310,24 +307,24 @@ function RebookingReport({ ctx }: { ctx: ReportContext }) {
 // ---------------------------------------------------------------------------
 
 function UtilisationReport({ ctx }: { ctx: ReportContext }) {
-  const { words } = useKpiSettings();
   const day = useDayLabel();
-  const { rows, loading, error } = useReportServices(ctx.employeeId, ctx.start, ctx.end, true);
-  const a = ctx.attendance;
-  const presentDates = (a?.days ?? []).filter(d => d.status === 'on_time' || d.status === 'late').map(d => d.date);
-  const lines = utilisationByDay(rows, presentDates, ctx.hoursPerDay);
-  const u = utilisation(monthTime(rows, ctx.start, ctx.end), a?.tracked ? a.presentDays : null, ctx.hoursPerDay);
+  const { tasks, loading, error } = useReportTasks(ctx.employeeId, ctx.start, ctx.end, true);
+  const now = Date.now();
+  const today = nepalTodayIso();
+  const lines = tasksByDay(tasks, ctx.start, ctx.end, now, today);
+  const c = countTasks(tasks, ctx.start, ctx.end, now, today).get(ctx.employeeId);
+  const pct = utilisationPct(c);
   return (
     <Gate loading={loading} error={error}>
-      {!u ? (
-        <Empty>No time with {words.many} to show for {ctx.monthLabel}: no service has a time.</Empty>
+      {!c || pct == null ? (
+        <Empty>No tasks due {ctx.mine ? 'for you ' : ''}in {ctx.monthLabel} yet.</Empty>
       ) : (
         <>
           <Tiles
             items={[
-              { label: `Share of the ${hoursText(ctx.hoursPerDay)}-hour day`, value: `${u.pct}%` },
-              { label: `A day with ${words.many}`, value: `${hoursText(u.avgHours)} h`, note: `of ${hoursText(ctx.hoursPerDay)} h` },
-              { label: 'Days worked', value: String(u.days) },
+              { label: 'Utilisation', value: `${pct}%` },
+              { label: 'Tasks done', value: String(c.done) },
+              { label: 'Tasks due', value: String(c.assigned), note: c.assigned - c.done > 0 ? `${c.assigned - c.done} not done` : 'all done' },
             ]}
           />
           <div className="overflow-x-auto">
@@ -335,17 +332,17 @@ function UtilisationReport({ ctx }: { ctx: ReportContext }) {
               <thead>
                 <tr className="border-b border-slate-200">
                   <th scope="col" className={TH}>Day</th>
-                  <th scope="col" className={`${TH} text-center`}>Services</th>
-                  <th scope="col" className={`${TH} text-center`}>With {words.many}</th>
-                  <th scope="col" className={`${TH} w-[34%]`}>Share of the day</th>
+                  <th scope="col" className={`${TH} text-center`}>Due</th>
+                  <th scope="col" className={`${TH} text-center`}>Done</th>
+                  <th scope="col" className={`${TH} w-[34%]`}>Done of due</th>
                 </tr>
               </thead>
               <tbody>
                 {lines.map(l => (
                   <tr key={l.date} className="border-b border-slate-100">
                     <th scope="row" className={`${TD} whitespace-nowrap font-semibold text-ink`}>{day(l.date)}</th>
-                    <td className={`${TD} text-center tabular-nums`}>{l.services || '–'}</td>
-                    <td className={`${TD} text-center tabular-nums`}>{l.minutes > 0 ? `${hoursText(Math.round(l.minutes / 6) / 10)} h` : '0 h'}</td>
+                    <td className={`${TD} text-center tabular-nums`}>{l.assigned}</td>
+                    <td className={`${TD} text-center font-bold tabular-nums text-ink`}>{l.done}</td>
                     <td className={TD}>
                       <div className="flex items-center gap-2">
                         <Bar pct={l.pct} />

@@ -8,7 +8,7 @@ import { buildMonth, monthDateRange, stepAnchor, todayAnchor } from '@/lib/calen
 import { otherCalendarSpan, parseMonthParam, visibleGroups } from '@/lib/kpi';
 import { useKpiOverview } from '@/lib/useKpiOverview';
 import { useKpiSettings } from '@/lib/useKpiSettings';
-import { useServiceMonth } from '@/lib/useServiceKpi';
+import { useTaskMonth } from '@/lib/useTaskKpi';
 import { useRebooking } from '@/lib/useRebookingKpi';
 import { useFeedbackMonth } from '@/lib/useFeedbackKpi';
 import { useColleagueMonth } from '@/lib/useColleagueKpi';
@@ -54,7 +54,7 @@ function Kpis() {
   const isThisMonth = thisMonth.start === start;
 
   const { loading, error, employees, attendance, today } = useKpiOverview(start, end);
-  const services = useServiceMonth(start, end, start <= today);
+  const tasks = useTaskMonth(start, end, start <= today);
   // Which KPIs this company uses, and what it calls them (KPIs > Settings).
   const { settings, loaded } = useKpiSettings();
   // The KPIs the company added itself (Settings > "Add your own KPI"), and the numbers typed in for them this month.
@@ -88,7 +88,7 @@ function Kpis() {
     router.replace(qs ? `/kpis?${qs}` : '/kpis');
   }
   // A table that is missing or a refused read is said out loud, so a dash never hides a number that could not be read.
-  const problems = problemsOf(services.error, rebooking.error, feedback.error, colleagues.error, ownKpis.error, own.error);
+  const problems = problemsOf(tasks.error, rebooking.error, feedback.error, colleagues.error, ownKpis.error, own.error);
 
   return (
     <div className="flex flex-col gap-4">
@@ -145,7 +145,7 @@ function Kpis() {
 
       <LoadProblems problems={problems} />
 
-      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} feedback={feedback} colleagues={colleagues} own={own} loading={loading || !loaded || !ownKpis.loaded} notStarted={start > today} monthStart={start} emptyText={searchTerm ? `No employee matches “${searchTerm}”.` : undefined} />
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} tasks={tasks} rebooking={rebooking} feedback={feedback} colleagues={colleagues} own={own} loading={loading || !loaded || !ownKpis.loaded} notStarted={start > today} monthStart={start} emptyText={searchTerm ? `No employee matches “${searchTerm}”.` : undefined} />
     </div>
   );
 }
