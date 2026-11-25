@@ -330,13 +330,16 @@ export default function TasksPage() {
     return null;
   }
 
-  // Cancel a task that has not been reviewed: it is deleted. Time tracked on it refers to it, so that goes first.
+  // Cancel a task that has not been reviewed: it is deleted, and the time tracked on it goes with it.
   // Resolves to an error message, or null when it worked.
   async function cancelTask(task: Task): Promise<string | null> {
-    const logs = await supabase.from('task_time_logs').delete().eq('task_id', task.id).select('id');
-    if (logs.error) return `Could not cancel the task: ${logs.error.message}`;
+    // One delete: the database removes the task's time logs with it (20261125200000_task_time_logs_cascade.sql), so either both go or
+    // neither does. Without that migration it refuses a task that has time logged (foreign key 23503), and nothing is touched.
     const { data, error } = await supabase.from('tasks').delete().eq('id', task.id).select('id');
-    if (error) return `Could not cancel the task: ${error.message}`;
+    if (error) {
+      if (error.code === '23503') return 'Could not cancel the task: it has tracked time, and the database cannot remove that with it yet. Run 20261125200000_task_time_logs_cascade.sql, then try again. Nothing was changed.';
+      return `Could not cancel the task: ${error.message}`;
+    }
     // .select() so a delete the security rules turn away is noticed instead of "cancelling" nothing.
     if (!((data as unknown[] | null) ?? []).length) return 'Could not cancel the task: nothing was removed. It may already be gone, or you may not be allowed to remove it.';
     reload();
