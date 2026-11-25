@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import ReportDialog from './ReportDialog';
 import { KPI_COLORS } from './KpiCharts';
 import { useCalendarSystem } from '@/lib/calendarSystem';
@@ -16,6 +17,8 @@ import { scoreText, summariseNps } from '@/lib/npsKpi';
 import { hoursText, monthTime, utilisation } from '@/lib/utilisationKpi';
 import { RELATION_LABEL, feedbackCount, ratingWord, summariseReport } from '@/lib/colleagueFeedback';
 import { GiverLabel } from './FeedbackReport';
+import { GuestHistoryBody, GuestName, GuestOpenContext } from './GuestHistory';
+import type { GuestAnchor } from '@/lib/guestHistory';
 
 /** What a report needs to know about the page it was opened from. */
 export type ReportContext = {
@@ -28,7 +31,6 @@ export type ReportContext = {
   personName: string;
   mine: boolean;
   hoursPerDay: number;
-  repeatDays: number;
   today: string;
   attendance: AttendanceKpi | null;
 };
@@ -243,13 +245,13 @@ function ServicesReport({ ctx }: { ctx: ReportContext }) {
 function RebookingReport({ ctx }: { ctx: ReportContext }) {
   const { words } = useKpiSettings();
   const day = useDayLabel();
-  const { guests, loading, error } = useReportRebooking({ employeeId: ctx.employeeId, start: ctx.start, end: ctx.end, windowDays: ctx.repeatDays, today: ctx.today, mine: ctx.mine, enabled: true });
+  const { guests, loading, error } = useReportRebooking({ employeeId: ctx.employeeId, start: ctx.start, end: ctx.end, mine: ctx.mine, enabled: true });
   const back = guests.filter(g => g.state === 'back').length;
   const pct = guests.length > 0 ? Math.round((back / guests.length) * 100) : null;
   return (
     <Gate loading={loading} error={error}>
       {guests.length === 0 ? (
-        <Empty>{words.t(`No customers ${ctx.mine ? 'you ' : ''}served with a code in ${ctx.monthLabel}.`)}</Empty>
+        <Empty>{words.t(`No customers ${ctx.mine ? 'you ' : ''}served in ${ctx.monthLabel}.`)}</Empty>
       ) : (
         <>
           <Tiles
@@ -273,7 +275,13 @@ function RebookingReport({ ctx }: { ctx: ReportContext }) {
                 {guests.map((g, i) => (
                   <tr key={g.key} className="border-b border-slate-100">
                     <th scope="row" className={`${TD} whitespace-nowrap font-semibold text-ink`}>
-                      {words.One} {i + 1} <span className="font-normal text-slate-500" title="The code made by the import. Names are never imported.">· {g.key.slice(0, 4)}</span>
+                      {g.name ? (
+                        <GuestName name={g.name} anchor={g.anchorId ? { serviceId: g.anchorId } : null} />
+                      ) : (
+                        <span title={words.t('Imported before customer names were kept: import the file again to see the name.')}>
+                          {words.One} {i + 1}
+                        </span>
+                      )}
                     </th>
                     <td className={`${TD} whitespace-nowrap text-slate-700`}>{day(g.first)}</td>
                     <td className={`${TD} text-center tabular-nums`}>{g.visits}</td>
@@ -282,8 +290,6 @@ function RebookingReport({ ctx }: { ctx: ReportContext }) {
                         <span className="font-semibold text-teal-800">
                           {day(g.returnedOn)} <span className="font-normal text-slate-600">· {dayCount(daysBetween(g.first, g.returnedOn))} later</span>
                         </span>
-                      ) : g.state === 'may_return' ? (
-                        <span className="text-slate-600">Not yet, may still come back</span>
                       ) : (
                         <span className="text-slate-600">Not yet</span>
                       )}
@@ -376,7 +382,7 @@ function NamesNote({ text }: { text: string }) {
 }
 
 /** The guest's name on a form, when it is on file. */
-const GuestName = ({ f }: { f: MyCustomerForm }) => (f.guest_name ? <span className="text-[13.5px] font-extrabold text-ink">{f.guest_name}</span> : null);
+const FormGuest = ({ f }: { f: MyCustomerForm }) => (f.guest_name ? <GuestName name={f.guest_name} anchor={{ feedbackId: f.id }} className="text-[13.5px]" /> : null);
 
 function FormComment({ f }: { f: MyCustomerForm }) {
   return f.comment ? <p className="m-0 mt-1 whitespace-pre-line text-sm leading-relaxed text-ink">{f.comment}</p> : <p className="m-0 mt-1 text-sm italic text-slate-500">No comment.</p>;
@@ -412,7 +418,7 @@ function GuestFeedbackReport({ ctx }: { ctx: ReportContext }) {
             {forms.map(f => (
               <li key={f.id} className="border-b border-slate-100 py-3 last:border-0">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
-                  <GuestName f={f} />
+                  <FormGuest f={f} />
                   <span className="font-bold text-slate-700">{day(f.given_on)}</span>
                   <Stars rating={f.rating} />
                   {f.recommend != null && <span>Would recommend: {f.recommend} out of 10</span>}
@@ -457,7 +463,7 @@ function NpsReport({ ctx }: { ctx: ReportContext }) {
               return (
                 <li key={f.id} className="border-b border-slate-100 py-3 last:border-0">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
-                    <GuestName f={f} />
+                    <FormGuest f={f} />
                     <span className="font-bold text-slate-700">{day(f.given_on)}</span>
                     <b className="text-[15px] tabular-nums text-ink">{f.recommend} <span className="text-[12px] font-medium text-slate-600">out of 10</span></b>
                     <span className={`rounded-full px-2.5 py-0.5 text-[12px] font-bold ${k.cls}`}>{k.label}</span>
@@ -519,6 +525,8 @@ const ColleaguesMine = ({ ctx }: { ctx: ReportContext }) => <ColleagueBody read=
 /** The report behind one KPI card, in a pop-up. It reads nothing until it is open. */
 export default function KpiReportDialog({ kind, ctx, onClose }: { kind: ReportKind; ctx: ReportContext; onClose: () => void }) {
   const { settings, words } = useKpiSettings();
+  // A guest's name in the report opens their history here, in place of the report (which stays loaded behind it).
+  const [guest, setGuest] = useState<{ anchor: GuestAnchor; name: string } | null>(null);
   const head: Record<ReportKind, { eyebrow: string; title: string }> = {
     attendance: { eyebrow: 'Attendance', title: kpiLabel('attendance', settings) },
     services: { eyebrow: 'Services', title: kpiLabel('services', settings, 'Number of services performed') },
@@ -529,14 +537,39 @@ export default function KpiReportDialog({ kind, ctx, onClose }: { kind: ReportKi
     colleagues: { eyebrow: 'Colleagues', title: 'Feedback from colleagues' },
   };
   return (
-    <ReportDialog eyebrow={head[kind].eyebrow} title={head[kind].title} subtitle={`${ctx.personName} · ${ctx.monthLabel}`} onClose={onClose}>
-      {kind === 'attendance' && <AttendanceReport ctx={ctx} />}
-      {kind === 'services' && <ServicesReport ctx={ctx} />}
-      {kind === 'rebooking' && <RebookingReport ctx={ctx} />}
-      {kind === 'utilisation' && <UtilisationReport ctx={ctx} />}
-      {kind === 'feedback' && <GuestFeedbackReport ctx={ctx} />}
-      {kind === 'nps' && <NpsReport ctx={ctx} />}
-      {kind === 'colleagues' && (ctx.mine ? <ColleaguesMine ctx={ctx} /> : <ColleaguesAdmin ctx={ctx} />)}
+    <ReportDialog
+      eyebrow={guest ? words.One : head[kind].eyebrow}
+      title={guest ? guest.name : head[kind].title}
+      subtitle={guest ? undefined : `${ctx.personName} · ${ctx.monthLabel}`}
+      onClose={onClose}
+    >
+      {guest && (
+        <div>
+          <button
+            type="button"
+            autoFocus
+            onClick={() => setGuest(null)}
+            className="-ml-1 mb-3 inline-flex min-h-[44px] items-center gap-1.5 rounded-[10px] px-1 text-sm font-bold text-teal-800 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <svg viewBox="0 0 24 24" width={16} height={16} fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+            Back to {head[kind].title}
+          </button>
+          <GuestHistoryBody anchor={guest.anchor} />
+        </div>
+      )}
+      <div hidden={!!guest}>
+        <GuestOpenContext.Provider value={(anchor, name) => setGuest({ anchor, name })}>
+          {kind === 'attendance' && <AttendanceReport ctx={ctx} />}
+          {kind === 'services' && <ServicesReport ctx={ctx} />}
+          {kind === 'rebooking' && <RebookingReport ctx={ctx} />}
+          {kind === 'utilisation' && <UtilisationReport ctx={ctx} />}
+          {kind === 'feedback' && <GuestFeedbackReport ctx={ctx} />}
+          {kind === 'nps' && <NpsReport ctx={ctx} />}
+          {kind === 'colleagues' && (ctx.mine ? <ColleaguesMine ctx={ctx} /> : <ColleaguesAdmin ctx={ctx} />)}
+        </GuestOpenContext.Provider>
+      </div>
     </ReportDialog>
   );
 }

@@ -64,8 +64,7 @@ function Kpis() {
   const own = useOwnMonth(ownIds, start, end, ownIds.length > 0 && start <= today);
   const feedback = useFeedbackMonth(start, end, (isKpiOn('feedback', settings) || isKpiOn('nps', settings)) && start <= today);
   const colleagues = useColleagueMonth(start, end, COLLEAGUE_KPIS.some(id => isKpiOn(id, settings)) && start <= today);
-  // Rebooking waits for the settings, because the "back within N days" setting decides who counts.
-  const rebooking = useRebooking(start, end, settings.repeatDays, loaded && isKpiOn('rebooking', settings) && start <= today);
+  const rebooking = useRebooking(start, end, isKpiOn('rebooking', settings) && start <= today);
 
   const departments = useMemo(
     () => [...new Set(employees.map(e => e.department).filter((d): d is string => !!d))].sort((a, b) => a.localeCompare(b)),
@@ -146,7 +145,7 @@ function Kpis() {
 
       <LoadProblems problems={problems} />
 
-      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} windowDays={settings.repeatDays} feedback={feedback} colleagues={colleagues} own={own} loading={loading || !loaded || !ownKpis.loaded} notStarted={start > today} monthStart={start} emptyText={searchTerm ? `No employee matches “${searchTerm}”.` : undefined} />
+      <KpiOverviewTable groups={groups} employees={shown} attendance={attendance} services={services} hoursPerDay={settings.hoursPerDay} rebooking={rebooking} feedback={feedback} colleagues={colleagues} own={own} loading={loading || !loaded || !ownKpis.loaded} notStarted={start > today} monthStart={start} emptyText={searchTerm ? `No employee matches “${searchTerm}”.` : undefined} />
     </div>
   );
 }

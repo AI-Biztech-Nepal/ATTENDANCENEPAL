@@ -374,12 +374,11 @@ export function ServicesCard({ eyebrow, name, data, bars, monthName, previousNam
 }
 
 /** Rebooking rate: a ring of the share of this person's customers who booked again, with the two numbers beside it.
- * Under it, last month's rate. The empty states say what is missing (nothing imported, no customer codes, no customers). */
-export function RebookingCard({ eyebrow, name, data, windowDays, monthName, previousName, notStarted, className = '' }: {
+ * Under it, last month's rate. The empty states say what is missing (nothing imported, no customer names, no customers). */
+export function RebookingCard({ eyebrow, name, data, monthName, previousName, notStarted, className = '' }: {
   eyebrow: string;
   name: string;
   data: PersonRebooking;
-  windowDays: number;
   /** The month on screen without its year ("November", "Mangsir"). */
   monthName: string;
   previousName: string;
@@ -395,7 +394,7 @@ export function RebookingCard({ eyebrow, name, data, windowDays, monthName, prev
       : data.reason === 'none'
         ? 'No services imported for this month. Import your booking file in the Import section to fill this in.'
         : data.reason === 'nocodes'
-          ? words.t('No customer codes in the file. Choose a "Customer code" column when you import, so we can tell who came back.')
+          ? words.t('No customer names in the file. Choose the "Customer name" and "Customer phone" columns when you import, so we can tell who came back.')
           : words.t(`No customers served in ${monthName}`);
   let body: React.ReactNode;
   if (!data.loading && !data.error && (notStarted || !cur)) {

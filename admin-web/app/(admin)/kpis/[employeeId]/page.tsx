@@ -88,7 +88,7 @@ function EmployeeKpiBody({ report, onClose }: { report: ReportKind | null; onClo
   const feedbackData = usePersonFeedback(employeeId, { start, end }, previous, (on('feedback') || on('nps')) && start <= today);
   const colleagueData = usePersonColleagues(employeeId, { start, end }, previous, COLLEAGUE_KPIS.some(on) && start <= today);
   const ownData = usePersonOwn(employeeId, ownIds, { start, end }, previous, ownIds.length > 0 && start <= today);
-  const rebookingData = usePersonRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
+  const rebookingData = usePersonRebooking(employeeId, { start, end }, previous, on('rebooking') && start <= today);
 
   if (notFound || error) {
     return (
@@ -155,7 +155,6 @@ function EmployeeKpiBody({ report, onClose }: { report: ReportKind | null; onClo
             eyebrow={services.title}
             name={kpiLabel('rebooking', settings)}
             data={loaded ? rebookingData : { ...rebookingData, loading: true }}
-            windowDays={settings.repeatDays}
             monthName={monthName}
             previousName={previousName}
             notStarted={start > today}
@@ -217,7 +216,7 @@ function EmployeeKpiBody({ report, onClose }: { report: ReportKind | null; onClo
         <KpiReportDialog
           kind={report}
           onClose={onClose}
-          ctx={{ employeeId, start, end, monthLabel: label, personName: employee.name, mine: false, hoursPerDay: settings.hoursPerDay, repeatDays: settings.repeatDays, today, attendance: current }}
+          ctx={{ employeeId, start, end, monthLabel: label, personName: employee.name, mine: false, hoursPerDay: settings.hoursPerDay, today, attendance: current }}
         />
       )}
     </div>

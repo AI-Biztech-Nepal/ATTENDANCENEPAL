@@ -3,12 +3,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { MIGRATION, fetchAllChecked } from './kpiLoad';
-import { addDays } from './taskSchedule';
 import { computeRebooking, type CustomerVisit, type Rebooking } from './rebookingKpi';
 import type { MonthRange } from './useServiceKpi';
 
 /** Why there is nothing to work out for a month: 'none' = no booking file covers it, 'nocodes' = the file that does
- * had no customer code, so nobody can be told apart. */
+ * had no customer name, phone or ID, so nobody can be told apart. */
 export type RebookingReason = 'none' | 'nocodes' | null;
 
 async function countServices(start: string, end: string, coded: boolean): Promise<number> {
@@ -24,18 +23,18 @@ async function whyEmpty(start: string, end: string): Promise<RebookingReason> {
   return (await countServices(start, end, false)) > 0 ? 'nocodes' : 'none';
 }
 
-/** The columns a visit needs, for customers who have a code. */
+/** The columns a visit needs, for rows that say who the customer was. */
 const VISIT_COLUMNS = 'employee_id, customer_key, performed_on';
 const WHAT = 'the services data';
 
 /**
- * Everyone's rebooking for the month `start`..`end`: of the customers each person served, how many booked again within
- * `windowDays`. The rows run `windowDays` past the month, because a customer served on its last day can come back after
- * it. `enabled` holds the work back (until the settings that give `windowDays` are read, or when the KPI is off).
- * `error` is set when the services could not be read, which is not the same as "no data".
+ * Everyone's rebooking for the month `start`..`end`: of the customers each person served, how many came back on a later
+ * day, with no time limit. The rows run from the month's start with no end, because a customer can come back any time
+ * after. `enabled` holds the work back (when the KPI is off, or the month has not begun). `error` is set when the services
+ * could not be read, which is not the same as "no data".
  */
-export function useRebooking(start: string, end: string, windowDays: number, enabled: boolean): { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string } {
-  const key = `${start}|${end}|${windowDays}`;
+export function useRebooking(start: string, end: string, enabled: boolean): { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string } {
+  const key = `${start}|${end}`;
   const [done, setDone] = useState<{ key: string; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string } | null>(null);
 
   useEffect(() => {
@@ -49,20 +48,19 @@ export function useRebooking(start: string, end: string, windowDays: number, ena
             .select(VISIT_COLUMNS)
             .not('customer_key', 'is', null)
             .gte('performed_on', start)
-            .lte('performed_on', addDays(end, windowDays))
             .order('id', { ascending: true })
             .range(a, b),
         WHAT,
         MIGRATION.services
       );
-      const byEmployee = computeRebooking(visits, start, end, windowDays);
+      const byEmployee = computeRebooking(visits, start, end);
       const reason = byEmployee.size > 0 || error ? null : await whyEmpty(start, end);
       if (live) setDone({ key, byEmployee: byEmployee.size > 0 ? byEmployee : null, reason, error });
     })();
     return () => {
       live = false;
     };
-    // `key` carries start, end and windowDays.
+    // `key` carries start and end.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, enabled]);
 
@@ -85,11 +83,11 @@ const KEYS_PER_REQUEST = 100;
 
 /**
  * One person's rebooking for the month `cur` and the month `prev` before it. Only this person's customers are looked up:
- * first the customer codes of their own services, then every visit by those customers (to anyone) in the two months
- * and the `windowDays` after.
+ * first the customer keys of their own services, then every visit by those customers (to anyone) from the start of the
+ * month before, with no end.
  */
-export function usePersonRebooking(employeeId: string, cur: MonthRange, prev: MonthRange, windowDays: number, enabled: boolean): PersonRebooking {
-  const key = `${employeeId}|${cur.start}|${cur.end}|${prev.start}|${prev.end}|${windowDays}`;
+export function usePersonRebooking(employeeId: string, cur: MonthRange, prev: MonthRange, enabled: boolean): PersonRebooking {
+  const key = `${employeeId}|${cur.start}|${cur.end}|${prev.start}|${prev.end}`;
   const [done, setDone] = useState<{ key: string; value: Omit<PersonRebooking, 'loading'> } | null>(null);
 
   useEffect(() => {
@@ -122,7 +120,6 @@ export function usePersonRebooking(employeeId: string, cur: MonthRange, prev: Mo
               .select(VISIT_COLUMNS)
               .in('customer_key', chunk)
               .gte('performed_on', prev.start)
-              .lte('performed_on', addDays(cur.end, windowDays))
               .order('id', { ascending: true })
               .range(a, b),
           WHAT,
@@ -131,8 +128,8 @@ export function usePersonRebooking(employeeId: string, cur: MonthRange, prev: Mo
         visits.push(...got.rows);
         error = got.error;
       }
-      const current = computeRebooking(visits, cur.start, cur.end, windowDays).get(employeeId) ?? null;
-      const previous = computeRebooking(visits, prev.start, prev.end, windowDays).get(employeeId) ?? null;
+      const current = computeRebooking(visits, cur.start, cur.end).get(employeeId) ?? null;
+      const previous = computeRebooking(visits, prev.start, prev.end).get(employeeId) ?? null;
       // Nothing to show for this person: is it because the month has nothing for anyone?
       const reason = current || error ? null : await whyEmpty(cur.start, cur.end);
       if (live) setDone({ key, value: { current, previous, reason, error } });

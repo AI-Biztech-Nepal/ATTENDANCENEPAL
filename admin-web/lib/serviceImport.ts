@@ -1,15 +1,18 @@
 // Service import: reads the CSV a booking system exports and works out which rows are services an employee performed.
 // Everything here is plain code with no network, so it can be tested on its own; the page (KPIs > Import) does the
-// uploading. Customers are never kept by name, phone number or ID: only a scrambled code (see customerKey()).
+// uploading. Each row keeps the customer's name and phone number when the file has them, and a key that tells two visits
+// were the same customer (see guestKey()).
 
-export type ColumnRole = 'employee' | 'date' | 'service' | 'minutes' | 'customer' | 'status' | 'ignore';
+export type ColumnRole = 'employee' | 'date' | 'service' | 'minutes' | 'customerName' | 'customerPhone' | 'customer' | 'status' | 'ignore';
 
 export const ROLE_LABEL: Record<ColumnRole, string> = {
   employee: 'Employee',
   date: 'Service date',
   service: 'Service name',
   minutes: 'Time with the customer',
-  customer: 'Customer code',
+  customerName: 'Customer name',
+  customerPhone: 'Customer phone',
+  customer: 'Customer ID',
   status: 'Status',
   ignore: 'Do not import',
 };
@@ -112,8 +115,10 @@ export function guessRoles(headers: string[]): ColumnRole[] {
     if (/\bdate\b|\bday\b|appointment|booked on|\bwhen\b/.test(h) && !/duration|time with/.test(h)) role = 'date';
     else if (/duration|minutes|\bmins?\b|\bhours?\b|\bhrs?\b|length|time spent|time with/.test(h)) role = 'minutes';
     else if (/status|outcome|\bstate\b/.test(h)) role = 'status';
+    else if (/phone|mobile|\bcell\b|contact/.test(h)) role = /staff|employee|therapist|provider|stylist|practitioner|doctor/.test(h) ? 'ignore' : 'customerPhone';
     else if (/(customer|client|guest|patient|member)\b.*(id|code|no|number|ref|#)/.test(h) || /^(customer|client|guest|patient|member)\s*(id|code|no|number|ref)$/.test(h)) role = 'customer';
-    else if (/(customer|client|guest|patient|member|phone|mobile|email|e-mail|address)/.test(h)) role = 'ignore';
+    else if (/email|e-mail|address/.test(h)) role = 'ignore';
+    else if (/(customer|client|guest|patient|member)/.test(h)) role = 'customerName';
     else if (/staff|employee|therapist|provider|stylist|practitioner|technician|doctor|consultant|served by|assigned|performed by|worker|operator/.test(h)) role = 'employee';
     else if (/service|treatment|procedure|item|product|\btype\b/.test(h)) role = 'service';
     if (role !== 'ignore' && taken.has(role)) role = 'ignore';
@@ -262,7 +267,7 @@ export type Mapping = {
   counted: Set<string> | null;
 };
 
-export type ImportRow = { employeeId: string; date: string; service: string | null; minutes: number | null; customer: string | null };
+export type ImportRow = { employeeId: string; date: string; service: string | null; minutes: number | null; customer: string | null; customerName: string | null; customerPhone: string | null };
 
 /** Why a row of the file is left out. */
 export type SkipReason = 'notCounted' | 'noName' | 'skippedByChoice' | 'unmatched' | 'badDate' | 'badTime' | 'future';
@@ -319,6 +324,8 @@ export function analyse(table: Table, mapping: Mapping, people: EmployeeRef[], n
   const iSvc = indexOfRole(roles, 'service');
   const iMin = indexOfRole(roles, 'minutes');
   const iCust = indexOfRole(roles, 'customer');
+  const iCustName = indexOfRole(roles, 'customerName');
+  const iCustPhone = indexOfRole(roles, 'customerPhone');
   const iStat = indexOfRole(roles, 'status');
   const matched = new Map<string, string | null>();
   const unknown = new Map<string, number>();
@@ -374,7 +381,9 @@ export function analyse(table: Table, mapping: Mapping, people: EmployeeRef[], n
     }
     const service = iSvc !== -1 ? row[iSvc].replace(/\s+/g, ' ').trim().slice(0, 120) || null : null;
     const customer = iCust !== -1 ? row[iCust] || null : null;
-    result.rows.push({ employeeId, date, service, minutes, customer });
+    const customerName = iCustName !== -1 ? row[iCustName].replace(/\s+/g, ' ').trim().slice(0, 100) || null : null;
+    const customerPhone = iCustPhone !== -1 ? row[iCustPhone].trim().slice(0, 30) || null : null;
+    result.rows.push({ employeeId, date, service, minutes, customer, customerName, customerPhone });
     result.rowStatus.push(null);
     if (!result.firstDate || date < result.firstDate) result.firstDate = date;
     if (!result.lastDate || date > result.lastDate) result.lastDate = date;
@@ -398,28 +407,37 @@ export function defaultCounted(values: string[]): Set<string> {
   return new Set(done.length > 0 ? done : values);
 }
 
-/** True when the sample values of a "customer code" column look like names, phone numbers or email addresses, so the
- * person can be warned before anything is sent. */
-export function looksLikePersonalData(samples: string[]): boolean {
-  const filled = samples.map(s => s.trim()).filter(Boolean).slice(0, 50);
-  if (filled.length === 0) return false;
-  const personal = filled.filter(s => s.includes('@') || /^\+?\d[\d\s-]{8,}$/.test(s) || /^[A-Za-z][A-Za-z.'-]*( [A-Za-z][A-Za-z.'-]*)+$/.test(s));
-  return personal.length / filled.length >= 0.4;
+// ---------------------------------------------------------------------------
+// Telling two visits were the same customer
+// ---------------------------------------------------------------------------
+
+/** A phone number as its last 10 digits, so "+977 980-0000001", "977-9800000001" and "9800000001" are one number. Null with
+ * fewer than 5 digits. The same rule as guest_phone_key() in the database. */
+export function phoneKey(phone: string | null | undefined): string | null {
+  const d = (phone ?? '').replace(/[^0-9]/g, '');
+  return d.length >= 5 ? d.slice(-10) : null;
+}
+
+/** A name in small letters with single spaces, or null. The same rule as guest_name_key() in the database. */
+export function nameKey(name: string | null | undefined): string | null {
+  const n = (name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return n || null;
+}
+
+/** The key that tells two visits were the same customer: their phone number when the row has one, otherwise their name,
+ * otherwise the booking system's customer ID. Null when the row says nothing about the customer. */
+export function guestKey(name: string | null, phone: string | null, id: string | null): string | null {
+  const p = phoneKey(phone);
+  if (p) return `p:${p}`;
+  const n = nameKey(name);
+  if (n) return `n:${n}`;
+  const c = (id ?? '').trim().toLowerCase();
+  return c ? `c:${c.slice(0, 120)}` : null;
 }
 
 // ---------------------------------------------------------------------------
 // What is sent
 // ---------------------------------------------------------------------------
-
-/** A customer's ID, scrambled: the same customer always gives the same code, within one company, but the ID cannot
- * be read back. Done in the browser, so the ID never leaves it. */
-export async function customerKey(code: string, companyId: string): Promise<string> {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) throw new Error('This browser cannot scramble customer codes, so the import was stopped.');
-  const bytes = new TextEncoder().encode(`${companyId}|${code.trim().toLowerCase()}`);
-  const digest = await subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
-}
 
 export type ServiceRecord = {
   import_id: string;
@@ -428,20 +446,32 @@ export type ServiceRecord = {
   service: string | null;
   minutes: number | null;
   customer_key: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
   row_key: string;
 };
 
 /** The rows to store. `row_key` says which service a row is, so a second export that repeats it is not counted twice:
  * the employee, the day, the service, the time and the customer, and which of several identical rows it is. */
-export async function buildRecords(rows: ImportRow[], companyId: string, importId: string): Promise<ServiceRecord[]> {
+export function buildRecords(rows: ImportRow[], companyId: string, importId: string): ServiceRecord[] {
   const seen = new Map<string, number>();
   const out: ServiceRecord[] = [];
   for (const r of rows) {
-    const key = r.customer ? await customerKey(r.customer, companyId) : null;
+    const key = guestKey(r.customerName, r.customerPhone, r.customer);
     const base = [r.employeeId, r.date, r.service ?? '', r.minutes ?? '', key ?? ''].join('|');
     const n = (seen.get(base) ?? 0) + 1;
     seen.set(base, n);
-    out.push({ import_id: importId, employee_id: r.employeeId, performed_on: r.date, service: r.service, minutes: r.minutes, customer_key: key, row_key: `${companyId}|${base}|${n}` });
+    out.push({
+      import_id: importId,
+      employee_id: r.employeeId,
+      performed_on: r.date,
+      service: r.service,
+      minutes: r.minutes,
+      customer_key: key,
+      customer_name: r.customerName,
+      customer_phone: r.customerPhone,
+      row_key: `${companyId}|${base}|${n}`,
+    });
   }
   return out;
 }

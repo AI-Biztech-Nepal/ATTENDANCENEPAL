@@ -5,6 +5,7 @@ import { formatAdDate } from '@/lib/calendar';
 import { RELATION_FROM, RELATION_LABEL, RELATION_ONE, feedbackCount, giverWords, ratingWord, summariseReport, type FeedbackItem } from '@/lib/colleagueFeedback';
 import { averageText, formWord, summariseRatings } from '@/lib/feedbackKpi';
 import type { FeedbackRead, MyCustomerForm } from '@/lib/useFeedback';
+import { GuestName } from './GuestHistory';
 
 const CARD = 'rounded-xl border border-slate-200 bg-white shadow-sm';
 
@@ -176,7 +177,7 @@ export function CustomerFormsReport({ periodLabel, forms, loading, error, namesE
                     <RatingBadge rating={f.rating} />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-slate-600">
-                        {f.guest_name && <span className="text-[13.5px] font-extrabold text-ink">{f.guest_name}</span>}
+                        {f.guest_name && <GuestName name={f.guest_name} anchor={{ feedbackId: f.id }} className="text-[13.5px]" />}
                         <span className="font-bold text-slate-700">{formatAdDate(f.given_on, system)}</span>
                         {f.reference && <span>{f.reference}</span>}
                         {f.recommend != null && <span>Would recommend: {f.recommend} out of 10</span>}

@@ -11,6 +11,7 @@ import { PageBody } from '@/components/employee/parts';
 import MonthStepper from '@/components/kpi/MonthStepper';
 import { CustomerFormsReport, FeedbackReport } from '@/components/kpi/FeedbackReport';
 import GiveFeedbackDialog from '@/components/kpi/GiveFeedbackDialog';
+import { GuestHistoryProvider } from '@/components/kpi/GuestHistory';
 
 // Feedback, for the person signed in: what colleagues said about them, laid out as a report (with who gave each piece), with a
 // "Give feedback" button that opens the feedback form so they can give feedback to anyone they work with; and the customer forms
@@ -68,7 +69,9 @@ export default function MyFeedbackPage() {
           </p>
         )}
 
-        <CustomerFormsReport periodLabel={label} forms={forms.forms} loading={employeeId === undefined || forms.loading} error={forms.error} namesError={forms.namesError} />
+        <GuestHistoryProvider>
+          <CustomerFormsReport periodLabel={label} forms={forms.forms} loading={employeeId === undefined || forms.loading} error={forms.error} namesError={forms.namesError} />
+        </GuestHistoryProvider>
       </div>
 
       {formOpen && (

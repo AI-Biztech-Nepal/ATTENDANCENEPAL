@@ -7,13 +7,13 @@ import type { ColumnRole } from '@/lib/serviceImport';
 
 export type PastImport = { id: string; file_name: string; rows_read: number; rows_imported: number; first_date: string | null; last_date: string | null; created_at: string };
 
-type Rec = { id: string; employee_id: string; performed_on: string; service: string | null; minutes: number | null; customer_key: string | null };
+type Rec = { id: string; employee_id: string; performed_on: string; service: string | null; minutes: number | null; customer_key: string | null; customer_name?: string | null; customer_phone?: string | null };
 
 /** How many rows one request asks for (the database sends at most 1,000 at a time). */
 const PAGE = 1000;
 
-/** An earlier import, opened as a sheet in a pop-up: the rows it brought in, as they were kept. The file itself is not kept, and
- * neither are customer names, phone numbers or IDs, so the customer column is the short scrambled code. */
+/** An earlier import, opened as a sheet in a pop-up: the rows it brought in, as they were kept (the file itself is not kept), with
+ * each customer's name and phone number. Rows imported before names were kept show the customer ID if there was one, else nothing. */
 export default function ImportSheetDialog({ item, people, dayText, heading, onClose, onRemove }: {
   item: PastImport;
   people: { id: string; name: string }[];
@@ -38,7 +38,7 @@ export default function ImportSheetDialog({ item, people, dayText, heading, onCl
       for (let from = 0; ; from += PAGE) {
         const { data, error: e } = await supabase
           .from('service_records')
-          .select('id, employee_id, performed_on, service, minutes, customer_key')
+          .select('*')
           .eq('import_id', item.id)
           .order('performed_on', { ascending: true })
           .order('id', { ascending: true })
@@ -82,12 +82,13 @@ export default function ImportSheetDialog({ item, people, dayText, heading, onCl
       { header: heading('employee'), width: 200 },
       { header: heading('service'), width: 230 },
       { header: heading('minutes'), width: 210, align: 'right' },
-      { header: heading('customer'), width: 170 },
+      { header: heading('customerName'), width: 200 },
+      { header: heading('customerPhone'), width: 160 },
     ],
     [heading]
   );
   const rows = useMemo(
-    () => records.map(r => [dayText(r.performed_on), names.get(r.employee_id) ?? '–', r.service ?? '', r.minutes == null ? '' : String(r.minutes), r.customer_key ? r.customer_key.slice(0, 8) : '']),
+    () => records.map(r => [dayText(r.performed_on), names.get(r.employee_id) ?? '–', r.service ?? '', r.minutes == null ? '' : String(r.minutes), r.customer_name ?? (r.customer_key?.startsWith('c:') ? r.customer_key.slice(2) : ''), r.customer_phone ?? '']),
     [records, names, dayText]
   );
 

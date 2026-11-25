@@ -19,6 +19,7 @@ import MonthStepper from '@/components/kpi/MonthStepper';
 import FeedbackFields, { type StaffOption } from '@/components/kpi/FeedbackFields';
 import FeedbackEditDialog from '@/components/kpi/FeedbackEditDialog';
 import BlankFeedbackForm from '@/components/kpi/BlankFeedbackForm';
+import { GuestHistoryProvider, GuestName } from '@/components/kpi/GuestHistory';
 
 type Person = Pick<Employee, 'id' | 'name' | 'department' | 'status'>;
 
@@ -30,7 +31,9 @@ export default function CustomerFeedbackPage() {
   // useSearchParams needs a Suspense boundary, like the other pages that read the address.
   return (
     <Suspense fallback={null}>
-      <FeedbackSection />
+      <GuestHistoryProvider>
+        <FeedbackSection />
+      </GuestHistoryProvider>
     </Suspense>
   );
 }
@@ -305,7 +308,7 @@ function FeedbackSection() {
                         <td className="max-w-[170px] px-3 py-[13px] text-[13px] text-slate-700">
                           {r.guest ? (
                             <>
-                              {r.guest.guest_name && <span className="block font-bold text-ink">{r.guest.guest_name}</span>}
+                              {r.guest.guest_name && <GuestName name={r.guest.guest_name} anchor={{ feedbackId: r.id }} />}
                               {r.guest.guest_phone && <span className="block text-xs text-slate-600">{r.guest.guest_phone}</span>}
                               {r.guest.guest_email && <span className="block break-all text-xs text-slate-600">{r.guest.guest_email}</span>}
                             </>

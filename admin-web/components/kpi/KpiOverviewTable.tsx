@@ -26,9 +26,8 @@ type Props = {
   services: ServiceMonth;
   /** The working day, in hours (Settings), that time with customers is measured against. */
   hoursPerDay: number;
-  /** Rebooking per person: of the customers served, how many booked again within `windowDays`. */
+  /** Rebooking per person: of the customers served, how many came back on a later day (no time limit). */
   rebooking: { loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; error: string };
-  windowDays: number;
   /** Customer feedback and NPS per person from the forms typed in. */
   feedback: FeedbackMonth;
   /** Colleague feedback per person, from the feedback colleagues gave during the month. `bySubject` is null when nobody was given any. */
@@ -47,7 +46,7 @@ type Props = {
 /** One row per person, the KPIs across (a line between the groups of KPIs that come from the same place). Nothing is
  * added up, ranked or compared: a dash means there is nothing to show yet, or its numbers could not be read (the note
  * above the table says so in that case). */
-export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, windowDays, feedback, colleagues, own, loading, notStarted, monthStart, emptyText = 'No employees to show.' }: Props) {
+export default function KpiOverviewTable({ groups, employees, attendance, services, hoursPerDay, rebooking, feedback, colleagues, own, loading, notStarted, monthStart, emptyText = 'No employees to show.' }: Props) {
   const columnCount = 1 + groups.reduce((n, g) => n + g.columns.length, 0);
   // The name column and every KPI column at its width, so the table scrolls sideways before it squeezes.
   const minWidth = 210 + groups.reduce((n, g) => n + g.columns.reduce((m, c) => m + c.width, 0), 0);
@@ -123,7 +122,7 @@ export default function KpiOverviewTable({ groups, employees, attendance, servic
                         ) : isOwnColumn(c.id) ? (
                           <OwnCell key={c.id} group={g} first={i === 0} loading={own.loading} values={own.byKpi.get(ownIdOf(c.id))} unread={!!own.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : c.id === 'rebooking' ? (
-                          <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} unread={!!rebooking.error} employeeId={emp.id} notStarted={notStarted} windowDays={windowDays} />
+                          <RebookingCell key={c.id} group={g} first={i === 0} loading={rebooking.loading} byEmployee={rebooking.byEmployee} reason={rebooking.reason} unread={!!rebooking.error} employeeId={emp.id} notStarted={notStarted} />
                         ) : (
                           <EmptyCell key={c.id} group={g} first={i === 0} />
                         )
@@ -200,13 +199,13 @@ function ServicesCell({ group, first, loading, counts, unread, employeeId, notSt
 }
 
 /** Of the customers this person served in the month, the share who booked again, with the numbers under it. A dash says
- * why there is nothing to show (not imported, no customer codes, no customers) for screen readers. */
-function RebookingCell({ group, first, loading, byEmployee, reason, unread, employeeId, notStarted, windowDays }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; unread: boolean; employeeId: string; notStarted: boolean; windowDays: number }) {
+ * why there is nothing to show (not imported, no customer names, no customers) for screen readers. */
+function RebookingCell({ group, first, loading, byEmployee, reason, unread, employeeId, notStarted }: { group: KpiGroup; first: boolean; loading: boolean; byEmployee: Map<string, Rebooking> | null; reason: RebookingReason; unread: boolean; employeeId: string; notStarted: boolean }) {
   const cell = `px-3 py-3.5 text-center align-middle ${first ? 'border-l border-slate-100' : ''}`;
   const r = byEmployee?.get(employeeId);
   const pct = r ? rebookingPct(r) : null;
   if (loading || notStarted || unread || reason || !r || pct == null) {
-    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : reason === 'nocodes' ? 'No customer codes' : reason === 'none' ? group.emptyNote : 'No customers';
+    const why = loading ? 'Loading' : notStarted ? 'Month has not started' : unread ? UNREAD : reason === 'nocodes' ? 'No customer names in the file' : reason === 'none' ? group.emptyNote : 'No customers';
     return (
       <td className={cell}>
         <div className="text-[15px] font-bold text-slate-600">
@@ -217,7 +216,7 @@ function RebookingCell({ group, first, loading, byEmployee, reason, unread, empl
     );
   }
   return (
-    <td className={cell} title={`${r.back} of ${r.served} booked again within ${windowDays} days`}>
+    <td className={cell} title={`${r.back} of ${r.served} came back`}>
       <div className="text-sm font-extrabold tabular-nums text-ink">{pct}%</div>
       <div className="mt-0.5 text-[11.5px] tabular-nums text-slate-600">
         {r.back} of {r.served}

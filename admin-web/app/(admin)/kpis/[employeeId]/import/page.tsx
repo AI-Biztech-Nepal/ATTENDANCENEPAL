@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { isKpiOn } from '@/lib/kpiSettings';
-import { publishKpiSettings, useKpiSettings } from '@/lib/useKpiSettings';
+import { useKpiSettings } from '@/lib/useKpiSettings';
 import { useCalendarSystem } from '@/lib/calendarSystem';
 import { formatAdDate } from '@/lib/calendar';
 import { nepalTodayIso } from '@/lib/shift';
@@ -19,33 +18,33 @@ import {
   distinctValues,
   guessRoles,
   guessUnit,
-  looksLikePersonalData,
   readTable,
   type ColumnRole,
   type DateOrder,
   type EmployeeRef,
   type Table,
 } from '@/lib/serviceImport';
+import { MIGRATION } from '@/lib/kpiLoad';
 import { useConfirm } from '@/components/ConfirmDialog';
 import Sheet, { type RowTone, type SheetColumn } from '@/components/kpi/Sheet';
 import ImportSheetDialog, { type PastImport } from '@/components/kpi/ImportSheetDialog';
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const ROLES: ColumnRole[] = ['employee', 'date', 'service', 'minutes', 'customer', 'status', 'ignore'];
+const ROLES: ColumnRole[] = ['employee', 'date', 'service', 'minutes', 'customerName', 'customerPhone', 'customer', 'status', 'ignore'];
 const CARD = 'rounded-xl border border-slate-200 bg-white shadow-sm';
 const ROLE_SELECT = 'h-10 w-full rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent';
 const OPTION_SELECT = 'h-10 rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-semibold text-ink';
 
 // Service import (for the whole company: the same on every person's page): the booking system's file (a CSV) is read here in the browser and
 // shown as a sheet, like Excel. The admin says what each column is (in the box at the top of the column), names the file does not match to an
-// employee are matched by hand, and the rows are saved. Customer names, phone numbers and IDs are never kept: only a scrambled code, enough to
-// tell that two services were for the same customer. Rows that were already imported (an export that overlaps an earlier one) are left out, and
+// employee are matched by hand, and the rows are saved, with each customer's name and phone number when the file has them (a customer's visits
+// are told apart by phone, then name, then the booking system's ID). Rows that were already imported (an export that overlaps an earlier one) are left out, and
 // a whole import can be removed. An earlier import opens as a sheet in a pop-up.
 export default function ImportPage() {
   const { system } = useCalendarSystem();
   const confirm = useConfirm();
-  // Which KPIs this company uses, what it calls them and its people (KPIs > Settings).
-  const { settings, words } = useKpiSettings();
+  // What this company calls the people it serves (KPIs > Settings).
+  const { words } = useKpiSettings();
   const today = useMemo(nepalTodayIso, []);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -67,12 +66,6 @@ export default function ImportPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
-
-  const [windowDays, setWindowDays] = useState('45');
-  const [windowNote, setWindowNote] = useState('');
-
-  // The saved window (from Settings, or from here) is what the box shows until it is edited.
-  useEffect(() => setWindowDays(String(settings.repeatDays)), [settings.repeatDays]);
 
   const loadPast = useCallback(() => {
     supabase
@@ -159,24 +152,6 @@ export default function ImportPage() {
     if (fileInput.current) fileInput.current.value = '';
   }
 
-  async function saveWindow() {
-    const n = /^\d{1,3}$/.test(windowDays.trim()) ? Number(windowDays.trim()) : NaN;
-    if (!(n >= 1 && n <= 365)) {
-      setWindowNote('Use a whole number of days from 1 to 365.');
-      return;
-    }
-    if (n === settings.repeatDays || !companyId) {
-      setWindowNote('');
-      return;
-    }
-    const { error: e } = await supabase.from('kpi_settings').upsert({ company_id: companyId, repeat_window_days: n }, { onConflict: 'company_id' });
-    if (e) setWindowNote(`Could not save: ${e.message}`);
-    else {
-      publishKpiSettings({ ...settings, repeatDays: n });
-      setWindowNote('Saved.');
-    }
-  }
-
   async function runImport() {
     if (!file || !analysis || !companyId || busy || analysis.rows.length === 0) return;
     setBusy(true);
@@ -202,7 +177,10 @@ export default function ImportPage() {
       total = records.length;
       for (const part of chunk(records, CHUNK_SIZE)) {
         const res = await supabase.from('service_records').upsert(part, { onConflict: 'row_key', ignoreDuplicates: true }).select('id');
-        if (res.error) throw new Error(res.error.message);
+        if (res.error) {
+          // The name and phone columns come with 20261125160000_guest_names_and_history.sql: say so when it has not been run.
+          throw new Error(/customer_(name|phone)/.test(res.error.message) ? `the database cannot keep customer names yet: run the migration ${MIGRATION.guests2}` : res.error.message);
+        }
         added += ((res.data as unknown[] | null) ?? []).length;
       }
     } catch (e) {
@@ -259,10 +237,6 @@ export default function ImportPage() {
     const unknown = (analysis?.unmatchedNames ?? []).map(u => u.name);
     return [...unknown, ...Object.keys(nameMap).filter(k => nameMap[k] && !unknown.includes(k))];
   }, [analysis, nameMap]);
-  const personalWarning = useMemo(() => {
-    const i = roles.indexOf('customer');
-    return file && i >= 0 ? looksLikePersonalData(file.table.rows.map(r => r[i])) : false;
-  }, [file, roles]);
   const statusCol = roles.indexOf('status');
   const statusValues = useMemo(() => (file && statusCol >= 0 ? distinctValues(file.table, statusCol) : []), [file, statusCol]);
   const dateCol = roles.indexOf('date');
@@ -322,7 +296,7 @@ export default function ImportPage() {
         ['Skipped, dated in the future', c.future, false, 'skip'],
       ]
     : [];
-  const alertsShown = missing.length > 0 || personalWarning || !!error;
+  const alertsShown = missing.length > 0 || !!error;
 
   return (
     <div className="flex flex-col gap-5">
@@ -366,7 +340,7 @@ export default function ImportPage() {
             </p>
           )}
           <p className="m-0 mt-4 rounded-[10px] bg-slate-100 px-3.5 py-3 text-[13px] leading-normal text-slate-700">
-            {words.t('Customer names and phone numbers are never imported. A customer is only a code, used to tell who came back.')}
+            {words.t('Include the customer name and phone columns: they show who each customer is, and tell when the same customer comes back.')}
           </p>
         </section>
       ) : (
@@ -398,7 +372,7 @@ export default function ImportPage() {
               </div>
             </div>
 
-            {(roles.includes('minutes') || slashDates || statusValues.length > 0 || isKpiOn('rebooking', settings)) && (
+            {(roles.includes('minutes') || slashDates || statusValues.length > 0) && (
               <div className="flex flex-wrap items-center gap-x-7 gap-y-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[13px] text-slate-700">
                 {roles.includes('minutes') && (
                   <div className="flex items-center gap-2.5">
@@ -421,33 +395,6 @@ export default function ImportPage() {
                       <option value="mdy">month / day / year</option>
                     </select>
                     {dateInfo?.ambiguous && <span className="text-xs font-semibold text-amber-800">Check this: your dates could be read either way.</span>}
-                  </div>
-                )}
-                {isKpiOn('rebooking', settings) && (
-                  <div className="flex flex-wrap items-center gap-2.5">
-                    <label htmlFor="rb-days" className="font-bold">
-                      Counts as back if they return within
-                    </label>
-                    <input
-                      id="rb-days"
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={365}
-                      value={windowDays}
-                      onChange={e => {
-                        setWindowDays(e.target.value);
-                        setWindowNote('');
-                      }}
-                      onBlur={saveWindow}
-                      className="h-10 w-[72px] rounded-[10px] border border-slate-300 bg-white px-2.5 text-sm font-bold text-ink"
-                    />
-                    <span>days</span>
-                    {windowNote && (
-                      <span role={windowNote === 'Saved.' ? 'status' : 'alert'} className={`text-xs font-semibold ${windowNote === 'Saved.' ? 'text-emerald-800' : 'text-critical-text'}`}>
-                        {windowNote}
-                      </span>
-                    )}
                   </div>
                 )}
                 {statusValues.length > 0 && (
@@ -484,11 +431,6 @@ export default function ImportPage() {
                 {missing.length > 0 && (
                   <p role="alert" className="m-0 text-sm font-semibold text-critical-text">
                     Choose which column is the {missing.map(m => ROLE_LABEL[m].toLowerCase()).join(' and the ')}.
-                  </p>
-                )}
-                {personalWarning && (
-                  <p role="alert" className="m-0 rounded-[10px] border border-amber-200 bg-amber-50 px-3.5 py-3 text-[13px] font-semibold leading-normal text-amber-900">
-                    {words.t('The column used for the customer code looks like names, phone numbers or email addresses. Choose a customer ID column instead, or set it to "Do not import". Codes are scrambled before they are saved, but it is better not to send them at all.')}
                   </p>
                 )}
                 {error && (

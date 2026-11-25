@@ -88,7 +88,7 @@ function MyKpis({ employeeId }: { employeeId: string }) {
   const feedbackData = usePersonFeedback(employeeId, { start, end }, previous, (on('feedback') || on('nps')) && start <= today);
   const colleagueData = useMyColleagues({ start, end }, previous, COLLEAGUE_KPIS.some(on) && start <= today);
   const ownData = usePersonOwn(employeeId, ownIds, { start, end }, previous, ownIds.length > 0 && start <= today);
-  const rebookingData = useMyRebooking(employeeId, { start, end }, previous, settings.repeatDays, loaded && on('rebooking') && start <= today);
+  const rebookingData = useMyRebooking(employeeId, { start, end }, previous, on('rebooking') && start <= today);
   // Clicking a graph card opens the report behind it in a pop-up (components/kpi/KpiReports.tsx): only this person's own rows.
   const [report, setReport] = useState<ReportKind | null>(null);
   const mode = useMemo(() => ({ mine: true, feedbackHref: '/my-feedback', openReport: setReport }), []);
@@ -145,7 +145,6 @@ function MyKpis({ employeeId }: { employeeId: string }) {
               eyebrow={services.title}
               name={kpiLabel('rebooking', settings)}
               data={loaded ? rebookingData : { ...rebookingData, loading: true }}
-              windowDays={settings.repeatDays}
               monthName={monthName}
               previousName={previousName}
               notStarted={start > today}
@@ -207,7 +206,7 @@ function MyKpis({ employeeId }: { employeeId: string }) {
         <KpiReportDialog
           kind={report}
           onClose={() => setReport(null)}
-          ctx={{ employeeId, start, end, monthLabel: label, personName: 'You', mine: true, hoursPerDay: settings.hoursPerDay, repeatDays: settings.repeatDays, today, attendance: current }}
+          ctx={{ employeeId, start, end, monthLabel: label, personName: 'You', mine: true, hoursPerDay: settings.hoursPerDay, today, attendance: current }}
         />
       )}
     </CardModeProvider>

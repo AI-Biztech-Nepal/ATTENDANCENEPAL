@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { MIGRATION, loadProblem } from './kpiLoad';
-import { addDays } from './taskSchedule';
-import { computeRebooking, type CustomerVisit } from './rebookingKpi';
+import { NO_END, computeRebooking, type CustomerVisit } from './rebookingKpi';
 import { summariseFeedback, type Roles } from './colleagueKpi';
 import type { FeedbackRelation } from './colleagueFeedback';
 import type { PersonRebooking } from './useRebookingKpi';
@@ -37,18 +36,18 @@ type Failure = { code?: string; message?: string } | null;
 
 /**
  * The signed-in person's rebooking for the month `cur` and the month `prev` before it: of the customers they served, how many
- * came back to anyone within `windowDays`. The visits come from my_customer_visits(), which gives the visits of the customers
+ * came back to anyone on a later day, with no time limit. The visits come from my_customer_visits(), which gives the visits of the customers
  * this person served, with whether each was theirs (never who did the others), and the same counting rule as the admin's page.
  */
-export function useMyRebooking(employeeId: string | null | undefined, cur: MonthRange, prev: MonthRange, windowDays: number, enabled: boolean): PersonRebooking {
-  const key = `${employeeId}|${cur.start}|${cur.end}|${prev.start}|${prev.end}|${windowDays}`;
+export function useMyRebooking(employeeId: string | null | undefined, cur: MonthRange, prev: MonthRange, enabled: boolean): PersonRebooking {
+  const key = `${employeeId}|${cur.start}|${cur.end}|${prev.start}|${prev.end}`;
   const [done, setDone] = useState<{ key: string; value: Omit<PersonRebooking, 'loading'> } | null>(null);
   const on = enabled && !!employeeId;
 
   useEffect(() => {
     if (!on || !employeeId) return;
     let live = true;
-    supabase.rpc('my_customer_visits', { p_from: prev.start, p_served_to: cur.end, p_to: addDays(cur.end, windowDays) }).then(({ data, error }) => {
+    supabase.rpc('my_customer_visits', { p_from: prev.start, p_served_to: cur.end, p_to: NO_END }).then(({ data, error }) => {
       if (!live) return;
       if (error) {
         setDone({ key, value: { current: null, previous: null, reason: null, error: loadProblem('the services data', error as Failure, MIGRATION.mine) } });
@@ -63,8 +62,8 @@ export function useMyRebooking(employeeId: string | null | undefined, cur: Month
       setDone({
         key,
         value: {
-          current: computeRebooking(visits, cur.start, cur.end, windowDays).get(employeeId) ?? null,
-          previous: computeRebooking(visits, prev.start, prev.end, windowDays).get(employeeId) ?? null,
+          current: computeRebooking(visits, cur.start, cur.end).get(employeeId) ?? null,
+          previous: computeRebooking(visits, prev.start, prev.end).get(employeeId) ?? null,
           reason: null,
           error: '',
         },
