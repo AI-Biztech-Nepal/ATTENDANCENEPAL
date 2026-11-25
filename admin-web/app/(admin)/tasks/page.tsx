@@ -117,7 +117,8 @@ export default function TasksPage() {
 
   // A task whose time is over is completed. The screen already shows it so (withTimeStatus); this also saves it, once, for the people and
   // screens that read the stored status (an employee cannot change a task, and the phone app reads it), and stops a timer still running
-  // on it at the moment its time ended. If saving fails it is tried again a minute later.
+  // on it at the moment its time ended. If saving fails it is tried again a minute later. Since 20261125180000_complete_finished_tasks.sql
+  // the database does the same every minute on its own (pg_cron); this stays as a backup, and does nothing once the job has run.
   const swept = useRef(new Set<string>());
   useEffect(() => {
     const due = rawTasks.filter(t => (t.status === 'pending' || t.status === 'in_progress') && withTimeStatus(t, clock).status === 'approved' && !swept.current.has(t.id));
