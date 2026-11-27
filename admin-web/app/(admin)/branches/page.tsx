@@ -6,7 +6,16 @@ import { usePageTitle } from '@/lib/pageTitle';
 import { useConfirm } from '@/components/ConfirmDialog';
 import type { Branch, BranchDepartment, Department } from '@/lib/types';
 
-const EMPTY_FORM = { name: '', radius_meters: 150 };
+const EMPTY_FORM = { name: '', radius_meters: 150, location: '' };
+
+/** "27.712387, 85.311287", as Google Maps copies it. Empty means no location
+ * yet; null means the text isn't a pair of coordinates. */
+function parseLocation(text: string): { latitude: number | null; longitude: number | null } | null {
+  if (!text.trim()) return { latitude: null, longitude: null };
+  const [latitude, longitude, extra] = text.split(/[,\s]+/).filter(Boolean).map(Number);
+  if (extra !== undefined || !(Math.abs(latitude) <= 90) || !(Math.abs(longitude) <= 180)) return null;
+  return { latitude, longitude };
+}
 
 // branch_code is only ever unique per-company (uq_branches_company_code),
 // never shown to an employee, and nothing keys off its specific value
@@ -37,6 +46,9 @@ export default function BranchesPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
+  /** How exact the "Use my current location" reading was, in meters. */
+  const [accuracy, setAccuracy] = useState<number | null>(null);
 
   const [showDeptForm, setShowDeptForm] = useState(false);
   const [deptName, setDeptName] = useState('');
@@ -70,26 +82,56 @@ export default function BranchesPage() {
     setEditing(null);
     setForm(EMPTY_FORM);
     setFormError(null);
+    setAccuracy(null);
     setShowForm(true);
   }
 
   function openEdit(b: Branch) {
     setEditing(b);
-    setForm({ name: b.name, radius_meters: b.radius_meters });
+    setForm({
+      name: b.name,
+      radius_meters: b.radius_meters,
+      location: b.latitude != null && b.longitude != null ? `${b.latitude}, ${b.longitude}` : '',
+    });
     setFormError(null);
+    setAccuracy(null);
     setShowForm(true);
+  }
+
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setFormError('This browser does not support location access.');
+      return;
+    }
+    setLocating(true);
+    setFormError(null);
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setForm(f => ({ ...f, location: `${pos.coords.latitude}, ${pos.coords.longitude}` }));
+        setAccuracy(Math.round(pos.coords.accuracy));
+        setLocating(false);
+      },
+      err => {
+        setFormError(`Could not get your location: ${err.message}`);
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
   }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
+    const location = parseLocation(form.location);
+    if (!location) {
+      setFormError('Enter the location as latitude, longitude. For example: 27.712387, 85.311287');
+      return;
+    }
+    const fields = { name: form.name, radius_meters: form.radius_meters, ...location };
     setSaving(true);
 
     if (editing) {
-      const { error } = await supabase
-        .from('branches')
-        .update({ name: form.name, radius_meters: form.radius_meters })
-        .eq('id', editing.id);
+      const { error } = await supabase.from('branches').update(fields).eq('id', editing.id);
       setSaving(false);
       if (error) {
         setFormError(error.message);
@@ -107,7 +149,7 @@ export default function BranchesPage() {
     let error: { code?: string; message: string } | null = null;
     for (let attempt = 0; attempt < 10; attempt++) {
       const branch_code = attempt === 0 ? base : `${base}-${attempt + 1}`;
-      const result = await supabase.from('branches').insert({ name: form.name, branch_code, radius_meters: form.radius_meters });
+      const result = await supabase.from('branches').insert({ ...fields, branch_code });
       error = result.error;
       if (!error || error.code !== '23505') break;
     }
@@ -224,10 +266,12 @@ export default function BranchesPage() {
             <div key={b.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="mb-1 font-semibold text-ink">{b.name}</h3>
               <p className="mb-3 text-xs text-slate-400">{b.branch_code}</p>
-              {b.latitude != null && b.longitude != null && (
+              {b.latitude != null && b.longitude != null ? (
                 <p className="text-sm text-slate-600">
                   📍 {b.latitude.toFixed(5)}, {b.longitude.toFixed(5)}
                 </p>
+              ) : (
+                <p className="text-sm text-warning-text">📍 Location not set</p>
               )}
               <p className="text-sm text-slate-600">↔ {b.radius_meters}m radius</p>
 
@@ -304,6 +348,28 @@ export default function BranchesPage() {
               className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
 
+            <label htmlFor="branch-location" className="mb-1 block text-xs font-medium text-slate-600">Location (latitude, longitude)</label>
+            <input
+              id="branch-location"
+              value={form.location}
+              onChange={e => {
+                setForm(f => ({ ...f, location: e.target.value }));
+                setAccuracy(null);
+              }}
+              placeholder="27.712387, 85.311287"
+              className="mb-1.5 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+            <button type="button" onClick={useCurrentLocation} disabled={locating} className="text-xs font-semibold text-accent hover:underline disabled:opacity-60">
+              {locating ? 'Getting location…' : '📍 Use my current location'}
+            </button>
+            <p className={`mb-3 mt-1 text-xs ${accuracy != null && accuracy > form.radius_meters ? 'text-warning-text' : 'text-slate-400'}`}>
+              {accuracy == null
+                ? 'Press this while standing at the branch, or right-click the branch in Google Maps, copy the two numbers and paste them here.'
+                : accuracy > form.radius_meters
+                  ? `This reading is only accurate to ±${accuracy} m. Use a phone at the branch, or paste the numbers from Google Maps.`
+                  : `Location found, accurate to ±${accuracy} m.`}
+            </p>
+
             <label className="mb-1 block text-xs font-medium text-slate-600">Radius (meters)</label>
             <input
               type="number"
@@ -314,8 +380,7 @@ export default function BranchesPage() {
               className="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />
             <p className="mb-3 text-xs text-slate-400">
-              How far (in meters) from this point an employee can still check in — e.g. 150 covers most of a single
-              office building.
+              How far (in meters) from the branch location an employee can check in and out, where automatic approval is on.
             </p>
 
             {formError && <p className="mb-3 text-sm text-critical">{formError}</p>}

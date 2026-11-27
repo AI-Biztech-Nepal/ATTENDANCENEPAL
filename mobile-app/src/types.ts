@@ -114,8 +114,8 @@ export type Branch = {
   id: string;
   name: string;
   branch_code: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   radius_meters: number;
 };
 
@@ -268,6 +268,15 @@ export type CorrectionRequest = {
   created_at: string;
   lat: number | null;
   lng: number | null;
+};
+
+/** From my_attendance_zone(): a row only when this person's phone punches are
+ * approved automatically. distance_m is null until a location is sent. */
+export type AttendanceZone = {
+  branch_name: string;
+  radius_m: number;
+  distance_m: number | null;
+  inside: boolean;
 };
 
 export type AttendanceGpsRequest = {

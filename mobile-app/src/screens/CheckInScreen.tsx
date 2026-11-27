@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, 
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { formatHoursMinutes, nepalDateKey, nepalTodayIso, punchTypeLabel, selectDayPunches } from '../lib/shift';
-import type { AttendanceGpsRequest, AttendanceLog } from '../types';
+import type { AttendanceGpsRequest, AttendanceLog, AttendanceZone } from '../types';
 import { ATTENDANCE_LOG_COLUMNS } from '../types';
 import { colors } from '../theme';
 import Badge from '../components/Badge';
@@ -19,8 +19,19 @@ type PunchModal = {
   punchTime: string;
   status: 'locating' | 'ready' | 'error';
   coords?: { lat: number; lng: number; accuracy: number | null };
+  zone?: AttendanceZone | null;
   error?: string;
 };
+
+/** Null when this person's punches aren't approved automatically. Also null if
+ * the check itself fails: the database enforces the zone either way. */
+async function fetchZone(at?: { lat: number; lng: number }): Promise<AttendanceZone | null> {
+  const { data } = await supabase.rpc('my_attendance_zone', at ? { p_lat: at.lat, p_lng: at.lng } : {});
+  return (data as AttendanceZone[] | null)?.[0] ?? null;
+}
+function formatDistance(metres: number) {
+  return metres < 1000 ? `${metres} m` : `${(metres / 1000).toFixed(1)} km`;
+}
 
 const HISTORY_WINDOW_DAYS = 90;
 type HistoryRange = 'daily' | 'weekly' | 'monthly';
@@ -60,6 +71,7 @@ export default function CheckInScreen({ navigation }: any) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'good' | 'critical'; text: string } | null>(null);
   const [modal, setModal] = useState<PunchModal | null>(null);
+  const [zone, setZone] = useState<AttendanceZone | null>(null);
   const [gpsRequests, setGpsRequests] = useState<AttendanceGpsRequest[]>([]);
   const [history, setHistory] = useState<AttendanceLog[]>([]);
   const [historyRange, setHistoryRange] = useState<HistoryRange>('weekly');
@@ -103,6 +115,7 @@ export default function CheckInScreen({ navigation }: any) {
       reloadGpsRequests(employeeId);
       reloadHistory(employeeId);
       reloadPendingLeave(employeeId);
+      fetchZone().then(setZone);
     };
     load();
     return navigation.addListener('focus', load);
@@ -201,8 +214,12 @@ export default function CheckInScreen({ navigation }: any) {
         setModal({ ...base, status: 'error', error: 'Location permission is required.' });
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setModal(m => (m ? { ...m, status: 'ready', coords: { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy } } : m));
+      // maximumAge: in a browser Expo otherwise returns the first reading forever,
+      // so "Try again" from a closer spot would never change.
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High, maximumAge: 0 } as Location.LocationOptions);
+      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+      const found = await fetchZone(coords);
+      setModal(m => (m ? { ...m, status: 'ready', coords, zone: found } : m));
     } catch (e: any) {
       setModal(m => (m ? { ...m, status: 'error', error: e.message ?? String(e) } : m));
     }
@@ -227,23 +244,34 @@ export default function CheckInScreen({ navigation }: any) {
   async function confirmPunch() {
     if (!modal || modal.status !== 'ready' || !modal.coords || !employeeId) return;
     setBusy(true);
-    const { error } = await supabase.from('attendance_gps_requests').insert({
-      employee_id: employeeId,
-      punch_time: modal.punchTime,
-      punch_type: modal.punchType,
-      lat: modal.coords.lat,
-      lng: modal.coords.lng,
-      accuracy_m: modal.coords.accuracy,
-    });
+    const { data: inserted, error } = await supabase
+      .from('attendance_gps_requests')
+      .insert({
+        employee_id: employeeId,
+        punch_time: modal.punchTime,
+        punch_type: modal.punchType,
+        lat: modal.coords.lat,
+        lng: modal.coords.lng,
+        accuracy_m: modal.coords.accuracy,
+      })
+      .select('id')
+      .single();
+    // The database may have approved it as it was saved, so read back what happened.
+    const saved = inserted ? (await supabase.from('attendance_gps_requests').select('status').eq('id', inserted.id).single()).data : null;
     setBusy(false);
-    const punchType = modal.punchType;
+    const label = punchTypeLabel(modal.punchType);
     setModal(null);
-    if (error) setMessage({ kind: 'critical', text: `Check-in failed: ${error.message}` });
+    if (error) setMessage({ kind: 'critical', text: `${label} not recorded. ${error.message}` });
     else {
-      setMessage({ kind: 'good', text: `${punchTypeLabel(punchType)} submitted — waiting for Admin/HR approval.` });
+      setMessage({ kind: 'good', text: saved?.status === 'approved' ? `${label} recorded and approved.` : `${label} submitted — waiting for Admin/HR approval.` });
       reloadGpsRequests(employeeId);
+      reloadHistory(employeeId);
     }
   }
+
+  /** Set only when the open punch is too far from the branch to be accepted. */
+  const outsideZone = modal?.status === 'ready' && modal.zone && !modal.zone.inside ? modal.zone : null;
+  const confirmDisabled = modal?.status !== 'ready' || !!outsideZone || busy;
 
   return (
     <View style={styles.container}>
@@ -296,7 +324,9 @@ export default function CheckInScreen({ navigation }: any) {
                 </View>
                 <View style={styles.gpsNote}>
                   <PinIcon size={14} color={colors.slate500} />
-                  <Text style={styles.gpsNoteText}>Uses your GPS location · approved by Admin/HR</Text>
+                  <Text style={styles.gpsNoteText}>
+                    {zone ? `Approved automatically within ${zone.radius_m} m of ${zone.branch_name}` : 'Uses your GPS location · approved by Admin/HR'}
+                  </Text>
                 </View>
               </View>
 
@@ -407,7 +437,24 @@ export default function CheckInScreen({ navigation }: any) {
             <Text style={styles.modalTitle}>Confirm {modal ? punchTypeLabel(modal.punchType) : ''}</Text>
             <Text style={styles.modalSub}>{modal ? formatDateTime(modal.punchTime, system) : ''}</Text>
             {modal?.status === 'locating' && <Text style={styles.modalStatus}>📍 Getting your location…</Text>}
-            {modal?.status === 'ready' && <Text style={[styles.modalStatus, { color: colors.goodText }]}>📍 Location confirmed</Text>}
+            {modal?.status === 'ready' && !outsideZone && (
+              <Text style={[styles.modalStatus, { color: colors.goodText }]}>📍 {modal.zone ? "You're inside the attendance zone" : 'Location confirmed'}</Text>
+            )}
+            {outsideZone && (
+              <View style={styles.zoneWarning} accessibilityRole="alert">
+                <Text style={styles.zoneTitle}>📍 You're outside the attendance approval zone</Text>
+                <Text style={styles.zoneText}>
+                  You're about {formatDistance(outsideZone.distance_m ?? 0)} from {outsideZone.branch_name}. Attendance can be recorded only within {outsideZone.radius_m} m. Move closer and try
+                  again.
+                </Text>
+                {(modal?.coords?.accuracy ?? 0) > outsideZone.radius_m && (
+                  <Text style={styles.zoneText}>Your location signal is weak (±{Math.round(modal!.coords!.accuracy!)} m). Step near a window or outside, then try again.</Text>
+                )}
+                <TouchableOpacity onPress={retryLocate}>
+                  <Text style={styles.zoneRetry}>Try again</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             {modal?.status === 'error' && (
               <View style={{ marginBottom: 12 }}>
                 <Text style={[styles.modalStatus, { color: colors.criticalText }]}>📍 {modal.error ?? 'Could not get your location.'}</Text>
@@ -420,7 +467,7 @@ export default function CheckInScreen({ navigation }: any) {
               <TouchableOpacity onPress={() => setModal(null)} style={styles.cancelBtn}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={confirmPunch} disabled={modal?.status !== 'ready' || busy} style={[styles.confirmBtn, (modal?.status !== 'ready' || busy) && { opacity: 0.5 }]}>
+              <TouchableOpacity onPress={confirmPunch} disabled={confirmDisabled} style={[styles.confirmBtn, confirmDisabled && { opacity: 0.5 }]}>
                 <Text style={styles.submitBtnText}>{busy ? 'Submitting…' : 'Confirm'}</Text>
               </TouchableOpacity>
             </View>
@@ -474,7 +521,11 @@ const styles = StyleSheet.create({
   outlineBtnText: { color: colors.accent, fontSize: 15, fontWeight: '800' },
   btnDisabled: { opacity: 0.5 },
   gpsNote: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
-  gpsNoteText: { fontSize: 12, fontWeight: '600', color: colors.slate500 },
+  gpsNoteText: { fontSize: 12, fontWeight: '600', color: colors.slate500, flexShrink: 1 },
+  zoneWarning: { backgroundColor: colors.criticalBg, borderRadius: 10, padding: 12, marginBottom: 12, gap: 6 },
+  zoneTitle: { fontSize: 13, fontWeight: '800', color: colors.criticalText },
+  zoneText: { fontSize: 13, lineHeight: 19, color: colors.criticalText },
+  zoneRetry: { fontSize: 12, fontWeight: '800', color: colors.criticalText, textDecorationLine: 'underline' },
   banner: { borderRadius: 12, padding: 12, marginTop: 12 },
   actionsCard: { marginTop: 14, backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.slate200 },
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },

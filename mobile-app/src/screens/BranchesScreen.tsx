@@ -49,7 +49,7 @@ export default function BranchesScreen() {
   }
   function openEdit(b: Branch) {
     setEditing(b);
-    setForm({ name: b.name, branch_code: b.branch_code, latitude: String(b.latitude), longitude: String(b.longitude), radius_meters: String(b.radius_meters) });
+    setForm({ name: b.name, branch_code: b.branch_code, latitude: String(b.latitude ?? ''), longitude: String(b.longitude ?? ''), radius_meters: String(b.radius_meters) });
     setFormError(null);
     setShowForm(true);
   }
@@ -62,7 +62,8 @@ export default function BranchesScreen() {
         Alert.alert('Location permission needed', 'Enable location access to use this.');
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      // maximumAge: never reuse an earlier reading (the browser build would).
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High, maximumAge: 0 } as Location.LocationOptions);
       setForm(f => ({ ...f, latitude: String(pos.coords.latitude), longitude: String(pos.coords.longitude) }));
     } catch (e: any) {
       Alert.alert('Could not get location', e.message ?? String(e));
@@ -153,7 +154,6 @@ export default function BranchesScreen() {
           <>
             <Text style={styles.intro}>
               Each branch's location and radius. An employee must be assigned to a branch for GPS check-in to work.
-              Every check-in/out still waits in Corrections for approval before it counts.
             </Text>
             <View style={styles.deptCard}>
               <View style={styles.deptHeader}>
@@ -185,7 +185,9 @@ export default function BranchesScreen() {
             <View style={styles.card}>
               <Text style={styles.branchName}>{b.name}</Text>
               <Text style={styles.branchCode}>{b.branch_code}</Text>
-              <Text style={styles.detail}>📍 {b.latitude.toFixed(5)}, {b.longitude.toFixed(5)}</Text>
+              <Text style={styles.detail}>
+                📍 {b.latitude != null && b.longitude != null ? `${b.latitude.toFixed(5)}, ${b.longitude.toFixed(5)}` : 'Location not set'}
+              </Text>
               <Text style={styles.detail}>↔ {b.radius_meters}m radius</Text>
               <View style={styles.deptSection}>
                 <Text style={styles.deptSectionLabel}>Departments</Text>

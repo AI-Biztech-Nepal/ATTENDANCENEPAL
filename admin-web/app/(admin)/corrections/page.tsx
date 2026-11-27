@@ -394,7 +394,9 @@ export default function CorrectionsPage() {
                         </button>
                       </div>
                     ) : (
-                      <span className="text-xs text-slate-400">Reviewed</span>
+                      <span className="text-xs text-slate-400">
+                        {item.kind === 'gps' && item.status === 'approved' && !item.data.reviewed_by ? 'Auto-approved' : 'Reviewed'}
+                      </span>
                     )}
                   </td>
                 </tr>

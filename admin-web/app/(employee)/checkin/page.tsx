@@ -20,6 +20,7 @@ import { fetchMyCompanyWeekOffConfig, weekOffDatesInRange } from '@/lib/weekOff'
 import type {
   AttendanceGpsRequest,
   AttendanceLog,
+  AttendanceZone,
   CompanyHoliday,
   CorrectionRequest,
   Gender,
@@ -52,6 +53,7 @@ type PunchModal = {
   punchTime: string;
   status: 'locating' | 'ready' | 'error';
   coords?: { lat: number; lng: number; accuracy: number };
+  zone?: AttendanceZone | null;
   error?: string;
 };
 
@@ -123,6 +125,17 @@ function methodLabel(method: string) {
   return method.toLowerCase() === 'gps' ? 'GPS' : method.charAt(0).toUpperCase() + method.slice(1);
 }
 
+/** Null when this person's punches aren't approved automatically. Also null if
+ * the check itself fails: the database enforces the zone either way. */
+async function fetchZone(at?: { lat: number; lng: number }): Promise<AttendanceZone | null> {
+  const { data } = await supabase.rpc('my_attendance_zone', at ? { p_lat: at.lat, p_lng: at.lng } : {});
+  return (data as AttendanceZone[] | null)?.[0] ?? null;
+}
+
+function formatDistance(metres: number) {
+  return metres < 1000 ? `${metres} m` : `${(metres / 1000).toFixed(1)} km`;
+}
+
 /** Best-effort, never blocks the caller — a denied/unavailable location
  * just means the request is submitted without coordinates. */
 function getCurrentCoords(): Promise<{ lat: number; lng: number } | null> {
@@ -148,6 +161,7 @@ export default function CheckInPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'good' | 'critical'; text: string } | null>(null);
   const [modal, setModal] = useState<PunchModal | null>(null);
+  const [zone, setZone] = useState<AttendanceZone | null>(null);
   const [gpsRequests, setGpsRequests] = useState<AttendanceGpsRequest[]>([]);
   const [history, setHistory] = useState<AttendanceLog[]>([]);
   const [historyRange, setHistoryRange] = useState<HistoryRange>('weekly');
@@ -180,6 +194,10 @@ export default function CheckInPage() {
       setEmployeeId(profile?.employee_id ?? null);
     });
   }, []);
+
+  useEffect(() => {
+    if (employeeId) fetchZone().then(setZone);
+  }, [employeeId]);
 
   useEffect(() => {
     if (!employeeId) return;
@@ -372,6 +390,8 @@ export default function CheckInPage() {
 
   const firstName = myName?.trim().split(/\s+/)[0];
   const todayLine = formatTodayLine(today);
+  /** Set only when the open punch is too far from the branch to be accepted. */
+  const outsideZone = modal?.status === 'ready' && modal.zone && !modal.zone.inside ? modal.zone : null;
 
   function reloadHistory(empId: string) {
     supabase
@@ -408,12 +428,11 @@ export default function CheckInPage() {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      pos =>
-        setModal(m =>
-          m
-            ? { ...m, status: 'ready', coords: { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy } }
-            : m
-        ),
+      async pos => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+        const found = await fetchZone(coords);
+        setModal(m => (m ? { ...m, status: 'ready', coords, zone: found } : m));
+      },
       err => setModal(m => (m ? { ...m, status: 'error', error: err.message } : m)),
       { enableHighAccuracy: true, timeout: 15000 }
     );
@@ -439,24 +458,33 @@ export default function CheckInPage() {
   async function confirmPunch() {
     if (!modal || modal.status !== 'ready' || !modal.coords || !employeeId) return;
     setBusy(true);
-    const { error } = await supabase.from('attendance_gps_requests').insert({
-      employee_id: employeeId,
-      punch_time: modal.punchTime,
-      punch_type: modal.punchType,
-      lat: modal.coords.lat,
-      lng: modal.coords.lng,
-      accuracy_m: modal.coords.accuracy,
-    });
+    const { data: inserted, error } = await supabase
+      .from('attendance_gps_requests')
+      .insert({
+        employee_id: employeeId,
+        punch_time: modal.punchTime,
+        punch_type: modal.punchType,
+        lat: modal.coords.lat,
+        lng: modal.coords.lng,
+        accuracy_m: modal.coords.accuracy,
+      })
+      .select('id')
+      .single();
+    // The database may have approved it as it was saved, so read back what happened.
+    const saved = inserted
+      ? (await supabase.from('attendance_gps_requests').select('status').eq('id', inserted.id).single()).data
+      : null;
     setBusy(false);
-    const punchType = modal.punchType;
+    const label = punchTypeLabel(modal.punchType);
     setModal(null);
-    if (error) setMessage({ kind: 'critical', text: `Check-in failed: ${error.message}` });
+    if (error) setMessage({ kind: 'critical', text: `${label} not recorded. ${error.message}` });
     else {
       setMessage({
         kind: 'good',
-        text: `${punchTypeLabel(punchType)} submitted — waiting for Admin/HR approval.`,
+        text: saved?.status === 'approved' ? `${label} recorded and approved.` : `${label} submitted — waiting for Admin/HR approval.`,
       });
       reloadGpsRequests(employeeId);
+      reloadHistory(employeeId);
     }
   }
 
@@ -536,7 +564,7 @@ export default function CheckInPage() {
               <p className="mt-0.5 text-sm text-slate-500">{todayLine}</p>
               <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
                 <PinIcon className="h-3.5 w-3.5 shrink-0" />
-                Uses your GPS location · approved by Admin/HR
+                {zone ? `Approved automatically within ${zone.radius_m} m of ${zone.branch_name}` : 'Uses your GPS location · approved by Admin/HR'}
               </p>
             </div>
             <PunchButtons disabled={!employeeId} onIn={() => openPunchModal('0')} onOut={() => openPunchModal('1')} />
@@ -937,10 +965,30 @@ export default function CheckInPage() {
                 Getting your location…
               </div>
             )}
-            {modal.status === 'ready' && (
+            {modal.status === 'ready' && !outsideZone && (
               <div className="mb-5 flex items-center gap-2 rounded-lg bg-good-bg px-3 py-2.5 text-sm font-medium text-good-text">
                 <PinIcon className="h-4 w-4 shrink-0" />
-                Location confirmed
+                {modal.zone ? "You're inside the attendance zone" : 'Location confirmed'}
+              </div>
+            )}
+            {outsideZone && (
+              <div role="alert" className="mb-5 rounded-lg bg-critical-bg px-3 py-2.5 text-sm text-critical-text">
+                <div className="flex items-center gap-2 font-semibold">
+                  <PinIcon className="h-4 w-4 shrink-0" />
+                  You&apos;re outside the attendance approval zone
+                </div>
+                <p className="mt-1.5">
+                  You&apos;re about {formatDistance(outsideZone.distance_m ?? 0)} from {outsideZone.branch_name}. Attendance can be recorded only within{' '}
+                  {outsideZone.radius_m} m. Move closer and try again.
+                </p>
+                {(modal.coords?.accuracy ?? 0) > outsideZone.radius_m && (
+                  <p className="mt-1.5">
+                    Your location signal is weak (±{Math.round(modal.coords!.accuracy)} m). Step near a window or outside, then try again.
+                  </p>
+                )}
+                <button type="button" onClick={retryLocate} className="mt-1.5 text-xs font-semibold underline">
+                  Try again
+                </button>
               </div>
             )}
             {modal.status === 'error' && (
@@ -962,7 +1010,7 @@ export default function CheckInPage() {
               <button
                 type="button"
                 onClick={confirmPunch}
-                disabled={modal.status !== 'ready' || busy}
+                disabled={modal.status !== 'ready' || !!outsideZone || busy}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
               >
                 {busy ? 'Submitting…' : 'Confirm'}

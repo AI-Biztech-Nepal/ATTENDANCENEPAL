@@ -218,6 +218,15 @@ export type CorrectionRequest = {
   device_id: string | null;
 };
 
+/** From my_attendance_zone(): a row only when this person's phone punches are
+ * approved automatically. distance_m is null until a location is sent. */
+export type AttendanceZone = {
+  branch_name: string;
+  radius_m: number;
+  distance_m: number | null;
+  inside: boolean;
+};
+
 export type AttendanceGpsRequest = {
   id: string;
   employee_id: string;
